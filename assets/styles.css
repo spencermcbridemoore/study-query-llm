@@ -1,0 +1,54 @@
+/* Custom styles for the Panel application */
+
+/* Customize the FastListTemplate appearance */
+.bk-root {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+/* Sidebar styling */
+.sidebar {
+    background-color: #f8f9fa;
+    padding: 20px;
+}
+
+/* Main content area */
+.main {
+    padding: 20px;
+}
+
+/* Card styling */
+.card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+/* Button styling */
+.bk-btn-primary {
+    background-color: #2596be;
+    border-color: #2596be;
+}
+
+.bk-btn-primary:hover {
+    background-color: #1e7aa0;
+    border-color: #1e7aa0;
+}
+
+/* Table styling */
+.tabulator {
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100% !important;
+    }
+    
+    .main {
+        width: 100% !important;
+    }
+}

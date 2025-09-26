@@ -1,83 +1,111 @@
-"""Main application entry point"""
+"""Minimal Panel application that serves a static dashboard."""
 
 import panel as pn
-import pandas as pd
-import numpy as np
-from pathlib import Path
+from typing import Optional
 
-from .components.dashboard import Dashboard
-from .components.widgets import create_sidebar_widgets
-from .utils.data_loader import load_sample_data
+NOTEBOOK_THEME_RESET = """
+body {
+    background-color: var(--jp-layout-color0, inherit) !important;
+}
+"""
 
-# Configure Panel extensions
+_extra_css = []
+_state_env = getattr(pn.state, "env", None)
+_is_notebook = bool(getattr(pn.state, "_is_notebook", False)) or _state_env == "notebook"
+if _is_notebook:
+    _extra_css.append(NOTEBOOK_THEME_RESET)
+
+# Configure Panel extensions once on import
 pn.extension(
-    'tabulator',  # For advanced tables
-    design='material',  # Material design theme
-    sizing_mode='stretch_width'  # Responsive layout
+    design='material',
+    sizing_mode='stretch_width',
+    raw_css=_extra_css,
 )
 
-# Cache data loading for performance
-@pn.cache
-def get_data():
-    """Load and cache the application data"""
-    return load_sample_data()
 
-def create_app():
-    """Create and return the Panel application"""
-    
-    # Load data
-    data = get_data()
-    
-    # Create dashboard
-    dashboard = Dashboard(data)
-    
-    # Create sidebar widgets
-    sidebar_widgets = create_sidebar_widgets(dashboard)
-    
-    # Create template
-    template = pn.template.FastListTemplate(
-        title="Panel Starter Dashboard",
-        sidebar=[
-            "# Controls",
-            pn.pane.Markdown("""
-            Use these controls to interact with the dashboard.
-            """),
-            *sidebar_widgets,
-            pn.layout.Divider(),
-            "## About",
-            pn.pane.Markdown("""
-            This is a starter template for Panel applications.
-            
-            **Features:**
-            - Interactive widgets
-            - Real-time updates
-            - Data visualization
-            - Responsive design
-            
-            Built with ❤️ using [Panel](https://panel.holoviz.org)
-            """),
-        ],
-        main=[dashboard.view()],
-        header_background='#2596be',
-        header_color='#FFFFFF',
+def create_dashboard() -> pn.viewable.Viewable:
+    """Return the static dashboard content."""
+    return pn.Column(
+        pn.pane.Markdown("""
+        # Study Query Dashboard
+        
+        Welcome to the barebones dashboard. This view is intentionally simple
+        and does not expose any interactive controls or external data sources.
+        """.strip()),
+        pn.pane.Markdown("""
+        ## Highlights
+        - Static content only
+        - No CSV or database dependencies
+        - Ready to customise for your own metrics
+        """.strip()),
+        pn.layout.HSpacer(),
+        sizing_mode="stretch_width",
     )
-    
+
+
+def create_app() -> pn.template.FastListTemplate:
+    """Create and return the Panel application template."""
+    dashboard = create_dashboard()
+    template = pn.template.FastListTemplate(
+        title="Barebones Dashboard",
+        sidebar=[],
+        main=[dashboard],
+        header_background="#2596be",
+        header_color="#FFFFFF",
+    )
     return template
 
-def main():
-    """Main entry point for the application"""
+
+def serve_app(
+    address: str = "localhost",
+    port: int = 5006,
+    route: Optional[str] = None,
+    open_browser: bool = False,
+    **kwargs,
+):
+    """Start the dashboard on a background server and return the handle and URL."""
     app = create_app()
-    
-    # Serve the application
+
+    if route:
+        normalized = route.strip("/")
+        if normalized:
+            objects = {normalized: app}
+            url_path = f"/{normalized}"
+        else:
+            objects = app
+            url_path = "/"
+    else:
+        objects = app
+        url_path = "/"
+
+    serve_kwargs = {
+        "address": address,
+        "port": port,
+        "show": open_browser,
+        "start": True,
+    }
+    serve_kwargs.update(kwargs)
+    serve_kwargs.setdefault("threaded", True)
+
+    server = pn.serve(objects, **serve_kwargs)
+
+    resolved_address = address or "localhost"
+    resolved_port = getattr(server, "port", port)
+    url = f"http://{resolved_address}:{resolved_port}{url_path}"
+
+    return server, url
+
+
+def main() -> pn.template.FastListTemplate:
+    """Main entry point for the application."""
+    app = create_app()
     app.show(port=5006, open=True)
-    
     return app
 
-# Make the app servable
+
 if __name__ == "__main__":
     app = create_app()
     app.servable()
-    
-# For panel serve
+
 if __name__.startswith("bokeh_app"):
     create_app().servable()

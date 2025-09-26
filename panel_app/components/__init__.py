@@ -1,6 +1,3 @@
-"""Panel application components"""
+"""Component hooks for the barebones dashboard."""
 
-from .dashboard import Dashboard
-from .widgets import create_sidebar_widgets
-
-__all__ = ["Dashboard", "create_sidebar_widgets"]
+__all__: list[str] = []

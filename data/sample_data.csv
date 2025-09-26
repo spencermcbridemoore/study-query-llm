@@ -1,8 +1,0 @@
-# This file will be automatically generated when you run:
-# python panel_app/utils/data_loader.py
-
-# Or you can create it manually with sample data like:
-date,sales,customers,revenue,costs,satisfaction,region,product,profit
-2024-01-01,1234.56,45,2345.67,567.89,85.3,North,Product A,1777.78
-2024-01-02,987.65,52,1876.54,432.10,92.1,South,Product B,1444.44
-2024-01-03,1567.89,38,2987.65,765.43,78.9,East,Product C,2222.22

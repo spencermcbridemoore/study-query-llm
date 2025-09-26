@@ -1,5 +1,3 @@
-"""Utility functions for the Panel application"""
+"""Utility namespace for the barebones dashboard."""
 
-from .data_loader import load_sample_data
-
-__all__ = ["load_sample_data"]
+__all__: list[str] = []

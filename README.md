@@ -1,152 +1,45 @@
-# Panel Starter Application
+Barebones Panel Dashboard
 
-A modern, interactive data application built with [Panel](https://panel.holoviz.org/).
+A minimal Panel project that renders a static dashboard page. Use this as a clean starting point without data dependencies, widgets, or complex component wiring.
 
-## Features
+Features:
+- Simple FastListTemplate layout with static content
+- Works as a standalone server or from Jupyter notebooks
+- Helper to serve the app on any address or port
+- Lightweight dependency footprint (Panel only)
 
-- 🎯 Interactive dashboard with real-time updates
-- 📊 Data visualization with hvplot/holoviews
-- 🔧 Modular component architecture
-- 📓 Jupyter notebook integration
-- 🚀 Ready for deployment
+Installation:
+1. git clone https://github.com/yourusername/study-query-llm.git
+2. cd study-query-llm
+3. pip install -e .
 
-## Installation
+(Optional) Install Jupyter if you plan to run the demo notebook: pip install jupyter
 
-### Quick Start
+Standalone server:
+panel serve panel_app/app.py --show --port 5006
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/study-query-llm.git
-cd study-query-llm
-
-# Install in development mode
-pip install -e .
-
-# Or install requirements directly
-pip install -r requirements.txt
-```
-
-### Development Setup
-
-```bash
-# Create a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install with development dependencies
-pip install -e ".[dev]"
-```
-
-## Usage
-
-### Run as Standalone App
-
-```bash
-# Basic usage
-panel serve panel_app/app.py --show
-
-# Development mode with auto-reload
-panel serve panel_app/app.py --show --dev
-
-# Custom port
-panel serve panel_app/app.py --port 5007 --show
-```
-
-### Use in Jupyter Notebook
-
-```python
-import panel as pn
-from panel_app.app import create_app
-
-pn.extension()
-
-app = create_app()
-app.servable()
-```
-
-### Run from Python Script
-
-```python
+Python entry point:
 from panel_app.app import main
-
 if __name__ == "__main__":
     main()
-```
 
-## Project Structure
+Notebook snippet:
+from panel_app.app import create_app, serve_app
+app = create_app()
+app.servable()
+server, url = serve_app(port=5050)
+print(url)
 
-```
+Project structure:
 study-query-llm/
-├── panel_app/           # Main application package
-│   ├── app.py          # Main application entry point
-│   ├── components/     # Reusable UI components
-│   └── utils/          # Utility functions
-├── notebooks/          # Jupyter notebooks
-├── data/              # Sample data
-├── assets/            # Static assets (CSS, images)
-└── tests/             # Unit tests
-```
+├── panel_app/ (app.py plus empty component and util packages)
+├── notebooks/
+├── assets/
+└── requirements.txt
 
-## Customization
+Customisation:
+- Edit create_dashboard() in panel_app/app.py to add panes or layouts.
+- Add modules under panel_app/components/ or panel_app/utils/ as needed.
+- Extend requirements.txt when you introduce additional libraries.
 
-### Adding New Components
-
-1. Create a new component in `panel_app/components/`
-2. Import and use in `app.py`
-
-### Styling
-
-- Modify `assets/styles.css` for custom CSS
-- Use Panel's built-in themes: `pn.extension(design='material')`
-- Available themes: 'material', 'bootstrap', 'fast'
-
-## Deployment
-
-### Local Deployment
-
-```bash
-panel serve panel_app/app.py --port 5006 --allow-websocket-origin="*"
-```
-
-### Docker
-
-```dockerfile
-FROM python:3.10-slim
-WORKDIR /app
-COPY . .
-RUN pip install -r requirements.txt
-CMD ["panel", "serve", "panel_app/app.py", "--port", "5006", "--allow-websocket-origin", "*"]
-```
-
-### Cloud Deployment
-
-- **Heroku**: Add `Procfile` with `web: panel serve panel_app/app.py --port $PORT --allow-websocket-origin="*"`
-- **Azure/AWS/GCP**: Use Docker container or custom deployment
-- **Panel Server**: Deploy to any Python web server
-
-## Features Included
-
-- ✅ Responsive layout with FastListTemplate
-- ✅ Interactive widgets (sliders, selects, buttons)
-- ✅ Data visualization with hvplot
-- ✅ File upload capability
-- ✅ Caching for performance
-- ✅ Modular component structure
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Acknowledgments
-
-- Built with [Panel](https://panel.holoviz.org/) by HoloViz
-- Inspired by awesome-panel.org
-- Uses the HoloViz ecosystem
+License: MIT License - see LICENSE for details.

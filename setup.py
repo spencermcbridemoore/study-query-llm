@@ -8,7 +8,7 @@ setup(
     version="0.1.0",
     author="Your Name",
     author_email="your.email@example.com",
-    description="A Panel application starter template",
+    description="A barebones Panel dashboard",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/yourusername/study-query-llm",
@@ -21,18 +21,13 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "panel>=1.3.0",
-        "pandas>=1.5.0",
-        "numpy>=1.20.0",
-        "hvplot>=0.9.0",
-        "jupyter",
-        "jupyterlab>=3.0",
-        "param>=2.0.0",
     ],
     extras_require={
         "dev": [
             "pytest>=7.0.0",
             "black>=22.0.0",
             "flake8>=5.0.0",
+            "jupyter",
         ]
     },
     entry_points={

@@ -12,15 +12,15 @@ class Dashboard(param.Parameterized):
     data = param.DataFrame(doc="The data to display")
     selected_column = param.Selector(doc="Column to visualize")
     chart_type = param.Selector(
-        default='bar',
-        objects=['bar', 'line', 'scatter', 'hist'],
+        default="bar",
+        objects=["bar", "line", "scatter", "hist"],
         doc="Type of chart to display"
     )
     
     def __init__(self, data, **params):
         # Set up data and column choices
         self.data = data
-        numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns.tolist()
+        numeric_columns = data.select_dtypes(include=["float64", "int64"]).columns.tolist()
         
         if numeric_columns:
             self.param.selected_column.objects = numeric_columns
@@ -28,45 +28,45 @@ class Dashboard(param.Parameterized):
         
         super().__init__(**params)
         
-    @param.depends('data', 'selected_column', 'chart_type')
+    @param.depends("data", "selected_column", "chart_type")
     def create_plot(self):
         """Create the main plot based on current parameters"""
         if self.data is None or self.selected_column is None:
             return pn.pane.Markdown("## No data available")
         
         try:
-            if self.chart_type == 'bar':
+            if self.chart_type == "bar":
                 plot = self.data.hvplot.bar(
                     y=self.selected_column,
                     height=400,
                     responsive=True,
-                    title=f'{self.selected_column} - Bar Chart'
+                    title=f"{self.selected_column} - Bar Chart"
                 )
-            elif self.chart_type == 'line':
+            elif self.chart_type == "line":
                 plot = self.data.hvplot.line(
                     y=self.selected_column,
                     height=400,
                     responsive=True,
-                    title=f'{self.selected_column} - Line Chart'
+                    title=f"{self.selected_column} - Line Chart"
                 )
-            elif self.chart_type == 'scatter':
+            elif self.chart_type == "scatter":
                 plot = self.data.hvplot.scatter(
                     y=self.selected_column,
                     height=400,
                     responsive=True,
-                    title=f'{self.selected_column} - Scatter Plot'
+                    title=f"{self.selected_column} - Scatter Plot"
                 )
             else:  # hist
                 plot = self.data[self.selected_column].hvplot.hist(
                     height=400,
                     responsive=True,
-                    title=f'{self.selected_column} - Histogram'
+                    title=f"{self.selected_column} - Histogram"
                 )
             return plot
         except Exception as e:
-            return pn.pane.Alert(f"Error creating plot: {str(e)}", alert_type='danger')
+            return pn.pane.Alert(f"Error creating plot: {str(e)}", alert_type="danger")
     
-    @param.depends('data')
+    @param.depends("data")
     def create_table(self):
         """Create the data table"""
         if self.data is None:
@@ -74,18 +74,18 @@ class Dashboard(param.Parameterized):
         
         return pn.widgets.Tabulator(
             self.data,
-            pagination='remote',
+            pagination="remote",
             page_size=10,
             height=300,
             show_index=True,
             configuration={
-                'columnDefaults': {
-                    'tooltip': True,
+                "columnDefaults": {
+                    "tooltip": True,
                 }
             }
         )
     
-    @param.depends('data')
+    @param.depends("data")
     def create_stats(self):
         """Create summary statistics"""
         if self.data is None:
@@ -100,29 +100,25 @@ class Dashboard(param.Parameterized):
     
     def view(self):
         """Create the complete dashboard view"""
-        return pn.template.FastGridTemplate(
-            title="",
-            main=[
-                pn.Row(
-                    pn.Column(
-                        "# Data Visualization",
-                        self.create_plot,
-                        width_policy='max',
-                    ),
-                    pn.Column(
-                        "# Summary Statistics",
-                        self.create_stats,
-                        width_policy='max',
-                    ),
-                    height=500,
-                ),
-                pn.layout.Divider(),
+        return pn.Column(
+            pn.Row(
                 pn.Column(
-                    "# Data Table",
-                    self.create_table,
-                    width_policy='max',
+                    "# Data Visualization",
+                    self.create_plot,
+                    sizing_mode="stretch_both",
                 ),
-            ],
-            prevent_collision=True,
-            save_layout=True,
+                pn.Column(
+                    "# Summary Statistics",
+                    self.create_stats,
+                    sizing_mode="stretch_both",
+                ),
+                sizing_mode="stretch_width",
+            ),
+            pn.layout.Divider(),
+            pn.Column(
+                "# Data Table",
+                self.create_table,
+                sizing_mode="stretch_width",
+            ),
+            sizing_mode="stretch_width",
         )

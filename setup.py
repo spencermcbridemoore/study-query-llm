@@ -24,6 +24,7 @@ setup(
     python_requires=">=3.10",
     install_requires=[
         "panel>=1.3.0",
+        "python-dotenv>=1.0.0",
     ],
     extras_require={
         "dev": [

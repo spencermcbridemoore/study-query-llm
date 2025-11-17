@@ -183,3 +183,69 @@ def openai_config():
     except ValueError:
         pytest.skip("OpenAI credentials not configured. Set OPENAI_API_KEY in .env")
 
+
+@pytest.fixture
+def counting_provider():
+    """
+    Fixture for a provider that includes a counter in each response.
+    
+    Useful for testing repeated inference - you can verify each call
+    was made separately by checking the call_count.
+    """
+    class CountingProvider(BaseLLMProvider):
+        def __init__(self):
+            self.call_count = 0
+
+        async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
+            """Return a response with a counter to verify each call is separate."""
+            self.call_count += 1
+            temperature = kwargs.get('temperature', 0.7)
+
+            return ProviderResponse(
+                text=f"Response #{self.call_count} to: {prompt} (temp={temperature})",
+                provider="counting_provider",
+                tokens=10,
+                latency_ms=50.0,
+            )
+
+        def get_provider_name(self) -> str:
+            return "counting_provider"
+    
+    return CountingProvider()
+
+
+@pytest.fixture
+def variable_provider():
+    """
+    Fixture for a provider that returns different responses.
+    
+    Useful for testing response variability in repeated inference.
+    """
+    class VariableProvider(BaseLLMProvider):
+        def __init__(self):
+            self.call_count = 0
+            self.responses = [
+                "The sky is blue",
+                "The ocean is vast",
+                "Mountains are tall",
+                "Rivers flow freely",
+                "Stars shine bright"
+            ]
+
+        async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
+            """Return varied responses to simulate temperature-based variability."""
+            response_text = self.responses[self.call_count % len(self.responses)]
+            self.call_count += 1
+
+            return ProviderResponse(
+                text=response_text,
+                provider="variable_provider",
+                tokens=5,
+                latency_ms=50.0,
+            )
+
+        def get_provider_name(self) -> str:
+            return "variable_provider"
+    
+    return VariableProvider()
+

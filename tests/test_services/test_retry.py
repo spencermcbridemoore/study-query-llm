@@ -117,7 +117,7 @@ async def test_retry_with_different_max_retries(failing_provider):
     service1 = InferenceService(provider1, max_retries=1, initial_wait=0.1)
     
     with pytest.raises(Exception):
-        await service.run_inference("Test prompt")
+        await service1.run_inference("Test prompt")
     
     assert provider1.attempts == 1, "Should have made exactly 1 attempt"
     

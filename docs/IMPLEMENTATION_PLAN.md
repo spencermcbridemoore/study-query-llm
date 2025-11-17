@@ -1612,7 +1612,7 @@ class AppConfig:
         self.database = DatabaseConfig(
             connection_string=os.getenv(
                 "DATABASE_URL",
-                "sqlite:///study_llm.db"
+                "sqlite:///study_query_llm.db"
             )
         )
 
@@ -1646,7 +1646,7 @@ class AppConfig:
 
 ```bash
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/study_llm
+DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm
 
 # Azure OpenAI
 AZURE_API_KEY=your-azure-key

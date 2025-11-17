@@ -135,7 +135,7 @@ pytest tests/
 
 Environment variables (create `.env` file):
 ```bash
-DATABASE_URL=postgresql://user:pass@localhost:5432/study_llm
+DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm
 AZURE_API_KEY=...
 AZURE_ENDPOINT=...
 AZURE_DEPLOYMENT=gpt-4

@@ -61,7 +61,7 @@ cp .env.example .env
 4. **Initialize database**
 ```bash
 # When database layer is implemented
-python -c "from study_query_llm.db.connection import DatabaseConnection; db = DatabaseConnection('sqlite:///study_llm.db'); db.init_db()"
+python -c "from study_query_llm.db.connection import DatabaseConnection; db = DatabaseConnection('sqlite:///study_query_llm.db'); db.init_db()"
 ```
 
 ## Usage
@@ -88,9 +88,9 @@ Set environment variables or create a `.env` file:
 
 ```bash
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/study_llm
+DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm
 # Or for development:
-DATABASE_URL=sqlite:///study_llm.db
+DATABASE_URL=sqlite:///study_query_llm.db
 
 # Azure OpenAI
 AZURE_API_KEY=your-azure-key

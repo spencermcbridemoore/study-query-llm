@@ -60,7 +60,7 @@ class DatabaseConfig:
     def __post_init__(self):
         """Provide default if not set."""
         if not self.connection_string:
-            self.connection_string = "sqlite:///study_llm.db"
+            self.connection_string = "sqlite:///study_query_llm.db"
 
 
 class Config:
@@ -76,7 +76,7 @@ class Config:
     def __init__(self):
         """Load configuration from environment."""
         self.database = DatabaseConfig(
-            connection_string=os.getenv("DATABASE_URL", "sqlite:///study_llm.db")
+            connection_string=os.getenv("DATABASE_URL", "sqlite:///study_query_llm.db")
         )
 
         # Provider configurations (lazy-loaded to avoid requiring all keys)

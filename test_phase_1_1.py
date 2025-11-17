@@ -9,7 +9,7 @@ Run this script to verify Phase 1.1 is working:
 """
 
 import asyncio
-from panel_app.providers.base import BaseLLMProvider, ProviderResponse
+from study_query_llm.providers.base import BaseLLMProvider, ProviderResponse
 
 
 class MockProvider(BaseLLMProvider):

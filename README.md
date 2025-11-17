@@ -61,7 +61,7 @@ cp .env.example .env
 4. **Initialize database**
 ```bash
 # When database layer is implemented
-python -c "from panel_app.db.connection import DatabaseConnection; db = DatabaseConnection('sqlite:///study_llm.db'); db.init_db()"
+python -c "from study_query_llm.db.connection import DatabaseConnection; db = DatabaseConnection('sqlite:///study_llm.db'); db.init_db()"
 ```
 
 ## Usage
@@ -114,12 +114,15 @@ PANEL_APP_THEME=dark  # or 'default'
 
 ```
 study-query-llm/
-├── panel_app/              # Main application package
-│   ├── providers/          # LLM provider abstractions (to be created)
-│   ├── services/           # Business logic layer (to be created)
-│   ├── db/                 # Database models and repository (to be created)
-│   ├── app.py              # Panel GUI application
-│   └── __init__.py         # Package exports
+├── src/
+│   └── study_query_llm/    # Core package (framework-agnostic)
+│       ├── __init__.py
+│       ├── providers/      # LLM provider abstractions
+│       ├── services/       # Business logic layer (to be created)
+│       └── db/             # Database models and repository (to be created)
+├── panel_app/              # Panel GUI application
+│   ├── __init__.py
+│   └── app.py
 ├── docs/                   # Documentation
 │   ├── ARCHITECTURE.md     # System architecture
 │   └── IMPLEMENTATION_PLAN.md  # Development roadmap
@@ -139,15 +142,15 @@ study-query-llm/
 pytest tests/
 
 # Run with coverage
-pytest --cov=panel_app tests/
+pytest --cov=study_query_llm tests/
 ```
 
 ### Adding a New LLM Provider
 
-1. Create `panel_app/providers/your_provider.py`
+1. Create `src/study_query_llm/providers/your_provider.py`
 2. Implement the `BaseLLMProvider` interface
 3. Add to `ProviderFactory`
-4. Update configuration in `panel_app/config.py`
+4. Update configuration
 5. Add tests
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.

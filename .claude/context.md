@@ -20,26 +20,28 @@
 - `README.md` - Project overview and quickstart
 
 ### Current Code
-- `panel_app/app.py` - Minimal Panel demo app (needs LLM functionality)
+- `src/study_query_llm/` - Core package (framework-agnostic)
+  - `src/study_query_llm/providers/` - LLM provider abstraction layer (Phase 1.1 ✓)
+- `panel_app/app.py` - Panel GUI application
 - `panel_app/__init__.py` - Package exports
-- `setup.py` - Package setup
+- `setup.py` - Package setup (src-layout)
 - `requirements.txt` - Currently minimal (just panel>=1.3.0)
 
 ### To Be Created
-- `panel_app/providers/` - LLM provider abstraction layer
-- `panel_app/services/` - Business logic (retry, preprocessing, analytics)
-- `panel_app/db/` - Database models and repository
+- `src/study_query_llm/services/` - Business logic (retry, preprocessing, analytics)
+- `src/study_query_llm/db/` - Database models and repository
 - `.env` - Configuration (API keys, database URL)
 
 ## Implementation Status
 
-### Current Phase: **Not Started - Ready to Begin**
+### Current Phase: **Phase 1.1 Complete**
 
-**Next Step:** Phase 1, Step 1.1 - Create base provider interface
-- File: `panel_app/providers/base.py`
-- Creates: `BaseLLMProvider` (ABC) and `ProviderResponse` (dataclass)
-- Time: ~5 minutes
-- Testable: Yes, with mock provider
+**Status:** Base provider interface implemented and tested ✓
+- File: `src/study_query_llm/providers/base.py`
+- Created: `BaseLLMProvider` (ABC) and `ProviderResponse` (dataclass)
+- Test: `test_phase_1_1.py` passes
+
+**Next Step:** Phase 1.2 - Implement Azure Provider
 
 ### Completed
 - ✅ Project structure cleaned up (minimalist rewrite)

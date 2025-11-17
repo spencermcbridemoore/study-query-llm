@@ -25,6 +25,7 @@ setup(
     install_requires=[
         "panel>=1.3.0",
         "python-dotenv>=1.0.0",
+        "openai>=1.0.0",  # Azure OpenAI and OpenAI SDK
     ],
     extras_require={
         "dev": [

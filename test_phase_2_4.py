@@ -203,7 +203,7 @@ async def test_repeated_inference():
         print("   [PASS] Result format is consistent")
 
     # Test 6: Verify backward compatibility with batch_inference
-    print("\n[6/5] Testing backward compatibility with run_batch_inference...")
+    print("\n[6/6] Testing backward compatibility with run_batch_inference...")
     provider6 = CountingProvider()
     service6 = InferenceService(provider6)
 

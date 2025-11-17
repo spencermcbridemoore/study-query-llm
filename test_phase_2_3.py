@@ -37,7 +37,7 @@ async def test_preprocessing():
     print("="*60)
 
     # Test 1: Default behavior (preprocessing disabled)
-    print("\n[1/7] Testing default behavior (preprocess=False)...")
+    print("\n[1/8] Testing default behavior (preprocess=False)...")
     provider1 = EchoProvider()
     service1 = InferenceService(provider1)  # Default preprocess=False
 
@@ -57,7 +57,7 @@ async def test_preprocessing():
         return
 
     # Test 2: Enable preprocessing with clean_whitespace
-    print("\n[2/7] Testing preprocessing enabled (clean_whitespace)...")
+    print("\n[2/8] Testing preprocessing enabled (clean_whitespace)...")
     service2 = InferenceService(provider1, preprocess=True)
 
     result = await service2.run_inference(messy_prompt)
@@ -75,7 +75,7 @@ async def test_preprocessing():
         return
 
     # Test 3: Truncation
-    print("\n[3/7] Testing truncation...")
+    print("\n[3/8] Testing truncation...")
     service3 = InferenceService(
         provider1,
         preprocess=True,
@@ -96,7 +96,7 @@ async def test_preprocessing():
         return
 
     # Test 4: Template application
-    print("\n[4/7] Testing template application...")
+    print("\n[4/8] Testing template application...")
     service4 = InferenceService(provider1, preprocess=True)
 
     template = "You are a helpful assistant. {user_input}"
@@ -115,7 +115,7 @@ async def test_preprocessing():
         return
 
     # Test 5: PII removal
-    print("\n[5/7] Testing PII removal...")
+    print("\n[5/8] Testing PII removal...")
     service5 = InferenceService(
         provider1,
         preprocess=True,
@@ -137,7 +137,7 @@ async def test_preprocessing():
         return
 
     # Test 6: Control character stripping
-    print("\n[6/7] Testing control character stripping...")
+    print("\n[6/8] Testing control character stripping...")
     service6 = InferenceService(
         provider1,
         preprocess=True,
@@ -157,7 +157,7 @@ async def test_preprocessing():
         return
 
     # Test 7: PromptPreprocessor standalone usage
-    print("\n[7/7] Testing PromptPreprocessor standalone methods...")
+    print("\n[7/8] Testing PromptPreprocessor standalone methods...")
 
     # Test individual methods
     assert PromptPreprocessor.clean_whitespace("  hello   world  ") == "hello world"
@@ -170,7 +170,7 @@ async def test_preprocessing():
     print("   [PASS] PromptPreprocessor utility class is functional")
 
     # Test 8: Verify backward compatibility
-    print("\n[8/7] Testing backward compatibility...")
+    print("\n[8/8] Testing backward compatibility...")
     print("   Verifying all previous tests still pass with new parameters...")
 
     # Previous phases should still work with default preprocess=False

@@ -300,6 +300,56 @@ class InferenceService:
 
         return await asyncio.gather(*tasks)
 
+    async def run_repeated_inference(
+        self,
+        prompt: str,
+        n: int,
+        **kwargs: Any,
+    ) -> list[dict]:
+        """
+        Run the same prompt multiple times to collect varied responses.
+
+        This is useful for sampling LLM output variability, especially with
+        higher temperature settings. Each request is independent and may
+        produce different results.
+
+        Args:
+            prompt: The prompt to repeat
+            n: Number of times to run the inference
+            **kwargs: Parameters to apply to all runs (e.g., temperature, max_tokens)
+
+        Returns:
+            List of result dictionaries (same format as run_inference)
+
+        Example:
+            >>> service = InferenceService(provider)
+            >>> # Get 5 different creative responses
+            >>> results = await service.run_repeated_inference(
+            ...     "Write a haiku about coding",
+            ...     n=5,
+            ...     temperature=1.0
+            ... )
+            >>> for i, result in enumerate(results, 1):
+            ...     print(f"Response {i}: {result['response']}")
+
+            >>> # Sample deterministic output (should be identical)
+            >>> results = await service.run_repeated_inference(
+            ...     "What is 2+2?",
+            ...     n=3,
+            ...     temperature=0.0
+            ... )
+            >>> # All responses should be the same
+        """
+        import asyncio
+
+        # Run the same prompt n times concurrently
+        tasks = [
+            self.run_inference(prompt, **kwargs)
+            for _ in range(n)
+        ]
+
+        return await asyncio.gather(*tasks)
+
     def get_provider_name(self) -> str:
         """
         Get the name of the underlying provider.

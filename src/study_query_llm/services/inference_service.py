@@ -22,6 +22,14 @@ Usage:
 """
 
 from typing import Optional, Any
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    retry_if_exception,
+    RetryError,
+)
 from ..providers.base import BaseLLMProvider, ProviderResponse
 
 
@@ -43,6 +51,9 @@ class InferenceService:
         self,
         provider: BaseLLMProvider,
         repository=None,  # Will be InferenceRepository in Phase 3
+        max_retries: int = 3,
+        initial_wait: float = 1.0,
+        max_wait: float = 10.0,
     ):
         """
         Initialize the inference service.
@@ -50,9 +61,15 @@ class InferenceService:
         Args:
             provider: Any LLM provider implementing BaseLLMProvider
             repository: Optional database repository for logging (Phase 3)
+            max_retries: Maximum number of retry attempts (default: 3)
+            initial_wait: Initial wait time in seconds for exponential backoff (default: 1.0)
+            max_wait: Maximum wait time in seconds between retries (default: 10.0)
         """
         self.provider = provider
         self.repository = repository
+        self.max_retries = max_retries
+        self.initial_wait = initial_wait
+        self.max_wait = max_wait
 
     async def run_inference(
         self,
@@ -91,8 +108,8 @@ class InferenceService:
             >>> print(result['metadata']['tokens'])
             15
         """
-        # Call the provider (retry logic will be added in Phase 2.2)
-        provider_response: ProviderResponse = await self.provider.complete(
+        # Call the provider with retry logic
+        provider_response: ProviderResponse = await self._call_with_retry(
             prompt,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -119,6 +136,88 @@ class InferenceService:
         #     self.repository.insert_inference_run(...)
 
         return result
+
+    async def _call_with_retry(
+        self,
+        prompt: str,
+        **kwargs: Any,
+    ) -> ProviderResponse:
+        """
+        Internal method to call provider with retry logic.
+
+        This method uses exponential backoff to retry transient errors like
+        network issues, rate limits, or temporary service unavailability.
+
+        Retries on:
+        - TimeoutError
+        - ConnectionError
+        - Exception messages containing 'rate limit', 'timeout', '429', '503', '502'
+
+        Does NOT retry on:
+        - Authentication errors (401, 403)
+        - Invalid requests (400)
+        - Not found errors (404)
+        - Permanent failures
+
+        Args:
+            prompt: The prompt to send
+            **kwargs: Additional parameters for the provider
+
+        Returns:
+            ProviderResponse from the provider
+
+        Raises:
+            RetryError: If all retry attempts are exhausted
+            Exception: For non-retryable errors
+        """
+        # Define retry strategy with exponential backoff
+        retry_decorator = retry(
+            stop=stop_after_attempt(self.max_retries),
+            wait=wait_exponential(
+                multiplier=self.initial_wait,
+                min=self.initial_wait,
+                max=self.max_wait
+            ),
+            retry=retry_if_exception(self._should_retry_exception),
+            reraise=True,
+        )
+
+        # Wrap the provider call with retry logic
+        @retry_decorator
+        async def _make_call():
+            return await self.provider.complete(prompt, **kwargs)
+
+        return await _make_call()
+
+    @staticmethod
+    def _should_retry_exception(exception: BaseException) -> bool:
+        """
+        Determine if an exception should trigger a retry.
+
+        Args:
+            exception: The exception to evaluate
+
+        Returns:
+            True if the exception is retryable, False otherwise
+        """
+        if isinstance(exception, (TimeoutError, ConnectionError)):
+            return True
+
+        # Check error message for retryable conditions
+        error_msg = str(exception).lower()
+        retryable_patterns = [
+            'rate limit',
+            'timeout',
+            'timed out',
+            '429',  # Too Many Requests
+            '503',  # Service Unavailable
+            '502',  # Bad Gateway
+            '504',  # Gateway Timeout
+            'temporary',
+            'throttl',
+        ]
+
+        return any(pattern in error_msg for pattern in retryable_patterns)
 
     async def run_batch_inference(
         self,

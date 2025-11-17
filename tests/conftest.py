@@ -89,9 +89,13 @@ def echo_provider():
 @pytest.fixture
 def failing_provider():
     """
-    Fixture for a provider that fails a specified number of times.
+    Fixture factory for a provider that fails a specified number of times.
     
-    Used for testing retry logic. Configure with fail_count parameter.
+    Used for testing retry logic. Returns a class that can be instantiated
+    with fail_count and error_type parameters.
+    
+    Usage:
+        provider = failing_provider(fail_count=2, error_type="timeout")
     """
     class FailingProvider(BaseLLMProvider):
         def __init__(self, fail_count: int = 2, error_type: str = "timeout"):
@@ -126,6 +130,28 @@ def failing_provider():
             return "failing_provider"
     
     return FailingProvider
+
+
+@pytest.fixture
+def permanently_failing_provider():
+    """
+    Fixture for a provider that always fails with a permanent error.
+    
+    Used to test that permanent errors (like 401) are not retried.
+    """
+    class PermanentlyFailingProvider(BaseLLMProvider):
+        def __init__(self):
+            self.attempts = 0
+
+        async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
+            self.attempts += 1
+            # 401 Unauthorized is a permanent error - should not retry
+            raise Exception("401 Unauthorized: Invalid API key")
+
+        def get_provider_name(self) -> str:
+            return "permanently_failing_provider"
+    
+    return PermanentlyFailingProvider()
 
 
 @pytest.fixture

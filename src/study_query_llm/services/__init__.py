@@ -16,7 +16,9 @@ All services are provider-agnostic and work with any BaseLLMProvider implementat
 """
 
 from .inference_service import InferenceService
+from .preprocessors import PromptPreprocessor
 
 __all__ = [
     "InferenceService",
+    "PromptPreprocessor",
 ]

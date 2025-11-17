@@ -31,6 +31,7 @@ from tenacity import (
     RetryError,
 )
 from ..providers.base import BaseLLMProvider, ProviderResponse
+from .preprocessors import PromptPreprocessor
 
 
 class InferenceService:
@@ -54,6 +55,12 @@ class InferenceService:
         max_retries: int = 3,
         initial_wait: float = 1.0,
         max_wait: float = 10.0,
+        preprocess: bool = False,
+        clean_whitespace: bool = True,
+        truncate_prompts: bool = True,
+        max_prompt_length: int = 10000,
+        remove_pii: bool = False,
+        strip_control_chars: bool = False,
     ):
         """
         Initialize the inference service.
@@ -64,6 +71,12 @@ class InferenceService:
             max_retries: Maximum number of retry attempts (default: 3)
             initial_wait: Initial wait time in seconds for exponential backoff (default: 1.0)
             max_wait: Maximum wait time in seconds between retries (default: 10.0)
+            preprocess: Enable prompt preprocessing (default: False)
+            clean_whitespace: Normalize whitespace when preprocessing (default: True)
+            truncate_prompts: Truncate long prompts when preprocessing (default: True)
+            max_prompt_length: Maximum prompt length when truncating (default: 10000)
+            remove_pii: Remove PII (emails, phones) when preprocessing (default: False)
+            strip_control_chars: Remove control characters when preprocessing (default: False)
         """
         self.provider = provider
         self.repository = repository
@@ -71,11 +84,20 @@ class InferenceService:
         self.initial_wait = initial_wait
         self.max_wait = max_wait
 
+        # Preprocessing configuration
+        self.preprocess = preprocess
+        self.clean_whitespace = clean_whitespace
+        self.truncate_prompts = truncate_prompts
+        self.max_prompt_length = max_prompt_length
+        self.remove_pii = remove_pii
+        self.strip_control_chars = strip_control_chars
+
     async def run_inference(
         self,
         prompt: str,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        template: Optional[str] = None,
         **kwargs: Any,
     ) -> dict:
         """
@@ -88,6 +110,7 @@ class InferenceService:
             prompt: The user's prompt/question
             temperature: Sampling temperature (0.0 = deterministic, 1.0 = creative)
             max_tokens: Maximum tokens to generate (None = provider default)
+            template: Optional template to wrap prompt (e.g., "You are a tutor. {user_input}")
             **kwargs: Additional provider-specific parameters
 
         Returns:
@@ -95,6 +118,8 @@ class InferenceService:
                 - response: The LLM's text response
                 - metadata: Dict with provider, tokens, latency, etc.
                 - provider_response: Full ProviderResponse object
+                - original_prompt: Original prompt before preprocessing (if preprocessing enabled)
+                - processed_prompt: Prompt after preprocessing (if preprocessing enabled)
 
         Example:
             >>> service = InferenceService(azure_provider)
@@ -108,6 +133,21 @@ class InferenceService:
             >>> print(result['metadata']['tokens'])
             15
         """
+        # Store original prompt
+        original_prompt = prompt
+
+        # Apply preprocessing if enabled
+        if self.preprocess:
+            prompt = PromptPreprocessor.preprocess(
+                prompt,
+                clean_whitespace=self.clean_whitespace,
+                truncate_prompts=self.truncate_prompts,
+                max_length=self.max_prompt_length,
+                remove_pii=self.remove_pii,
+                strip_control_chars=self.strip_control_chars,
+                template=template,
+            )
+
         # Call the provider with retry logic
         provider_response: ProviderResponse = await self._call_with_retry(
             prompt,
@@ -124,12 +164,18 @@ class InferenceService:
                 'tokens': provider_response.tokens,
                 'latency_ms': provider_response.latency_ms,
                 'temperature': temperature,
+                'preprocessing_enabled': self.preprocess,
             },
             'provider_response': provider_response,  # Include full object for advanced use
         }
 
         if max_tokens is not None:
             result['metadata']['max_tokens'] = max_tokens
+
+        # Include preprocessing info if enabled
+        if self.preprocess:
+            result['original_prompt'] = original_prompt
+            result['processed_prompt'] = prompt
 
         # Database logging will be added here in Phase 3.5
         # if self.repository:

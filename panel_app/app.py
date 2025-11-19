@@ -40,6 +40,7 @@ pn.extension(
 # Global state for database and services
 _db_connection: Optional[DatabaseConnection] = None
 _inference_service: Optional[InferenceService] = None
+_inference_service_provider: Optional[str] = None  # Track which provider the service is for
 _study_service: Optional[StudyService] = None
 
 
@@ -52,20 +53,45 @@ def get_db_connection() -> DatabaseConnection:
     return _db_connection
 
 
-def get_inference_service(provider_name: str) -> InferenceService:
-    """Get or create inference service for a provider."""
-    # Create factory and get provider from config
-    factory = ProviderFactory()
-    provider = factory.create_from_config(provider_name)
+def get_inference_service(provider_name: str, deployment_name: Optional[str] = None) -> InferenceService:
+    """
+    Get or create inference service for a provider.
     
-    # Create repository for database logging (use session scope for proper transaction handling)
-    db = get_db_connection()
-    session = db.get_session()
-    repository = InferenceRepository(session)
+    Args:
+        provider_name: Name of the provider ('azure', 'openai', etc.)
+        deployment_name: Optional deployment name to use (for Azure). If provided,
+                        updates the config before creating the provider.
+    """
+    global _inference_service, _inference_service_provider
     
-    # Create service with repository
-    service = InferenceService(provider, repository=repository)
-    return service
+    # If we need to update deployment or switch providers, clear cached service
+    if (_inference_service is None or 
+        _inference_service_provider != provider_name or
+        (deployment_name and provider_name == "azure")):
+        
+        # Update config if deployment name provided (for Azure)
+        if deployment_name and provider_name == "azure":
+            # Clear cached config to force reload with new deployment
+            if hasattr(config, '_provider_configs') and 'azure' in config._provider_configs:
+                del config._provider_configs['azure']
+            # Update the deployment in config
+            azure_config = config.get_provider_config("azure")
+            azure_config.deployment_name = deployment_name
+        
+        # Create factory and get provider from config
+        factory = ProviderFactory()
+        provider = factory.create_from_config(provider_name)
+        
+        # Create repository for database logging (use session scope for proper transaction handling)
+        db = get_db_connection()
+        session = db.get_session()
+        repository = InferenceRepository(session)
+        
+        # Create service with repository
+        _inference_service = InferenceService(provider, repository=repository)
+        _inference_service_provider = provider_name
+    
+    return _inference_service
 
 
 def get_study_service() -> StudyService:
@@ -168,11 +194,19 @@ def create_inference_ui() -> pn.viewable.Viewable:
         deployment_select.visible = True
         load_deployments_button.visible = True
     
-    # Update deployment in config when selection changes
+    # Update deployment in config when selection changes (and clear service cache)
     def update_deployment(event):
         """Update config when deployment is selected."""
+        global _inference_service, _inference_service_provider
         if provider_select.value == "azure" and deployment_select.value:
             try:
+                # Clear cached service so it will be recreated with new deployment
+                _inference_service = None
+                _inference_service_provider = None
+                # Clear cached config to force reload
+                if hasattr(config, '_provider_configs') and 'azure' in config._provider_configs:
+                    del config._provider_configs['azure']
+                # Update the deployment in config
                 azure_config = config.get_provider_config("azure")
                 azure_config.deployment_name = deployment_select.value
             except Exception:
@@ -239,16 +273,13 @@ def create_inference_ui() -> pn.viewable.Viewable:
             response_output.object = ""
             metadata_output.object = ""
             
-            # Update Azure config with selected deployment if Azure is selected
+            # Get service with selected deployment (if Azure)
+            deployment_name = None
             if provider_select.value == "azure" and deployment_select.value:
-                try:
-                    azure_config = config.get_provider_config("azure")
-                    azure_config.deployment_name = deployment_select.value
-                except Exception:
-                    pass  # Use default if update fails
+                deployment_name = deployment_select.value
             
-            # Get service and run inference
-            service = get_inference_service(provider_select.value)
+            # Get service and run inference (service will use the deployment_name)
+            service = get_inference_service(provider_select.value, deployment_name=deployment_name)
             
             # Run inference within database session scope
             db = get_db_connection()

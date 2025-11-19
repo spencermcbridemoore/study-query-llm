@@ -14,6 +14,7 @@ from study_query_llm.config import config
 from study_query_llm.db.connection import DatabaseConnection
 from study_query_llm.db.inference_repository import InferenceRepository
 from study_query_llm.providers.factory import ProviderFactory
+from study_query_llm.providers.azure_utils import list_azure_deployments
 from study_query_llm.services.inference_service import InferenceService
 from study_query_llm.services.study_service import StudyService
 
@@ -90,12 +91,88 @@ def create_inference_ui() -> pn.viewable.Viewable:
         width=200
     )
     
+    # Deployment selector (for Azure)
+    deployment_select = pn.widgets.Select(
+        name="Deployment",
+        options=["Loading..."],
+        value=None,
+        width=200,
+        visible=False  # Hidden by default, shown only for Azure
+    )
+    
+    load_deployments_button = pn.widgets.Button(
+        name="Load Deployments",
+        button_type="default",
+        width=150,
+        visible=False
+    )
+    
     prompt_input = pn.widgets.TextAreaInput(
         name="Prompt",
         placeholder="Enter your prompt here...",
         height=150,
         sizing_mode='stretch_width'
     )
+    
+    # Load deployments function
+    async def load_deployments():
+        """Load available Azure deployments."""
+        if provider_select.value != "azure":
+            return
+        
+        try:
+            status_output.object = "⏳ Loading deployments..."
+            load_deployments_button.disabled = True
+            
+            azure_config = config.get_provider_config("azure")
+            deployments = await list_azure_deployments(azure_config)
+            
+            if deployments:
+                deployment_select.options = deployments
+                deployment_select.value = deployments[0]
+                # Also update the config with the selected deployment
+                azure_config.deployment_name = deployments[0]
+                status_output.object = f"✅ Loaded {len(deployments)} deployment(s)"
+            else:
+                deployment_select.options = ["No deployments found"]
+                status_output.object = "⚠️ No deployments found. Check Azure Portal."
+        except Exception as e:
+            deployment_select.options = ["Error loading deployments"]
+            status_output.object = f"❌ Error: {str(e)}"
+        finally:
+            load_deployments_button.disabled = False
+    
+    # Show/hide deployment selector based on provider
+    async def update_provider_ui(event):
+        """Update UI when provider changes."""
+        if provider_select.value == "azure":
+            deployment_select.visible = True
+            load_deployments_button.visible = True
+            # Try to load deployments automatically
+            await load_deployments()
+        else:
+            deployment_select.visible = False
+            load_deployments_button.visible = False
+    
+    provider_select.param.watch(update_provider_ui, 'value')
+    load_deployments_button.on_click(load_deployments)
+    
+    # Initialize UI if Azure is selected by default
+    if provider_select.value == "azure":
+        deployment_select.visible = True
+        load_deployments_button.visible = True
+    
+    # Update deployment in config when selection changes
+    def update_deployment(event):
+        """Update config when deployment is selected."""
+        if provider_select.value == "azure" and deployment_select.value:
+            try:
+                azure_config = config.get_provider_config("azure")
+                azure_config.deployment_name = deployment_select.value
+            except Exception:
+                pass  # Ignore errors during config update
+    
+    deployment_select.param.watch(update_deployment, 'value')
     
     temperature_slider = pn.widgets.FloatSlider(
         name="Temperature",
@@ -156,6 +233,14 @@ def create_inference_ui() -> pn.viewable.Viewable:
             response_output.object = ""
             metadata_output.object = ""
             
+            # Update Azure config with selected deployment if Azure is selected
+            if provider_select.value == "azure" and deployment_select.value:
+                try:
+                    azure_config = config.get_provider_config("azure")
+                    azure_config.deployment_name = deployment_select.value
+                except Exception:
+                    pass  # Use default if update fails
+            
             # Get service and run inference
             service = get_inference_service(provider_select.value)
             
@@ -202,6 +287,8 @@ def create_inference_ui() -> pn.viewable.Viewable:
         pn.pane.Markdown("## Run Inference"),
         pn.Row(
             provider_select,
+            deployment_select,
+            load_deployments_button,
             pn.Spacer(width=20),
             temperature_slider,
             pn.Spacer(width=20),

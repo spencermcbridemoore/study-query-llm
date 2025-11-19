@@ -27,6 +27,8 @@ setup(
         "python-dotenv>=1.0.0",
         "openai>=1.0.0",  # Azure OpenAI and OpenAI SDK
         "tenacity>=8.0.0",  # Retry logic with exponential backoff
+        "sqlalchemy>=2.0.0",  # Database ORM
+        "psycopg2-binary>=2.9.0",  # PostgreSQL driver
     ],
     extras_require={
         "dev": [

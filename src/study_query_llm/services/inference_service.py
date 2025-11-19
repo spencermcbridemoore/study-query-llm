@@ -21,7 +21,7 @@ Usage:
     print(result['response'])
 """
 
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -32,6 +32,9 @@ from tenacity import (
 )
 from ..providers.base import BaseLLMProvider, ProviderResponse
 from .preprocessors import PromptPreprocessor
+
+if TYPE_CHECKING:
+    from ..db.inference_repository import InferenceRepository
 
 
 class InferenceService:
@@ -51,7 +54,7 @@ class InferenceService:
     def __init__(
         self,
         provider: BaseLLMProvider,
-        repository=None,  # Will be InferenceRepository in Phase 3
+        repository: Optional["InferenceRepository"] = None,
         max_retries: int = 3,
         initial_wait: float = 1.0,
         max_wait: float = 10.0,
@@ -177,9 +180,23 @@ class InferenceService:
             result['original_prompt'] = original_prompt
             result['processed_prompt'] = prompt
 
-        # Database logging will be added here in Phase 3.5
-        # if self.repository:
-        #     self.repository.insert_inference_run(...)
+        # Persist to database if repository provided
+        inference_id = None
+        if self.repository:
+            try:
+                inference_id = self.repository.insert_inference_run(
+                    prompt=original_prompt,  # Store original prompt, not processed
+                    response=provider_response.text,
+                    provider=provider_response.provider,
+                    tokens=provider_response.tokens,
+                    latency_ms=provider_response.latency_ms,
+                    metadata=provider_response.metadata
+                )
+                result['id'] = inference_id
+            except Exception as e:
+                # Log error but don't fail the inference
+                # In production, you might want to use proper logging here
+                print(f"Warning: Failed to save inference to database: {e}")
 
         return result
 

@@ -189,7 +189,7 @@ def counting_provider():
     """
     Fixture for a provider that includes a counter in each response.
     
-    Useful for testing repeated inference - you can verify each call
+    Useful for testing sampling inference - you can verify each call
     was made separately by checking the call_count.
     """
     class CountingProvider(BaseLLMProvider):
@@ -219,7 +219,7 @@ def variable_provider():
     """
     Fixture for a provider that returns different responses.
     
-    Useful for testing response variability in repeated inference.
+    Useful for testing response variability in sampling inference.
     """
     class VariableProvider(BaseLLMProvider):
         def __init__(self):

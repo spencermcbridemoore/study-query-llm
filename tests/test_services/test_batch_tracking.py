@@ -1,7 +1,7 @@
 """
 Tests for batch tracking in InferenceService.
 
-Tests that run_repeated_inference and run_batch_inference properly
+Tests that run_sampling_inference and run_batch_inference properly
 generate and use batch_id for grouping runs.
 """
 
@@ -21,13 +21,13 @@ def db_connection():
 
 
 @pytest.mark.asyncio
-async def test_repeated_inference_generates_batch_id(counting_provider, db_connection):
-    """Test that repeated inference generates a batch_id."""
+async def test_sampling_inference_generates_batch_id(counting_provider, db_connection):
+    """Test that sampling inference generates a batch_id."""
     with db_connection.session_scope() as session:
         repo = InferenceRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
-        results = await service.run_repeated_inference("Test prompt", n=3)
+        results = await service.run_sampling_inference("Test prompt", n=3)
         
         # All results should have the same batch_id
         batch_ids = [r.get('batch_id') for r in results if 'batch_id' in r]
@@ -40,14 +40,14 @@ async def test_repeated_inference_generates_batch_id(counting_provider, db_conne
 
 
 @pytest.mark.asyncio
-async def test_repeated_inference_with_custom_batch_id(counting_provider, db_connection):
-    """Test that repeated inference can use a custom batch_id."""
+async def test_sampling_inference_with_custom_batch_id(counting_provider, db_connection):
+    """Test that sampling inference can use a custom batch_id."""
     with db_connection.session_scope() as session:
         repo = InferenceRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         custom_batch_id = str(uuid.uuid4())
         
-        results = await service.run_repeated_inference(
+        results = await service.run_sampling_inference(
             "Test prompt",
             n=3,
             batch_id=custom_batch_id
@@ -121,13 +121,13 @@ async def test_single_inference_with_batch_id(counting_provider, db_connection):
 
 
 @pytest.mark.asyncio
-async def test_repeated_inference_stored_in_database(counting_provider, db_connection):
-    """Test that repeated inference runs are stored with batch_id in database."""
+async def test_sampling_inference_stored_in_database(counting_provider, db_connection):
+    """Test that sampling inference runs are stored with batch_id in database."""
     with db_connection.session_scope() as session:
         repo = InferenceRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
-        results = await service.run_repeated_inference("Test prompt", n=3)
+        results = await service.run_sampling_inference("Test prompt", n=3)
         batch_id = results[0].get('batch_id')
         
         session.commit()
@@ -171,9 +171,9 @@ async def test_different_batches_have_different_ids(counting_provider, db_connec
         repo = InferenceRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
-        # Run two separate repeated inferences
-        results1 = await service.run_repeated_inference("Prompt 1", n=2)
-        results2 = await service.run_repeated_inference("Prompt 2", n=2)
+        # Run two separate sampling inferences
+        results1 = await service.run_sampling_inference("Prompt 1", n=2)
+        results2 = await service.run_sampling_inference("Prompt 2", n=2)
         
         batch_id_1 = results1[0].get('batch_id')
         batch_id_2 = results2[0].get('batch_id')

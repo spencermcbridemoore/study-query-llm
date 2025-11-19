@@ -60,11 +60,11 @@ async def test_batch_inference(mock_provider):
 
 
 @pytest.mark.asyncio
-async def test_repeated_inference(mock_provider):
-    """Test repeated inference (same prompt multiple times)."""
+async def test_sampling_inference(mock_provider):
+    """Test sampling inference (same prompt multiple times)."""
     service = InferenceService(mock_provider)
     
-    results = await service.run_repeated_inference(
+    results = await service.run_sampling_inference(
         "What is the meaning of life?",
         n=3
     )

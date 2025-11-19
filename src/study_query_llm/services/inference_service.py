@@ -329,22 +329,22 @@ class InferenceService:
 
         return await asyncio.gather(*tasks)
 
-    async def run_repeated_inference(
+    async def run_sampling_inference(
         self,
         prompt: str,
         n: int,
         **kwargs: Any,
     ) -> list[dict]:
         """
-        Run the same prompt multiple times to collect varied responses.
+        Run the same prompt multiple times to collect varied responses (sampling).
 
         This is useful for sampling LLM output variability, especially with
         higher temperature settings. Each request is independent and may
         produce different results. All runs will share the same batch_id for tracking.
 
         Args:
-            prompt: The prompt to repeat
-            n: Number of times to run the inference
+            prompt: The prompt to sample
+            n: Number of samples to generate
             **kwargs: Parameters to apply to all runs (e.g., temperature, max_tokens)
                      batch_id will be generated if not provided
 
@@ -353,8 +353,8 @@ class InferenceService:
 
         Example:
             >>> service = InferenceService(provider)
-            >>> # Get 5 different creative responses
-            >>> results = await service.run_repeated_inference(
+            >>> # Get 5 different creative responses (samples)
+            >>> results = await service.run_sampling_inference(
             ...     "Write a haiku about coding",
             ...     n=5,
             ...     temperature=1.0
@@ -362,10 +362,10 @@ class InferenceService:
             >>> # All results will have the same batch_id
             >>> print(results[0]['batch_id'])  # e.g., "550e8400-e29b-41d4-a716-446655440000"
             >>> for i, result in enumerate(results, 1):
-            ...     print(f"Response {i}: {result['response']}")
+            ...     print(f"Sample {i}: {result['response']}")
 
             >>> # Sample deterministic output (should be identical)
-            >>> results = await service.run_repeated_inference(
+            >>> results = await service.run_sampling_inference(
             ...     "What is 2+2?",
             ...     n=3,
             ...     temperature=0.0

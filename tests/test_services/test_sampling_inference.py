@@ -1,8 +1,8 @@
 """
-Tests for Phase 2.4 - Repeated Inference Batching.
+Tests for Phase 2.4 - Sampling Inference.
 
 Tests that InferenceService can run the same prompt multiple times
-to collect varied responses, useful for sampling LLM output variability.
+to collect varied responses (samples), useful for sampling LLM output variability.
 """
 
 import pytest
@@ -11,11 +11,11 @@ from study_query_llm.services.inference_service import InferenceService
 
 
 @pytest.mark.asyncio
-async def test_basic_repeated_inference(counting_provider):
-    """Test basic repeated inference with same prompt."""
+async def test_basic_sampling_inference(counting_provider):
+    """Test basic sampling inference with same prompt."""
     service = InferenceService(counting_provider)
     
-    results = await service.run_repeated_inference(
+    results = await service.run_sampling_inference(
         "What is the meaning of life?",
         n=3
     )
@@ -29,11 +29,11 @@ async def test_basic_repeated_inference(counting_provider):
 
 
 @pytest.mark.asyncio
-async def test_repeated_inference_with_parameters(counting_provider):
-    """Test repeated inference with custom parameters."""
+async def test_sampling_inference_with_parameters(counting_provider):
+    """Test sampling inference with custom parameters."""
     service = InferenceService(counting_provider)
     
-    results = await service.run_repeated_inference(
+    results = await service.run_sampling_inference(
         "Test prompt",
         n=5,
         temperature=0.9,
@@ -51,10 +51,10 @@ async def test_repeated_inference_with_parameters(counting_provider):
 
 @pytest.mark.asyncio
 async def test_response_variability(variable_provider):
-    """Test that repeated inference can produce varied responses."""
+    """Test that sampling inference can produce varied responses."""
     service = InferenceService(variable_provider)
     
-    results = await service.run_repeated_inference(
+    results = await service.run_sampling_inference(
         "Describe nature",
         n=5,
         temperature=1.0
@@ -69,12 +69,12 @@ async def test_response_variability(variable_provider):
 
 
 @pytest.mark.asyncio
-async def test_large_batch_concurrent_execution(counting_provider):
-    """Test that large batches execute concurrently."""
+async def test_large_sampling_concurrent_execution(counting_provider):
+    """Test that large sampling runs execute concurrently."""
     service = InferenceService(counting_provider)
     
     start = time.time()
-    results = await service.run_repeated_inference(
+    results = await service.run_sampling_inference(
         "Quick test",
         n=10
     )
@@ -94,7 +94,7 @@ async def test_result_format_consistency(counting_provider):
     """Test that all results have consistent format."""
     service = InferenceService(counting_provider)
     
-    results = await service.run_repeated_inference(
+    results = await service.run_sampling_inference(
         "Format test",
         n=3,
         temperature=0.5
@@ -129,12 +129,12 @@ async def test_backward_compatibility_with_batch_inference(counting_provider):
 
 
 @pytest.mark.asyncio
-async def test_repeated_vs_batch_difference(counting_provider):
-    """Test that repeated inference and batch inference behave differently."""
+async def test_sampling_vs_batch_difference(counting_provider):
+    """Test that sampling inference and batch inference behave differently."""
     service = InferenceService(counting_provider)
     
-    # Repeated: same prompt multiple times
-    repeated_results = await service.run_repeated_inference("Same prompt", n=3)
+    # Sampling: same prompt multiple times
+    sampling_results = await service.run_sampling_inference("Same prompt", n=3)
     
     # Reset counter
     counting_provider.call_count = 0
@@ -145,11 +145,11 @@ async def test_repeated_vs_batch_difference(counting_provider):
     )
     
     # Both should have 3 results
-    assert len(repeated_results) == 3
+    assert len(sampling_results) == 3
     assert len(batch_results) == 3
     
-    # But repeated should have same prompt in all responses
-    assert all("Same prompt" in r['response'] for r in repeated_results)
+    # But sampling should have same prompt in all responses
+    assert all("Same prompt" in r['response'] for r in sampling_results)
     
     # Batch should have different prompts
     assert "Prompt 1" in batch_results[0]['response']
@@ -158,13 +158,13 @@ async def test_repeated_vs_batch_difference(counting_provider):
 
 
 @pytest.mark.asyncio
-async def test_repeated_inference_with_different_n_values(counting_provider):
-    """Test repeated inference with various n values."""
+async def test_sampling_inference_with_different_n_values(counting_provider):
+    """Test sampling inference with various n values."""
     service = InferenceService(counting_provider)
     
     for n in [1, 2, 5, 10]:
         counting_provider.call_count = 0
-        results = await service.run_repeated_inference("Test", n=n)
+        results = await service.run_sampling_inference("Test", n=n)
         
         assert len(results) == n
         assert counting_provider.call_count == n

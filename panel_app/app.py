@@ -64,34 +64,32 @@ def get_inference_service(provider_name: str, deployment_name: Optional[str] = N
     """
     global _inference_service, _inference_service_provider
     
-    # If we need to update deployment or switch providers, clear cached service
-    if (_inference_service is None or 
-        _inference_service_provider != provider_name or
-        (deployment_name and provider_name == "azure")):
-        
-        # Update config if deployment name provided (for Azure)
-        if deployment_name and provider_name == "azure":
-            # Clear cached config to force reload with new deployment
-            if hasattr(config, '_provider_configs') and 'azure' in config._provider_configs:
-                del config._provider_configs['azure']
-            # Update the deployment in config
-            azure_config = config.get_provider_config("azure")
-            azure_config.deployment_name = deployment_name
-        
-        # Create factory and get provider from config
-        factory = ProviderFactory()
-        provider = factory.create_from_config(provider_name)
-        
-        # Create repository for database logging (use session scope for proper transaction handling)
-        db = get_db_connection()
-        session = db.get_session()
-        repository = InferenceRepository(session)
-        
-        # Create service with repository
-        _inference_service = InferenceService(provider, repository=repository)
-        _inference_service_provider = provider_name
+    # Always create a new service to ensure we use the latest deployment
+    # (Don't cache since deployment can change)
     
-    return _inference_service
+    # Update config if deployment name provided (for Azure)
+    if deployment_name and provider_name == "azure":
+        # Clear cached config to force reload with new deployment
+        if hasattr(config, '_provider_configs') and 'azure' in config._provider_configs:
+            del config._provider_configs['azure']
+        # Get config and update deployment
+        azure_config = config.get_provider_config("azure")
+        azure_config.deployment_name = deployment_name
+    
+    # Create factory and get provider from config
+    factory = ProviderFactory()
+    provider = factory.create_from_config(provider_name)
+    
+    # Create repository for database logging (use session scope for proper transaction handling)
+    db = get_db_connection()
+    session = db.get_session()
+    repository = InferenceRepository(session)
+    
+    # Create service with repository (always create new to ensure fresh provider)
+    service = InferenceService(provider, repository=repository)
+    _inference_service_provider = provider_name
+    
+    return service
 
 
 def get_study_service() -> StudyService:
@@ -275,7 +273,11 @@ def create_inference_ui() -> pn.viewable.Viewable:
             
             # Get service with selected deployment (if Azure)
             deployment_name = None
-            if provider_select.value == "azure" and deployment_select.value:
+            if provider_select.value == "azure":
+                if not deployment_select.value or deployment_select.value == "Loading..." or deployment_select.value == "Error loading deployments":
+                    status_output.object = "⚠️ Please load and select a deployment first"
+                    run_button.disabled = False
+                    return
                 deployment_name = deployment_select.value
             
             # Get service and run inference (service will use the deployment_name)

@@ -10,9 +10,11 @@ standardized ProviderResponse objects.
 
 from .base import BaseLLMProvider, ProviderResponse
 from .azure_provider import AzureOpenAIProvider
+from .factory import ProviderFactory
 
 __all__ = [
     "BaseLLMProvider",
     "ProviderResponse",
     "AzureOpenAIProvider",
+    "ProviderFactory",
 ]

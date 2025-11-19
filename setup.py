@@ -29,6 +29,7 @@ setup(
         "tenacity>=8.0.0",  # Retry logic with exponential backoff
         "sqlalchemy>=2.0.0",  # Database ORM
         "psycopg2-binary>=2.9.0",  # PostgreSQL driver
+        "pandas>=2.0.0",  # Data analysis and DataFrames
     ],
     extras_require={
         "dev": [

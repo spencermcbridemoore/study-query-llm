@@ -71,7 +71,7 @@ class InferenceRepository:
             provider=provider,
             tokens=tokens,
             latency_ms=latency_ms,
-            metadata=metadata or {}
+            metadata_json=metadata or {}
         )
 
         self.session.add(inference)

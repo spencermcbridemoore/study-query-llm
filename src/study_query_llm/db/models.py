@@ -4,9 +4,9 @@ Database Models - SQLAlchemy ORM models.
 Defines the database schema for storing LLM inference runs.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Float, Text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -36,8 +36,8 @@ class InferenceRun(Base):
     provider = Column(String(50), nullable=False, index=True)
     tokens = Column(Integer, nullable=True)
     latency_ms = Column(Float, nullable=True)
-    metadata = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    metadata_json = Column('metadata', JSON, nullable=True)  # Column name is 'metadata', attribute is 'metadata_json'
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
     def __repr__(self) -> str:
         """String representation for debugging."""
@@ -62,7 +62,7 @@ class InferenceRun(Base):
             'provider': self.provider,
             'tokens': self.tokens,
             'latency_ms': self.latency_ms,
-            'metadata': self.metadata,
+            'metadata': self.metadata_json,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

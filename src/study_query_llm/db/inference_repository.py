@@ -49,7 +49,8 @@ class InferenceRepository:
         provider: str,
         tokens: Optional[int] = None,
         latency_ms: Optional[float] = None,
-        metadata: Optional[dict] = None
+        metadata: Optional[dict] = None,
+        batch_id: Optional[str] = None
     ) -> int:
         """
         Insert a single inference run.
@@ -61,6 +62,7 @@ class InferenceRepository:
             tokens: Total tokens used (optional)
             latency_ms: Response latency in milliseconds (optional)
             metadata: Provider-specific metadata as dict (optional)
+            batch_id: UUID string identifying the batch this run belongs to (optional)
         
         Returns:
             The ID of the inserted record
@@ -71,7 +73,8 @@ class InferenceRepository:
             provider=provider,
             tokens=tokens,
             latency_ms=latency_ms,
-            metadata_json=metadata or {}
+            metadata_json=metadata or {},
+            batch_id=batch_id
         )
 
         self.session.add(inference)
@@ -234,4 +237,75 @@ class InferenceRepository:
         return self.session.query(func.count(InferenceRun.id))\
             .filter(InferenceRun.provider == provider)\
             .scalar()
+
+    def get_inferences_by_batch_id(self, batch_id: str) -> List[InferenceRun]:
+        """
+        Get all inference runs belonging to a specific batch.
+        
+        Args:
+            batch_id: UUID string identifying the batch
+        
+        Returns:
+            List of InferenceRun objects in the batch, ordered by created_at
+        """
+        return self.session.query(InferenceRun)\
+            .filter(InferenceRun.batch_id == batch_id)\
+            .order_by(desc(InferenceRun.created_at))\
+            .all()
+
+    def get_batch_summary(self, batch_id: str) -> dict:
+        """
+        Get aggregate statistics for a specific batch.
+        
+        Args:
+            batch_id: UUID string identifying the batch
+        
+        Returns:
+            Dictionary with batch statistics:
+            {
+                'batch_id': '...',
+                'total_runs': 5,
+                'providers': ['azure', 'openai'],
+                'total_tokens': 500,
+                'avg_tokens': 100.0,
+                'avg_latency_ms': 1250.5,
+                'min_latency_ms': 800.0,
+                'max_latency_ms': 2000.0,
+                'created_at_range': (start_datetime, end_datetime)
+            }
+        """
+        runs = self.get_inferences_by_batch_id(batch_id)
+        
+        if not runs:
+            return {
+                'batch_id': batch_id,
+                'total_runs': 0,
+                'providers': [],
+                'total_tokens': 0,
+                'avg_tokens': 0.0,
+                'avg_latency_ms': 0.0,
+                'min_latency_ms': None,
+                'max_latency_ms': None,
+                'created_at_range': (None, None)
+            }
+        
+        tokens_list = [r.tokens for r in runs if r.tokens is not None]
+        latency_list = [r.latency_ms for r in runs if r.latency_ms is not None]
+        providers = list(set(r.provider for r in runs))
+        created_ats = [r.created_at for r in runs if r.created_at is not None]
+        
+        return {
+            'batch_id': batch_id,
+            'total_runs': len(runs),
+            'providers': providers,
+            'total_tokens': sum(tokens_list),
+            'avg_tokens': sum(tokens_list) / len(tokens_list) if tokens_list else 0.0,
+            'avg_latency_ms': sum(latency_list) / len(latency_list) if latency_list else 0.0,
+            'min_latency_ms': min(latency_list) if latency_list else None,
+            'max_latency_ms': max(latency_list) if latency_list else None,
+            'created_at_range': (
+                min(created_ats) if created_ats else None,
+                max(created_ats) if created_ats else None
+            )
+        }
 

@@ -26,6 +26,8 @@ class InferenceRun(Base):
         tokens: Total tokens used (prompt + completion)
         latency_ms: Response latency in milliseconds
         metadata: JSON field for provider-specific metadata
+        batch_id: UUID string identifying the batch this run belongs to (nullable)
+                  Designed to be compatible with future Batch table foreign key
         created_at: Timestamp when the inference was run
     """
     __tablename__ = 'inference_runs'
@@ -37,6 +39,7 @@ class InferenceRun(Base):
     tokens = Column(Integer, nullable=True)
     latency_ms = Column(Float, nullable=True)
     metadata_json = Column('metadata', JSON, nullable=True)  # Column name is 'metadata', attribute is 'metadata_json'
+    batch_id = Column(String(36), nullable=True, index=True)  # UUID format (36 chars), indexed for efficient queries
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
     def __repr__(self) -> str:
@@ -63,6 +66,7 @@ class InferenceRun(Base):
             'tokens': self.tokens,
             'latency_ms': self.latency_ms,
             'metadata': self.metadata_json,
+            'batch_id': self.batch_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

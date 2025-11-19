@@ -80,5 +80,6 @@ def test_inference_run_to_dict():
     assert result['tokens'] == 100
     assert result['latency_ms'] == 500.0
     assert result['metadata'] == {"key": "value"}
+    assert result['batch_id'] is None  # No batch_id set
     assert result['created_at'] == created_at.isoformat()
 

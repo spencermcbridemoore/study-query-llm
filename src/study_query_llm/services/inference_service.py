@@ -21,6 +21,7 @@ Usage:
     print(result['response'])
 """
 
+import uuid
 from typing import Optional, Any, TYPE_CHECKING
 from tenacity import (
     retry,
@@ -101,6 +102,7 @@ class InferenceService:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         template: Optional[str] = None,
+        batch_id: Optional[str] = None,
         **kwargs: Any,
     ) -> dict:
         """
@@ -114,6 +116,7 @@ class InferenceService:
             temperature: Sampling temperature (0.0 = deterministic, 1.0 = creative)
             max_tokens: Maximum tokens to generate (None = provider default)
             template: Optional template to wrap prompt (e.g., "You are a tutor. {user_input}")
+            batch_id: Optional UUID string to group this run with others in a batch
             **kwargs: Additional provider-specific parameters
 
         Returns:
@@ -190,9 +193,12 @@ class InferenceService:
                     provider=provider_response.provider,
                     tokens=provider_response.tokens,
                     latency_ms=provider_response.latency_ms,
-                    metadata=provider_response.metadata
+                    metadata=provider_response.metadata,
+                    batch_id=batch_id
                 )
                 result['id'] = inference_id
+                if batch_id:
+                    result['batch_id'] = batch_id
             except Exception as e:
                 # Log error but don't fail the inference
                 # In production, you might want to use proper logging here
@@ -291,27 +297,33 @@ class InferenceService:
         Run multiple inferences concurrently.
 
         This is a convenience method for running multiple prompts through
-        the same provider with the same parameters.
+        the same provider with the same parameters. All runs in the batch
+        will share the same batch_id for tracking.
 
         Args:
             prompts: List of prompts to process
-            **kwargs: Parameters to apply to all prompts
+            **kwargs: Parameters to apply to all prompts (batch_id will be generated if not provided)
 
         Returns:
-            List of result dictionaries (same format as run_inference)
+            List of result dictionaries (same format as run_inference), all with the same batch_id
 
         Example:
             >>> service = InferenceService(provider)
             >>> prompts = ["What is 2+2?", "What is 3+3?", "What is 4+4?"]
             >>> results = await service.run_batch_inference(prompts, temperature=0.0)
+            >>> # All results will have the same batch_id
+            >>> print(results[0]['batch_id'])  # e.g., "550e8400-e29b-41d4-a716-446655440000"
             >>> for result in results:
             ...     print(result['response'])
         """
         import asyncio
 
-        # Run all prompts concurrently
+        # Generate batch_id if not provided
+        batch_id = kwargs.pop('batch_id', None) or str(uuid.uuid4())
+
+        # Run all prompts concurrently with the same batch_id
         tasks = [
-            self.run_inference(prompt, **kwargs)
+            self.run_inference(prompt, batch_id=batch_id, **kwargs)
             for prompt in prompts
         ]
 
@@ -328,15 +340,16 @@ class InferenceService:
 
         This is useful for sampling LLM output variability, especially with
         higher temperature settings. Each request is independent and may
-        produce different results.
+        produce different results. All runs will share the same batch_id for tracking.
 
         Args:
             prompt: The prompt to repeat
             n: Number of times to run the inference
             **kwargs: Parameters to apply to all runs (e.g., temperature, max_tokens)
+                     batch_id will be generated if not provided
 
         Returns:
-            List of result dictionaries (same format as run_inference)
+            List of result dictionaries (same format as run_inference), all with the same batch_id
 
         Example:
             >>> service = InferenceService(provider)
@@ -346,6 +359,8 @@ class InferenceService:
             ...     n=5,
             ...     temperature=1.0
             ... )
+            >>> # All results will have the same batch_id
+            >>> print(results[0]['batch_id'])  # e.g., "550e8400-e29b-41d4-a716-446655440000"
             >>> for i, result in enumerate(results, 1):
             ...     print(f"Response {i}: {result['response']}")
 
@@ -359,9 +374,12 @@ class InferenceService:
         """
         import asyncio
 
-        # Run the same prompt n times concurrently
+        # Generate batch_id if not provided
+        batch_id = kwargs.pop('batch_id', None) or str(uuid.uuid4())
+
+        # Run the same prompt n times concurrently with the same batch_id
         tasks = [
-            self.run_inference(prompt, **kwargs)
+            self.run_inference(prompt, batch_id=batch_id, **kwargs)
             for _ in range(n)
         ]
 

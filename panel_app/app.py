@@ -1,7 +1,21 @@
-"""Minimal Panel application that serves a static dashboard."""
+"""
+Panel application for Study Query LLM.
+
+Provides a web interface for running LLM inferences and analyzing results.
+"""
 
 import panel as pn
+import asyncio
 from typing import Optional
+import traceback
+
+# Import core functionality
+from study_query_llm.config import config
+from study_query_llm.db.connection import DatabaseConnection
+from study_query_llm.db.inference_repository import InferenceRepository
+from study_query_llm.providers.factory import ProviderFactory
+from study_query_llm.services.inference_service import InferenceService
+from study_query_llm.services.study_service import StudyService
 
 NOTEBOOK_THEME_RESET = """
 body {
@@ -15,7 +29,7 @@ _is_notebook = bool(getattr(pn.state, "_is_notebook", False)) or _state_env == "
 if _is_notebook:
     _extra_css.append(NOTEBOOK_THEME_RESET)
 
-# Configure Panel extensions once on import
+# Configure Panel extensions
 pn.extension(
     design='material',
     sizing_mode='stretch_width',
@@ -23,31 +37,285 @@ pn.extension(
 )
 
 
-def create_dashboard() -> pn.viewable.Viewable:
-    """Return the static dashboard content."""
-    return pn.Column(
-        pn.pane.Markdown("""
-        # Study Query Dashboard
-        
-        Welcome to the barebones dashboard. This view is intentionally simple
-        and does not expose any interactive controls or external data sources.
-        """.strip()),
-        pn.pane.Markdown("""
-        ## Highlights
-        - Static content only
-        - No CSV or database dependencies
-        - Ready to customise for your own metrics
-        """.strip()),
-        pn.layout.HSpacer(),
-        sizing_mode="stretch_width",
+# Global state for database and services
+_db_connection: Optional[DatabaseConnection] = None
+_inference_service: Optional[InferenceService] = None
+_study_service: Optional[StudyService] = None
+
+
+def get_db_connection() -> DatabaseConnection:
+    """Get or create database connection."""
+    global _db_connection
+    if _db_connection is None:
+        _db_connection = DatabaseConnection(config.database.connection_string)
+        _db_connection.init_db()
+    return _db_connection
+
+
+def get_inference_service(provider_name: str) -> InferenceService:
+    """Get or create inference service for a provider."""
+    # Get provider config and create provider
+    provider_config = config.get_provider_config(provider_name)
+    provider = ProviderFactory.create(provider_name, provider_config)
+    
+    # Create repository for database logging (use session scope for proper transaction handling)
+    db = get_db_connection()
+    session = db.get_session()
+    repository = InferenceRepository(session)
+    
+    # Create service with repository
+    service = InferenceService(provider, repository=repository)
+    return service
+
+
+def get_study_service() -> StudyService:
+    """Get or create study service for analytics."""
+    global _study_service
+    if _study_service is None:
+        db = get_db_connection()
+        session = db.get_session()
+        repository = InferenceRepository(session)
+        _study_service = StudyService(repository)
+    return _study_service
+
+
+def create_inference_ui() -> pn.viewable.Viewable:
+    """Create the inference testing UI."""
+    
+    # UI Components
+    provider_select = pn.widgets.Select(
+        name="Provider",
+        options=config.get_available_providers() or ["No providers configured"],
+        value=config.get_available_providers()[0] if config.get_available_providers() else None,
+        width=200
     )
+    
+    prompt_input = pn.widgets.TextAreaInput(
+        name="Prompt",
+        placeholder="Enter your prompt here...",
+        height=150,
+        sizing_mode='stretch_width'
+    )
+    
+    temperature_slider = pn.widgets.FloatSlider(
+        name="Temperature",
+        start=0.0,
+        end=2.0,
+        value=0.7,
+        step=0.1,
+        width=300
+    )
+    
+    max_tokens_input = pn.widgets.IntInput(
+        name="Max Tokens",
+        value=None,
+        start=1,
+        end=100000,
+        width=150
+    )
+    
+    run_button = pn.widgets.Button(
+        name="Run Inference",
+        button_type="primary",
+        width=150
+    )
+    
+    # Response display
+    response_output = pn.pane.Str(
+        "",
+        styles={'background': '#f5f5f5', 'padding': '10px', 'border-radius': '5px'},
+        sizing_mode='stretch_width'
+    )
+    
+    metadata_output = pn.pane.Str(
+        "",
+        styles={'background': '#f0f0f0', 'padding': '10px', 'border-radius': '5px', 'font-size': '12px'},
+        sizing_mode='stretch_width'
+    )
+    
+    status_output = pn.pane.Str(
+        "",
+        styles={'color': '#666', 'font-size': '12px'},
+        sizing_mode='stretch_width'
+    )
+    
+    # Async callback for running inference
+    async def run_inference(event):
+        """Run inference when button is clicked."""
+        if not prompt_input.value or not prompt_input.value.strip():
+            status_output.object = "⚠️ Please enter a prompt"
+            return
+        
+        if provider_select.value == "No providers configured":
+            status_output.object = "⚠️ No providers configured. Please set API keys in .env file"
+            return
+        
+        try:
+            status_output.object = "⏳ Running inference..."
+            run_button.disabled = True
+            response_output.object = ""
+            metadata_output.object = ""
+            
+            # Get service and run inference
+            service = get_inference_service(provider_select.value)
+            
+            # Run inference within database session scope
+            db = get_db_connection()
+            with db.session_scope() as session:
+                # Update repository session
+                service.repository.session = session
+                
+                result = await service.run_inference(
+                    prompt_input.value,
+                    temperature=temperature_slider.value,
+                    max_tokens=max_tokens_input.value if max_tokens_input.value else None
+                )
+            
+            # Display results
+            response_output.object = result.get('response', 'No response')
+            
+            # Format metadata
+            metadata = result.get('metadata', {})
+            metadata_text = f"""
+**Provider:** {metadata.get('provider', 'N/A')}  
+**Tokens:** {metadata.get('tokens', 'N/A')}  
+**Latency:** {metadata.get('latency_ms', 'N/A'):.2f} ms  
+**Temperature:** {metadata.get('temperature', 'N/A')}  
+**Inference ID:** {result.get('id', 'N/A')}
+"""
+            metadata_output.object = metadata_text
+            status_output.object = "✅ Inference complete!"
+            
+        except Exception as e:
+            error_msg = f"❌ Error: {str(e)}\n\n{traceback.format_exc()}"
+            status_output.object = error_msg
+            response_output.object = ""
+            metadata_output.object = ""
+        finally:
+            run_button.disabled = False
+    
+    # Connect button to callback
+    run_button.on_click(run_inference)
+    
+    # Layout
+    return pn.Column(
+        pn.pane.Markdown("## Run Inference"),
+        pn.Row(
+            provider_select,
+            pn.Spacer(width=20),
+            temperature_slider,
+            pn.Spacer(width=20),
+            max_tokens_input,
+        ),
+        prompt_input,
+        run_button,
+        status_output,
+        pn.pane.Markdown("### Response"),
+        response_output,
+        pn.pane.Markdown("### Metadata"),
+        metadata_output,
+        sizing_mode='stretch_width',
+        margin=(10, 20)
+    )
+
+
+def create_analytics_ui() -> pn.viewable.Viewable:
+    """Create the analytics dashboard UI."""
+    
+    refresh_button = pn.widgets.Button(
+        name="Refresh",
+        button_type="primary",
+        width=100
+    )
+    
+    summary_output = pn.pane.Str("", sizing_mode='stretch_width')
+    provider_comparison_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=200)
+    recent_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=400)
+    
+    def update_analytics():
+        """Update analytics display."""
+        try:
+            db = get_db_connection()
+            with db.session_scope() as session:
+                repository = InferenceRepository(session)
+                study_service = StudyService(repository)
+                
+                # Get summary stats
+                stats = study_service.get_summary_stats()
+                summary_text = f"""
+**Total Inferences:** {stats['total_inferences']}  
+**Total Tokens:** {stats['total_tokens']:,}  
+**Unique Providers:** {stats['unique_providers']}
+"""
+                summary_output.object = summary_text
+                
+                # Get provider comparison
+                comparison_df = study_service.get_provider_comparison()
+                if not comparison_df.empty:
+                    # Select relevant columns for display
+                    display_cols = ['provider', 'count', 'avg_tokens', 'avg_latency_ms', 'total_tokens']
+                    if 'avg_cost_estimate' in comparison_df.columns:
+                        display_cols.append('avg_cost_estimate')
+                    provider_comparison_table.object = comparison_df[display_cols]
+                else:
+                    provider_comparison_table.object = None
+                
+                # Get recent inferences
+                recent_df = study_service.get_recent_inferences(limit=20)
+                if not recent_df.empty:
+                    # Select and format columns for display
+                    display_df = recent_df[['id', 'prompt', 'provider', 'tokens', 'latency_ms', 'created_at']].copy()
+                    # Truncate long prompts for display
+                    display_df['prompt'] = display_df['prompt'].apply(lambda x: x[:50] + '...' if len(str(x)) > 50 else x)
+                    recent_table.object = display_df
+                else:
+                    recent_table.object = None
+                    
+        except Exception as e:
+            error_msg = f"Error loading analytics: {str(e)}"
+            summary_output.object = error_msg
+            provider_comparison_table.object = None
+            recent_table.object = None
+    
+    refresh_button.on_click(lambda e: update_analytics())
+    
+    # Initial load
+    update_analytics()
+    
+    return pn.Column(
+        pn.pane.Markdown("## Analytics Dashboard"),
+        pn.Row(refresh_button, pn.Spacer()),
+        pn.pane.Markdown("### Summary Statistics"),
+        summary_output,
+        pn.pane.Markdown("### Provider Comparison"),
+        provider_comparison_table,
+        pn.pane.Markdown("### Recent Inferences"),
+        recent_table,
+        sizing_mode='stretch_width',
+        margin=(10, 20)
+    )
+
+
+def create_dashboard() -> pn.viewable.Viewable:
+    """Create the main dashboard with tabs."""
+    
+    inference_tab = create_inference_ui()
+    analytics_tab = create_analytics_ui()
+    
+    tabs = pn.Tabs(
+        ("Inference", inference_tab),
+        ("Analytics", analytics_tab),
+        sizing_mode='stretch_width'
+    )
+    
+    return tabs
 
 
 def create_app() -> pn.template.FastListTemplate:
     """Create and return the Panel application template."""
     dashboard = create_dashboard()
     template = pn.template.FastListTemplate(
-        title="Barebones Dashboard",
+        title="Study Query LLM",
         sidebar=[],
         main=[dashboard],
         header_background="#2596be",

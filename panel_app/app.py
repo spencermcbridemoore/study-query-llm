@@ -54,9 +54,9 @@ def get_db_connection() -> DatabaseConnection:
 
 def get_inference_service(provider_name: str) -> InferenceService:
     """Get or create inference service for a provider."""
-    # Get provider config and create provider
-    provider_config = config.get_provider_config(provider_name)
-    provider = ProviderFactory.create(provider_name, provider_config)
+    # Create factory and get provider from config
+    factory = ProviderFactory()
+    provider = factory.create_from_config(provider_name)
     
     # Create repository for database logging (use session scope for proper transaction handling)
     db = get_db_connection()

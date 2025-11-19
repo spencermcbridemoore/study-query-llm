@@ -148,6 +148,40 @@ class AzureOpenAIProvider(BaseLLMProvider):
         """Return the provider name."""
         return f"azure_openai_{self.deployment_name}"
 
+    @staticmethod
+    async def list_deployments(azure_config: ProviderConfig) -> list[str]:
+        """
+        List available Azure OpenAI deployments.
+        
+        This is a static method that can be called without creating a provider instance,
+        useful for querying available deployments before selecting one.
+        
+        Args:
+            azure_config: ProviderConfig with Azure credentials (endpoint, api_key, api_version)
+        
+        Returns:
+            List of deployment names (model IDs)
+        
+        Raises:
+            Exception: If unable to connect or list deployments
+        """
+        from typing import List
+        
+        client = AsyncAzureOpenAI(
+            api_key=azure_config.api_key,
+            api_version=azure_config.api_version,
+            azure_endpoint=azure_config.endpoint,
+        )
+        
+        try:
+            models = await client.models.list()
+            deployment_names = [model.id for model in models.data]
+            return deployment_names
+        except Exception as e:
+            raise Exception(f"Failed to list Azure deployments: {str(e)}") from e
+        finally:
+            await client.close()
+
     async def close(self):
         """Close the Azure OpenAI client connection."""
         await self.client.close()

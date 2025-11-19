@@ -110,4 +110,39 @@ class ProviderFactory:
             List of provider names that are configured and ready to use
         """
         return self.config.get_available_providers()
+    
+    async def list_provider_deployments(self, provider_name: str) -> list[str]:
+        """
+        List available deployments/models for a provider.
+        
+        This is provider-specific functionality. Currently only Azure OpenAI
+        supports listing deployments. Other providers may return empty list
+        or raise NotImplementedError.
+        
+        Args:
+            provider_name: Name of provider ('azure', 'openai', 'hyperbolic')
+        
+        Returns:
+            List of deployment/model names available for the provider
+        
+        Raises:
+            ValueError: If provider is unknown
+            NotImplementedError: If provider doesn't support listing deployments
+            Exception: If unable to query deployments
+        """
+        provider_name = provider_name.lower()
+        
+        if provider_name == "azure":
+            from .azure_provider import AzureOpenAIProvider
+            provider_config = self.config.get_provider_config("azure")
+            return await AzureOpenAIProvider.list_deployments(provider_config)
+        elif provider_name in ["openai", "hyperbolic"]:
+            # These providers don't have a concept of "deployments" like Azure
+            # They use model names directly
+            raise NotImplementedError(
+                f"Provider '{provider_name}' does not support listing deployments. "
+                f"Use model names directly in configuration."
+            )
+        else:
+            raise ValueError(f"Unknown provider: {provider_name}")
 

@@ -14,7 +14,6 @@ from study_query_llm.config import config
 from study_query_llm.db.connection import DatabaseConnection
 from study_query_llm.db.inference_repository import InferenceRepository
 from study_query_llm.providers.factory import ProviderFactory
-from study_query_llm.providers.azure_utils import list_azure_deployments
 from study_query_llm.services.inference_service import InferenceService
 from study_query_llm.services.study_service import StudyService
 
@@ -115,27 +114,34 @@ def create_inference_ui() -> pn.viewable.Viewable:
     )
     
     # Load deployments function
-    async def load_deployments():
-        """Load available Azure deployments."""
-        if provider_select.value != "azure":
+    async def load_deployments(event=None):
+        """Load available deployments from the provider."""
+        if provider_select.value not in config.get_available_providers():
             return
         
         try:
             status_output.object = "⏳ Loading deployments..."
             load_deployments_button.disabled = True
             
-            azure_config = config.get_provider_config("azure")
-            deployments = await list_azure_deployments(azure_config)
+            # Use factory to query deployments (provider-agnostic)
+            factory = ProviderFactory()
+            deployments = await factory.list_provider_deployments(provider_select.value)
             
             if deployments:
                 deployment_select.options = deployments
                 deployment_select.value = deployments[0]
-                # Also update the config with the selected deployment
-                azure_config.deployment_name = deployments[0]
+                # Update the config with the selected deployment
+                if provider_select.value == "azure":
+                    azure_config = config.get_provider_config("azure")
+                    azure_config.deployment_name = deployments[0]
                 status_output.object = f"✅ Loaded {len(deployments)} deployment(s)"
             else:
                 deployment_select.options = ["No deployments found"]
-                status_output.object = "⚠️ No deployments found. Check Azure Portal."
+                status_output.object = "⚠️ No deployments found. Check provider configuration."
+        except NotImplementedError:
+            # Provider doesn't support listing deployments
+            deployment_select.options = ["Not supported for this provider"]
+            status_output.object = "ℹ️ This provider doesn't support listing deployments"
         except Exception as e:
             deployment_select.options = ["Error loading deployments"]
             status_output.object = f"❌ Error: {str(e)}"
@@ -149,13 +155,13 @@ def create_inference_ui() -> pn.viewable.Viewable:
             deployment_select.visible = True
             load_deployments_button.visible = True
             # Try to load deployments automatically
-            await load_deployments()
+            await load_deployments(event)
         else:
             deployment_select.visible = False
             load_deployments_button.visible = False
     
     provider_select.param.watch(update_provider_ui, 'value')
-    load_deployments_button.on_click(load_deployments)
+    load_deployments_button.on_click(lambda e: pn.state.execute(load_deployments, e))
     
     # Initialize UI if Azure is selected by default
     if provider_select.value == "azure":

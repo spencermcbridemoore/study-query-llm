@@ -121,6 +121,9 @@ class AzureOpenAIProvider(BaseLLMProvider):
             completion: ChatCompletion = await self.client.chat.completions.create(
                 **api_params
             )
+            end_time = time.time()
+            latency_ms = (end_time - start_time) * 1000
+            
             logger.info(
                 f"Azure OpenAI API call successful: tokens={completion.usage.total_tokens if completion.usage else 'N/A'}, "
                 f"latency={latency_ms:.2f}ms"
@@ -133,9 +136,6 @@ class AzureOpenAIProvider(BaseLLMProvider):
             )
             # Re-raise with context
             raise Exception(f"Azure OpenAI API call failed: {str(e)}") from e
-
-        end_time = time.time()
-        latency_ms = (end_time - start_time) * 1000
 
         # Extract response data
         choice = completion.choices[0]

@@ -453,9 +453,8 @@ def create_dashboard() -> pn.viewable.Viewable:
 
 
 def create_app() -> pn.template.FastListTemplate:
-    """Create and return the main Panel application."""
-    logger.info("Creating Panel application...")
     """Create and return the Panel application template."""
+    logger.info("Creating Panel application...")
     dashboard = create_dashboard()
     template = pn.template.FastListTemplate(
         title="Study Query LLM",

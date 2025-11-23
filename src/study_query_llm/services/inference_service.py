@@ -33,9 +33,12 @@ from tenacity import (
 )
 from ..providers.base import BaseLLMProvider, ProviderResponse
 from .preprocessors import PromptPreprocessor
+from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
     from ..db.inference_repository import InferenceRepository
+
+logger = get_logger(__name__)
 
 
 class InferenceService:
@@ -95,6 +98,12 @@ class InferenceService:
         self.max_prompt_length = max_prompt_length
         self.remove_pii = remove_pii
         self.strip_control_chars = strip_control_chars
+        
+        logger.debug(
+            f"Initialized InferenceService: provider={provider.get_provider_name()}, "
+            f"max_retries={max_retries}, preprocess={preprocess}, "
+            f"repository={'enabled' if repository else 'disabled'}"
+        )
 
     async def run_inference(
         self,
@@ -199,10 +208,17 @@ class InferenceService:
                 result['id'] = inference_id
                 if batch_id:
                     result['batch_id'] = batch_id
+                logger.info(
+                    f"Inference saved to database: id={inference_id}, "
+                    f"provider={provider_response.provider}, tokens={provider_response.tokens}"
+                )
             except Exception as e:
                 # Log error but don't fail the inference
-                # In production, you might want to use proper logging here
-                print(f"Warning: Failed to save inference to database: {e}")
+                logger.error(
+                    f"Failed to save inference to database: {str(e)}",
+                    exc_info=True
+                )
+                # Still return the result even if database save failed
 
         return result
 
@@ -254,9 +270,25 @@ class InferenceService:
         # Wrap the provider call with retry logic
         @retry_decorator
         async def _make_call():
+            logger.debug(f"Calling provider: {self.provider.get_provider_name()}")
             return await self.provider.complete(prompt, **kwargs)
 
-        return await _make_call()
+        try:
+            return await _make_call()
+        except RetryError as e:
+            logger.error(
+                f"Provider call failed after {self.max_retries} retries: "
+                f"provider={self.provider.get_provider_name()}, error={str(e.last_attempt.exception())}",
+                exc_info=True
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Provider call failed (non-retryable): "
+                f"provider={self.provider.get_provider_name()}, error={str(e)}",
+                exc_info=True
+            )
+            raise
 
     @staticmethod
     def _should_retry_exception(exception: BaseException) -> bool:

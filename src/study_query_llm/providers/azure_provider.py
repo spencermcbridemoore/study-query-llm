@@ -23,6 +23,9 @@ from openai.types.chat import ChatCompletion
 
 from .base import BaseLLMProvider, ProviderResponse
 from ..config import ProviderConfig
+from ..utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class AzureOpenAIProvider(BaseLLMProvider):
@@ -61,6 +64,11 @@ class AzureOpenAIProvider(BaseLLMProvider):
             azure_endpoint=config.endpoint,
         )
         self.deployment_name = config.deployment_name
+        
+        logger.info(
+            f"Initialized Azure OpenAI provider with deployment: {self.deployment_name}, "
+            f"endpoint: {config.endpoint}, api_version: {config.api_version}"
+        )
 
     async def complete(
         self,
@@ -103,11 +111,26 @@ class AzureOpenAIProvider(BaseLLMProvider):
         api_params.update(kwargs)
 
         # Make the API call
+        logger.debug(
+            f"Calling Azure OpenAI API: deployment={self.deployment_name}, "
+            f"temperature={temperature}, max_tokens={max_tokens}, "
+            f"prompt_length={len(prompt)}"
+        )
+        
         try:
             completion: ChatCompletion = await self.client.chat.completions.create(
                 **api_params
             )
+            logger.info(
+                f"Azure OpenAI API call successful: tokens={completion.usage.total_tokens if completion.usage else 'N/A'}, "
+                f"latency={latency_ms:.2f}ms"
+            )
         except Exception as e:
+            logger.error(
+                f"Azure OpenAI API call failed: deployment={self.deployment_name}, "
+                f"error={str(e)}",
+                exc_info=True
+            )
             # Re-raise with context
             raise Exception(f"Azure OpenAI API call failed: {str(e)}") from e
 

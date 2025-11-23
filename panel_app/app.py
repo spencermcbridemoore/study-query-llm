@@ -16,6 +16,11 @@ from study_query_llm.db.inference_repository import InferenceRepository
 from study_query_llm.providers.factory import ProviderFactory
 from study_query_llm.services.inference_service import InferenceService
 from study_query_llm.services.study_service import StudyService
+from study_query_llm.utils.logging_config import get_logger, setup_logging
+
+# Setup logging
+setup_logging()
+logger = get_logger(__name__)
 
 NOTEBOOK_THEME_RESET = """
 body {
@@ -48,8 +53,10 @@ def get_db_connection() -> DatabaseConnection:
     """Get or create database connection."""
     global _db_connection
     if _db_connection is None:
+        logger.info("Initializing database connection...")
         _db_connection = DatabaseConnection(config.database.connection_string)
         _db_connection.init_db()
+        logger.info("Database connection established")
     return _db_connection
 
 
@@ -311,7 +318,12 @@ def create_inference_ui() -> pn.viewable.Viewable:
             status_output.object = "✅ Inference complete!"
             
         except Exception as e:
-            error_msg = f"❌ Error: {str(e)}\n\n{traceback.format_exc()}"
+            error_msg = f"❌ Error: {str(e)}"
+            logger.error(
+                f"Inference failed: provider={provider_select.value}, "
+                f"deployment={deployment_name}, error={str(e)}",
+                exc_info=True
+            )
             status_output.object = error_msg
             response_output.object = ""
             metadata_output.object = ""
@@ -361,6 +373,7 @@ def create_analytics_ui() -> pn.viewable.Viewable:
     def update_analytics():
         """Update analytics display."""
         try:
+            logger.debug("Updating analytics display...")
             db = get_db_connection()
             with db.session_scope() as session:
                 repository = InferenceRepository(session)
@@ -368,6 +381,7 @@ def create_analytics_ui() -> pn.viewable.Viewable:
                 
                 # Get summary stats
                 stats = study_service.get_summary_stats()
+                logger.debug(f"Analytics stats: {stats}")
                 summary_text = f"""
 **Total Inferences:** {stats['total_inferences']}  
 **Total Tokens:** {stats['total_tokens']:,}  
@@ -399,6 +413,7 @@ def create_analytics_ui() -> pn.viewable.Viewable:
                     
         except Exception as e:
             error_msg = f"Error loading analytics: {str(e)}"
+            logger.error(f"Failed to update analytics: {str(e)}", exc_info=True)
             summary_output.object = error_msg
             provider_comparison_table.object = None
             recent_table.object = None
@@ -438,6 +453,8 @@ def create_dashboard() -> pn.viewable.Viewable:
 
 
 def create_app() -> pn.template.FastListTemplate:
+    """Create and return the main Panel application."""
+    logger.info("Creating Panel application...")
     """Create and return the Panel application template."""
     dashboard = create_dashboard()
     template = pn.template.FastListTemplate(

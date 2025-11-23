@@ -10,6 +10,9 @@ from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
 from typing import Generator
 from .models import Base
+from ..utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class DatabaseConnection:
@@ -49,6 +52,20 @@ class DatabaseConnection:
             autoflush=False,
             bind=self.engine
         )
+        
+        # Mask password in connection string for logging
+        safe_connection_string = connection_string
+        if '@' in connection_string and '://' in connection_string:
+            parts = connection_string.split('@', 1)
+            if ':' in parts[0]:
+                user_pass = parts[0].split('://', 1)[1]
+                if ':' in user_pass:
+                    user = user_pass.split(':')[0]
+                    safe_connection_string = connection_string.replace(
+                        user_pass, f"{user}:***"
+                    )
+        
+        logger.info(f"Initialized database connection: {safe_connection_string}")
 
     def init_db(self) -> None:
         """
@@ -57,7 +74,9 @@ class DatabaseConnection:
         This should be called once when setting up the database.
         Safe to call multiple times (won't recreate existing tables).
         """
+        logger.info("Initializing database tables...")
         Base.metadata.create_all(bind=self.engine)
+        logger.info("Database tables initialized successfully")
 
     def drop_all_tables(self) -> None:
         """
@@ -104,8 +123,10 @@ class DatabaseConnection:
         try:
             yield session
             session.commit()
-        except Exception:
+            logger.debug("Database transaction committed")
+        except Exception as e:
             session.rollback()
+            logger.error(f"Database transaction rolled back: {str(e)}", exc_info=True)
             raise
         finally:
             session.close()

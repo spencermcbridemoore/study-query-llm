@@ -10,6 +10,9 @@ from typing import Optional, Tuple, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from .models import InferenceRun
+from ..utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class InferenceRepository:
@@ -80,6 +83,11 @@ class InferenceRepository:
         self.session.add(inference)
         self.session.flush()  # Flush to get the ID without committing
         self.session.refresh(inference)
+        
+        logger.debug(
+            f"Inserted inference run: id={inference.id}, provider={provider}, "
+            f"tokens={tokens}, batch_id={batch_id}"
+        )
 
         return inference.id
 

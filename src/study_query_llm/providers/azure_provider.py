@@ -151,19 +151,28 @@ class AzureOpenAIProvider(BaseLLMProvider):
     @staticmethod
     async def list_deployments(azure_config: ProviderConfig) -> list[str]:
         """
-        List available Azure OpenAI deployments.
+        List available Azure OpenAI model IDs.
+        
+        NOTE: This returns MODEL IDs, not deployment names!
+        Deployment names are custom names you create in Azure Portal.
+        Model IDs from this list may or may not work as deployment names.
+        
+        To find actual deployment names:
+        1. Check Azure Portal > Your Resource > Deployments
+        2. Or use find_working_deployment.py to test common names
+        3. Or use Azure Management API (requires additional credentials)
         
         This is a static method that can be called without creating a provider instance,
-        useful for querying available deployments before selecting one.
+        useful for querying available models before selecting one.
         
         Args:
             azure_config: ProviderConfig with Azure credentials (endpoint, api_key, api_version)
         
         Returns:
-            List of deployment names (model IDs)
+            List of model IDs (may work as deployment names, but not guaranteed)
         
         Raises:
-            Exception: If unable to connect or list deployments
+            Exception: If unable to connect or list models
         """
         from typing import List
         
@@ -175,12 +184,62 @@ class AzureOpenAIProvider(BaseLLMProvider):
         
         try:
             models = await client.models.list()
-            deployment_names = [model.id for model in models.data]
-            return deployment_names
+            model_ids = [model.id for model in models.data]
+            return model_ids
         except Exception as e:
-            raise Exception(f"Failed to list Azure deployments: {str(e)}") from e
+            raise Exception(f"Failed to list Azure models: {str(e)}") from e
         finally:
             await client.close()
+    
+    @staticmethod
+    async def find_working_deployment(azure_config: ProviderConfig, model_ids: Optional[list[str]] = None) -> Optional[str]:
+        """
+        Test model IDs to find one that works as a deployment name.
+        
+        This tries each model ID to see if it works as a deployment name.
+        This is a workaround since we can't query actual deployment names via the API.
+        
+        Args:
+            azure_config: ProviderConfig with Azure credentials
+            model_ids: Optional list of model IDs to test. If None, will list and test chat models.
+        
+        Returns:
+            First working deployment name, or None if none found
+        """
+        if model_ids is None:
+            model_ids = await AzureOpenAIProvider.list_deployments(azure_config)
+        
+        # Filter to likely chat completion models
+        chat_models = [m for m in model_ids if any(
+            m.startswith(prefix) for prefix in [
+                'gpt-4', 'gpt-35-turbo', 'gpt-3.5', 'gpt-4o', 
+                'o1', 'o3', 'claude', 'gpt-5', 'gpt-4.1', 'gpt-4.5'
+            ]
+        )]
+        
+        # Test each one
+        test_client = AsyncAzureOpenAI(
+            api_key=azure_config.api_key,
+            api_version=azure_config.api_version,
+            azure_endpoint=azure_config.endpoint,
+        )
+        
+        try:
+            for model_id in chat_models[:10]:  # Limit to first 10 to avoid too many API calls
+                try:
+                    # Try a minimal completion to test if this works as a deployment
+                    await test_client.chat.completions.create(
+                        model=model_id,
+                        messages=[{"role": "user", "content": "Hi"}],
+                        max_tokens=1
+                    )
+                    return model_id  # Found a working one!
+                except Exception:
+                    continue  # Try next one
+        finally:
+            await test_client.close()
+        
+        return None  # None found
 
     async def close(self):
         """Close the Azure OpenAI client connection."""

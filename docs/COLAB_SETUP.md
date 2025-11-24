@@ -17,8 +17,8 @@ This guide explains how to run Study Query LLM in Google Colab.
    - Or run each cell sequentially
 
 4. **Access the app:**
-   - The notebook will display a URL
-   - Click the link to open the application in a new tab
+   - The notebook will display a Colab proxy URL (looks like `https://xxxx-5006.proxy.googleusercontent.com`)
+   - Click that link to open the application in a new tab (do **not** use `http://127.0.0.1:5006`)
 
 ## Detailed Steps
 
@@ -75,7 +75,7 @@ The database initialization cell creates the SQLite database and tables. This ha
 
 ### Step 5: Start Application
 
-The final cell starts the Panel server and provides a URL to access the app.
+The final cell starts the Panel server and prints a **Colab proxy link** that tunnels traffic from your browser to the Colab runtime. Use that link (or the inline button) to open the UI—local URLs such as `http://127.0.0.1:5006` only work when you run the app on your own machine.
 
 ## Important Notes
 
@@ -105,9 +105,14 @@ The final cell starts the Panel server and provides a URL to access the app.
 
 ### Can't Access the URL
 1. Make sure the server cell is still running
-2. Try refreshing the URL
-3. Check that Colab hasn't disconnected
-4. Restart the runtime and run all cells again
+2. Use the Colab proxy link that looks like `https://<session>-5006.proxy.googleusercontent.com` (not `http://127.0.0.1:5006`)
+3. Try refreshing the link
+4. Check that Colab hasn't disconnected
+5. Restart the runtime and run all cells again
+
+### Blank Page at 127.0.0.1
+- This happens when you try to open the Panel server through your local loopback address while the app is actually running inside Colab.
+- Always open the proxy link printed by the notebook. It forwards traffic through Colab's infrastructure and also enables the WebSocket connection that Panel/Bokeh needs.
 
 ### Database Errors
 1. The database is created automatically

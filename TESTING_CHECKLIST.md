@@ -5,6 +5,14 @@
 - [x] .env file configured with Azure deployment (gpt-4o)
 - [x] Verification script created
 
+## Docker Image Smoke Test
+- [ ] `docker build -t study-query-llm:local .` completes without errors
+- [ ] `docker compose up --build` exposes Panel on http://localhost:5006
+- [ ] `curl http://localhost:5006/health` returns `{"status": "ok"}`
+- [ ] Inferences run successfully inside the container (GUI + DB write)
+- [ ] `docker compose down` preserves `study_query_data` volume (rerun and confirm history exists)
+- [ ] Optional: `COMPOSE_PROFILES=postgres docker compose up` works after setting `DATABASE_URL` to Postgres URI
+
 ## Test 1: GUI Startup
 - [ ] GUI loads without errors
 - [ ] Both tabs visible (Inference and Analytics)

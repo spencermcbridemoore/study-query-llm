@@ -99,6 +99,19 @@ pip install -e ".[dev]"
 python -c "from study_query_llm.db.connection import DatabaseConnection; from study_query_llm.config import config; db = DatabaseConnection(config.database.connection_string); db.init_db()"
 ```
 
+### Docker (Optional)
+
+The repository ships with a multi-stage `Dockerfile` and a `docker-compose.yml`
+stack for running the Panel app plus optional Postgres instance:
+
+```bash
+docker build -t study-query-llm:local .
+docker compose up --build
+```
+
+See `docs/DEPLOYMENT.md` for detailed instructions, environment variables, and
+Postgres profile usage.
+
 ## Usage
 
 ### Running the Panel App

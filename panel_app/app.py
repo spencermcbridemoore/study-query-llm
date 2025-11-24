@@ -4,9 +4,11 @@ Panel application for Study Query LLM.
 Provides a web interface for running LLM inferences and analyzing results.
 """
 
+import argparse
+import os
 import panel as pn
 import asyncio
-from typing import Optional
+from typing import Optional, Sequence, Set
 import traceback
 
 # Import core functionality
@@ -506,16 +508,78 @@ def serve_app(
     return server, url
 
 
-def main() -> pn.template.FastListTemplate:
-    """Main entry point for the application."""
-    app = create_app()
-    app.show(port=5006, open=True)
-    return app
+def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None) -> None:
+    """Start the Panel server using CLI/environment configuration."""
+    allowed_ws: Set[str] = {
+        f"{address}:{port}",
+        "localhost:5006",
+        "127.0.0.1:5006",
+    }
+    env_extra = os.getenv("PANEL_ALLOW_WS_ORIGINS", "")
+    if env_extra:
+        allowed_ws.update(
+            {origin.strip() for origin in env_extra.split(",") if origin.strip()}
+        )
+    if extra_origins:
+        allowed_ws.update(extra_origins)
+
+    logger.info(
+        "Starting Panel server on %s:%s with allowed origins %s",
+        address,
+        port,
+        ", ".join(sorted(allowed_ws)),
+    )
+    server, url = serve_app(
+        address=address,
+        port=port,
+        open_browser=False,
+        allow_websocket_origin=sorted(allowed_ws),
+    )
+    logger.info("Panel application available at %s", url)
+
+    try:
+        server.io_loop.start()
+    except KeyboardInterrupt:
+        logger.info("Shutdown signal received, stopping Panel server")
+    finally:
+        server.stop()
 
 
-if __name__ == "__main__":
-    app = create_app()
-    app.servable()
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    """CLI entry point for running the Panel application."""
+    parser = argparse.ArgumentParser(description="Run the Study Query LLM Panel app")
+    parser.add_argument(
+        "--address",
+        default=os.getenv("PANEL_ADDRESS", "0.0.0.0"),
+        help="Interface to bind the Panel server (env: PANEL_ADDRESS)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("PANEL_PORT", "5006")),
+        help="Port for the Panel server (env: PANEL_PORT)",
+    )
+    parser.add_argument(
+        "--allow-websocket-origin",
+        action="append",
+        dest="allow_origins",
+        help="Additional websocket origins (repeatable).",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    extra_origins = {origin for origin in args.allow_origins or []}
+    run_server(address=args.address, port=args.port, extra_origins=extra_origins)
 
-if __name__.startswith("bokeh_app"):
+
+def _running_inside_panel_server() -> bool:
+    """Detect if the module is being executed inside `panel serve`."""
+    try:
+        session_context = getattr(pn.state.curdoc, "session_context", None)
+        return session_context is not None or __name__.startswith("bokeh_app")
+    except Exception:
+        return False
+
+
+if _running_inside_panel_server():
     create_app().servable()
+elif __name__ == "__main__":
+    main()

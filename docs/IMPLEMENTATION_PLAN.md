@@ -1705,10 +1705,20 @@ Update:
 
 ### Step 6.4: Docker Setup ⬜
 
-Create:
-- `Dockerfile`
-- `docker-compose.yml`
-- Production deployment guide
+**Runtime targets**
+- Python 3.11 slim image with `panel_app.app` exposed on port `5006`
+- Default SQLite database persisted via container volume (`study_query_llm.db`)
+- Optional Postgres connection through `DATABASE_URL`
+
+**Required env vars**
+- Azure: `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_API_VERSION`
+- Optional providers: `OPENAI_API_KEY`, `OPENAI_MODEL`, `HYPERBOLIC_API_KEY`, `HYPERBOLIC_ENDPOINT`
+- App: `PANEL_ADDRESS` (default `0.0.0.0`), `PANEL_PORT` (default `5006`), `DATABASE_URL`
+
+**Deliverables**
+- Multi-stage `Dockerfile` (build dependencies, runtime, non-root user)
+- `docker-compose.yml` with app service, optional Postgres profile, healthcheck
+- Deployment guide covering `docker build`, `docker compose up`, secrets, and volume usage
 
 ---
 

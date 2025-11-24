@@ -120,3 +120,36 @@ curl http://localhost:5006/health
 - Publish the image to an internal registry once secrets are configured via
   container runtime (Azure Container Apps, ECS, etc.).
 
+## 7. Validation & CI Recommendations
+
+### Container Smoke Tests
+
+Run these quick checks before publishing or tagging a release:
+
+1. `docker run --rm study-query-llm:local --address 127.0.0.1 --port 5007`
+   - Verify logs show `Panel application available at http://...`
+2. `curl http://localhost:5007/health` (from host) returns `{"status": "ok"}`
+3. `docker exec` into the container and run `python -m pytest tests/test_phase_1_1.py`
+4. If API keys are available, run a real inference through the UI and confirm it
+   lands in the database volume.
+
+### CI Pipeline Sketch
+
+```yaml
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ghcr.io/your-org/study-query-llm:${{ github.ref_name }}
+          build-args: RUN_TESTS=1
+```
+
+Add a second step to run `docker compose up -d` followed by the smoke tests
+above to ensure the compose stack is functional before pushing images.
+

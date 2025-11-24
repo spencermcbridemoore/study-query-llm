@@ -468,6 +468,10 @@ def create_app() -> pn.template.FastListTemplate:
     return template
 
 
+def _health_response():
+    return {"status": "ok"}
+
+
 def serve_app(
     address: str = "localhost",
     port: int = 5006,
@@ -498,6 +502,11 @@ def serve_app(
     }
     serve_kwargs.update(kwargs)
     serve_kwargs.setdefault("threaded", True)
+    rest_routes = serve_kwargs.get("rest_routes")
+    default_routes = {"/health": _health_response}
+    if rest_routes:
+        default_routes.update(rest_routes)
+    serve_kwargs["rest_routes"] = default_routes
 
     server = pn.serve(objects, **serve_kwargs)
 

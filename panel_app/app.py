@@ -8,6 +8,7 @@ import argparse
 import os
 import panel as pn
 import asyncio
+import time
 from typing import Optional, Sequence, Set
 import traceback
 
@@ -468,10 +469,6 @@ def create_app() -> pn.template.FastListTemplate:
     return template
 
 
-def _health_response():
-    return {"status": "ok"}
-
-
 def serve_app(
     address: str = "localhost",
     port: int = 5006,
@@ -502,11 +499,6 @@ def serve_app(
     }
     serve_kwargs.update(kwargs)
     serve_kwargs.setdefault("threaded", True)
-    rest_routes = serve_kwargs.get("rest_routes")
-    default_routes = {"/health": _health_response}
-    if rest_routes:
-        default_routes.update(rest_routes)
-    serve_kwargs["rest_routes"] = default_routes
 
     server = pn.serve(objects, **serve_kwargs)
 
@@ -515,6 +507,27 @@ def serve_app(
     url = f"http://{resolved_address}:{resolved_port}{url_path}"
 
     return server, url
+
+
+def _add_health_route(server) -> None:
+    """Expose `/health` via the underlying Tornado application."""
+    try:
+        from tornado.web import RequestHandler
+    except Exception as exc:  # pragma: no cover - tornado available in runtime
+        logger.warning("Unable to import Tornado for healthcheck: %s", exc)
+        return
+
+    tornado_app = getattr(server, "_tornado", None)
+    if tornado_app is None:
+        logger.debug("Server has no Tornado application; skipping health route")
+        return
+
+    class HealthHandler(RequestHandler):
+        def get(self):
+            self.set_header("Content-Type", "application/json")
+            self.write({"status": "ok"})
+
+    tornado_app.add_handlers(r".*", [(r"/health", HealthHandler)])
 
 
 def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None) -> None:
@@ -542,16 +555,28 @@ def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None
         address=address,
         port=port,
         open_browser=False,
+        threaded=False,
+        start=False,
         allow_websocket_origin=sorted(allowed_ws),
     )
+    _add_health_route(server)
+    server.start()
     logger.info("Panel application available at %s", url)
 
     try:
-        server.io_loop.start()
+        if hasattr(server, "io_loop"):
+            server.io_loop.start()
+        elif hasattr(server, "join"):
+            server.join()
+        else:
+            logger.info("Server handle lacks io_loop/join; sleeping until interrupted")
+            while True:
+                time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutdown signal received, stopping Panel server")
     finally:
-        server.stop()
+        if hasattr(server, "stop"):
+            server.stop()
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:

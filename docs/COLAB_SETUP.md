@@ -26,6 +26,7 @@ This guide explains how to run Study Query LLM in Google Colab.
 
 The first cell installs all required Python packages:
 - Panel (web framework)
+- `jupyter_bokeh` (enables Panel widgets inside Colab)
 - OpenAI SDK (for Azure and OpenAI)
 - SQLAlchemy (database)
 - Pandas (analytics)
@@ -102,6 +103,7 @@ The final cell starts the Panel server and prints a **Colab proxy link** that tu
 2. Verify API keys are set correctly
 3. Ensure the source code is accessible (uploaded or cloned)
 4. Check the error messages in the cell output
+5. If you see a warning about `jupyter_bokeh`, run `!pip install jupyter_bokeh` (the notebook does this automatically, but rerun Step 1 if you interrupted it)
 
 ### Can't Access the URL
 1. Make sure the server cell is still running

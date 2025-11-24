@@ -126,11 +126,16 @@ curl http://localhost:5006/health
 
 Run these quick checks before publishing or tagging a release:
 
-1. `docker run --rm study-query-llm:local --address 127.0.0.1 --port 5007`
+1. `python scripts/docker_smoke.py` — builds the image, runs `docker compose up`,
+   polls `/health`, and tears everything down automatically.
+2. `python scripts/docker_smoke.py --profile postgres --database-url postgresql+psycopg2://study:study@db:5432/study_query_llm`
+   - Verifies the Postgres profile can spin up and the Panel app migrates
+     against the database container.
+3. `docker run --rm study-query-llm:local --address 127.0.0.1 --port 5007`
    - Verify logs show `Panel application available at http://...`
-2. `curl http://localhost:5007/health` (from host) returns `{"status": "ok"}`
-3. `docker exec` into the container and run `python -m pytest tests/test_phase_1_1.py`
-4. If API keys are available, run a real inference through the UI and confirm it
+4. `curl http://localhost:5007/health` (from host) returns `{"status": "ok"}`
+5. `docker exec` into the container and run `python -m pytest tests/test_phase_1_1.py`
+6. If API keys are available, run a real inference through the UI and confirm it
    lands in the database volume.
 
 ### CI Pipeline Sketch
@@ -150,6 +155,26 @@ jobs:
           build-args: RUN_TESTS=1
 ```
 
-Add a second step to run `docker compose up -d` followed by the smoke tests
-above to ensure the compose stack is functional before pushing images.
+Add a second step to run either `python scripts/docker_smoke.py` or
+`docker compose up -d` followed by the smoke tests above to ensure the compose
+stack is functional before pushing images. See `.github/workflows/docker-smoke.yml`
+for the working GitHub Actions configuration used in this repository.
+
+## 8. Secret Management & Hosted Runtimes
+
+- **Local `.env`:** Keep your provider keys plus `DATABASE_URL` for Supabase or
+  other hosted Postgres instances inside `.env`. Never bake secrets into Docker
+  images or commit them to git.
+- **Docker secrets / compose overrides:** When deploying to Docker Swarm,
+  Kubernetes, or Azure Container Apps, mount secrets as environment variables or
+  files. For example, map Azure credentials via Docker secrets and reference them
+  in the compose file using `${AZURE_OPENAI_API_KEY}`.
+- **Supabase / external Postgres:** Set
+  `DATABASE_URL=postgresql+psycopg2://<user>:<password>@<supabase-host>:6543/<db>`
+  (or the connection string provided by your managed database). No additional
+  changes are required inside the container—the SQLAlchemy URL determines the
+  target.
+- **CI/CD:** Store secrets in your pipeline’s secret store (GitHub Actions
+  secrets, Azure Key Vault, etc.) and inject them as environment variables when
+  running `docker run`, `docker compose`, or `python scripts/docker_smoke.py`.
 

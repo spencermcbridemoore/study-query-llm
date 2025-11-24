@@ -47,15 +47,27 @@ You have two options:
 
 ### Step 3: Configure API Keys
 
-Set your API keys in the environment variables:
-- `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key
-- `AZURE_OPENAI_ENDPOINT`: Your Azure endpoint URL
-- `AZURE_OPENAI_DEPLOYMENT`: Your deployment name (e.g., "gpt-4o")
-- `AZURE_OPENAI_API_VERSION`: API version (default: "2024-02-15-preview")
+**Recommended Method: Use Colab Secrets** (More Secure)
 
-Optional providers:
-- `OPENAI_API_KEY`: For OpenAI provider
-- `HYPERBOLIC_API_KEY`: For Hyperbolic provider
+1. Click the 🔑 (key) icon in the left sidebar
+2. Click "+ Add secret"
+3. Add secrets with these exact names:
+   - `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key
+   - `AZURE_OPENAI_ENDPOINT`: Your Azure endpoint URL
+   - `AZURE_OPENAI_DEPLOYMENT`: Your deployment name (e.g., "gpt-4o")
+   - `AZURE_OPENAI_API_VERSION`: API version (default: "2024-02-15-preview")
+   - (Optional) `OPENAI_API_KEY`: For OpenAI provider
+   - (Optional) `OPENAI_MODEL`: OpenAI model name
+   - (Optional) `HYPERBOLIC_API_KEY`: For Hyperbolic provider
+   - (Optional) `HYPERBOLIC_ENDPOINT`: Hyperbolic endpoint URL
+
+The notebook will automatically load these secrets. This is more secure than hardcoding keys in the notebook.
+
+**Alternative Method: Direct Environment Variables**
+
+If you prefer, you can set API keys directly in the code cell (less secure, but works):
+- Edit the configuration cell
+- Replace placeholder values with your actual API keys
 
 ### Step 4: Initialize Database
 

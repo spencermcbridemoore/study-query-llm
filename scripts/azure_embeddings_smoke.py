@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 _DEBUG_LOG_PATH = r"c:\Users\spenc\Cursor Repos\study-query-llm\.cursor\debug.log"
+_DEBUG_FALLBACK_LOG_PATH = str(Path(__file__).resolve().parent / "azure_embeddings_smoke_debug.log")
+_DEBUG_FALLBACK_ROOT_LOG_PATH = str(Path(__file__).resolve().parents[1] / "azure_embeddings_smoke_debug.log")
 
 
 def _log_debug(hypothesis_id: str, location: str, message: str, data: dict) -> None:
@@ -41,9 +44,38 @@ def _log_debug(hypothesis_id: str, location: str, message: str, data: dict) -> N
     try:
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        return
     except Exception as exc:
         print(f"[debug] Failed to write log file at {log_path}: {exc}")
+        payload["data"] = {
+            **payload.get("data", {}),
+            "primary_log_error": str(exc)[:200],
+            "primary_log_path": str(log_path),
+        }
+        for fallback in [_DEBUG_FALLBACK_LOG_PATH, _DEBUG_FALLBACK_ROOT_LOG_PATH]:
+            try:
+                fallback_path = Path(fallback)
+                with open(fallback_path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+                print(f"[debug] Wrote fallback log to {fallback_path}")
+                return
+            except Exception as fallback_exc:
+                print(f"[debug] Failed to write fallback log at {fallback}: {fallback_exc}")
         raise
+
+
+# region agent log
+_log_debug(
+    "H0",
+    "scripts/azure_embeddings_smoke.py:module",
+    "module_imported",
+    {
+        "python_executable": sys.executable,
+        "cwd": str(Path.cwd()),
+        "script_path": str(Path(__file__).resolve()),
+    },
+)
+# endregion
 
 
 def _load_env() -> dict:
@@ -52,11 +84,12 @@ def _load_env() -> dict:
         "env_path": None,
         "env_found": False,
         "loaded_from": None,
+        "manual_loaded_keys": 0,
     }
     try:
         from dotenv import load_dotenv
     except ImportError:
-        return info
+        load_dotenv = None
 
     info["dotenv_available"] = True
     repo_root = Path(__file__).resolve().parents[1]
@@ -64,12 +97,53 @@ def _load_env() -> dict:
     info["env_path"] = str(env_path)
     info["env_found"] = env_path.exists()
     if info["env_found"]:
-        load_dotenv(env_path)
+        if load_dotenv:
+            load_dotenv(env_path)
         info["loaded_from"] = "repo_root"
+        info["manual_loaded_keys"] = _load_env_file(env_path)
     else:
-        load_dotenv()
+        if load_dotenv:
+            load_dotenv()
         info["loaded_from"] = "default"
     return info
+
+
+def _load_env_file(env_path: Path) -> int:
+    loaded = 0
+    try:
+        with open(env_path, "r", encoding="utf-8") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+                    loaded += 1
+    except Exception as exc:
+        _log_debug(
+            "H1",
+            "scripts/azure_embeddings_smoke.py:_load_env_file",
+            "manual_env_load_failed",
+            {"error_type": type(exc).__name__, "error_message": str(exc)[:200]},
+        )
+    return loaded
+
+
+def _apply_env_aliases() -> list[str]:
+    aliases = {
+        "AZURE_ENDPOINT": "AZURE_OPENAI_ENDPOINT",
+        "AZURE_API_KEY": "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_KEY": "AZURE_OPENAI_API_KEY",
+    }
+    used = []
+    for source, target in aliases.items():
+        if not os.environ.get(target) and os.environ.get(source):
+            os.environ[target] = os.environ[source]
+            used.append(source)
+    return used
 
 
 def _get_deployments() -> Tuple[List[str], Optional[str]]:
@@ -91,6 +165,7 @@ def _get_deployments() -> Tuple[List[str], Optional[str]]:
 
 def main() -> None:
     load_info = _load_env()
+    alias_sources = _apply_env_aliases()
 
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
     api_key = os.environ.get("AZURE_OPENAI_API_KEY")
@@ -119,6 +194,8 @@ def main() -> None:
             "env_path": load_info.get("env_path"),
             "env_found": load_info.get("env_found"),
             "loaded_from": load_info.get("loaded_from"),
+            "manual_loaded_keys": load_info.get("manual_loaded_keys"),
+            "alias_sources": alias_sources,
             "endpoint_present": bool(endpoint),
             "api_key_present": bool(api_key),
             "api_version": api_version,

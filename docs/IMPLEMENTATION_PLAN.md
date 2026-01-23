@@ -18,6 +18,14 @@ This document outlines the phased implementation plan for building the Study-Que
 
 Every phase includes a "Test" section describing how to validate the component works. Don't skip these - they ensure each building block is solid before you stack the next layer.
 
+### Status Legend (current repo)
+✅ Implemented  
+⚠️ Partially implemented  
+⬜ Not implemented
+
+### Repo Layout Note
+Core Python modules live under `src/study_query_llm/` (providers, services, db, config). Panel UI lives in `panel_app/app.py`.
+
 ---
 
 ## Phase 1: LLM Provider Abstraction Layer
@@ -25,7 +33,7 @@ Every phase includes a "Test" section describing how to validate the component w
 
 **Dependencies:** None (this is the foundation)
 
-### Step 1.1: Base Provider Interface ⬜
+### Step 1.1: Base Provider Interface ✅
 
 **Files to create:**
 - `panel_app/providers/__init__.py`
@@ -108,7 +116,7 @@ asyncio.run(test())
 
 ---
 
-### Step 1.2: Azure Provider Implementation ⬜
+### Step 1.2: Azure Provider Implementation ✅
 
 **Files to create:**
 - `panel_app/providers/azure_provider.py`
@@ -321,7 +329,7 @@ class HyperbolicProvider(BaseLLMProvider):
 
 ---
 
-### Step 1.5: Provider Factory ⬜
+### Step 1.5: Provider Factory ⚠️ (Azure only)
 
 **Files to create:**
 - `panel_app/providers/factory.py`
@@ -421,16 +429,19 @@ asyncio.run(test_factory())
 
 ---
 
-### Phase 1 Milestone ✓
+### Phase 1 Milestone ⚠️
 
 **What you have now:**
-- Abstract interface for all LLM providers
-- Azure, OpenAI, and Hyperbolic implementations
-- Factory for easy provider creation
-- Standardized response format
-- Fully testable without database or GUI
+- Abstract provider interface + standardized response format
+- Azure OpenAI provider implementation
+- Provider factory (Azure only)
 
-**Next:** Add business logic layer
+**Still missing:**
+- OpenAI provider
+- Hyperbolic provider
+- Factory support for additional providers
+
+**Next:** Implement remaining providers and expand the factory
 
 ---
 
@@ -439,7 +450,7 @@ asyncio.run(test_factory())
 
 **Dependencies:** Phase 1 (Provider layer)
 
-### Step 2.1: Basic Inference Service ⬜
+### Step 2.1: Basic Inference Service ✅
 
 **Files to create:**
 - `panel_app/services/__init__.py`
@@ -518,7 +529,7 @@ asyncio.run(test_service())
 
 ---
 
-### Step 2.2: Add Retry Logic ⬜
+### Step 2.2: Add Retry Logic ✅
 
 **Update:** `panel_app/services/inference_service.py`
 
@@ -578,7 +589,7 @@ class InferenceService:
 
 ---
 
-### Step 2.3: Add Prompt Preprocessing ⬜
+### Step 2.3: Add Prompt Preprocessing ✅
 
 **Files to create:**
 - `panel_app/services/preprocessors.py`
@@ -740,7 +751,7 @@ class ConversationService:
 
 ---
 
-### Step 2.5: Request Batching Service ⬜ (Optional for now)
+### Step 2.5: Request Batching Service ⚠️ (batching/sampling in InferenceService; no dedup)
 
 **Files to create:**
 - `panel_app/services/batch_service.py`
@@ -824,17 +835,17 @@ async def test_dedup():
 
 ---
 
-### Phase 2 Milestone ✓
+### Phase 2 Milestone ⚠️
 
 **What you have now:**
-- Full-featured business logic layer
-- Retry logic with exponential backoff
-- Prompt preprocessing
-- Multi-turn conversations (optional)
-- Request deduplication (optional)
-- Still no database - all testable in isolation
+- Inference service with retry + preprocessing
+- Batch + sampling helpers in `InferenceService`
 
-**Next:** Add database persistence
+**Still missing (optional):**
+- Conversation service
+- Request deduplication service
+
+**Next:** Add conversation + dedup services if needed
 
 ---
 
@@ -843,7 +854,7 @@ async def test_dedup():
 
 **Dependencies:** Phase 1 (Providers), Phase 2 (Services)
 
-### Step 3.1: Database Models ⬜
+### Step 3.1: Database Models ✅
 
 **Files to create:**
 - `panel_app/db/__init__.py`
@@ -897,7 +908,7 @@ print("Tables created successfully!")
 
 ---
 
-### Step 3.2: Database Connection ⬜
+### Step 3.2: Database Connection ✅
 
 **Files to create:**
 - `panel_app/db/connection.py`
@@ -972,7 +983,7 @@ with db.session_scope() as session:
 
 ---
 
-### Step 3.3: Repository - Write Operations ⬜
+### Step 3.3: Repository - Write Operations ✅
 
 **Files to create:**
 - `panel_app/db/inference_repository.py`
@@ -1075,7 +1086,7 @@ with db.session_scope() as session:
 
 ---
 
-### Step 3.4: Repository - Query Operations ⬜
+### Step 3.4: Repository - Query Operations ✅
 
 **Update:** `panel_app/db/inference_repository.py`
 
@@ -1214,7 +1225,7 @@ with db.session_scope() as session:
 
 ---
 
-### Step 3.5: Integrate Services with Repository ⬜
+### Step 3.5: Integrate Services with Repository ✅
 
 **Update:** `panel_app/services/inference_service.py`
 
@@ -1327,7 +1338,7 @@ asyncio.run(test())
 
 **Dependencies:** Phase 3 (Database layer)
 
-### Step 4.1: Study Service ⬜
+### Step 4.1: Study Service ✅
 
 **Files to create:**
 - `panel_app/services/study_service.py`
@@ -1541,7 +1552,7 @@ with db.session_scope() as session:
 
 **Dependencies:** All previous phases
 
-### Step 5.1: Simple Inference UI ⬜
+### Step 5.1: Simple Inference UI ✅
 
 **Update:** `panel_app/app.py`
 
@@ -1563,7 +1574,7 @@ Key components:
 
 ---
 
-### Step 5.2: Analytics Dashboard ⬜
+### Step 5.2: Analytics Dashboard ⚠️ (tables/summary only)
 
 **What to add:**
 1. Provider comparison bar chart
@@ -1576,11 +1587,11 @@ Key components:
 
 ---
 
-### Step 5.3: Configuration Management ⬜
+### Step 5.3: Configuration Management ⚠️ (config exists; `.env.example` missing)
 
 **Files to create:**
-- `.env.example`
-- `panel_app/config.py`
+- `.env.example` (missing)
+- `src/study_query_llm/config.py` (already implemented)
 
 **What to build:**
 
@@ -1666,44 +1677,46 @@ HYPERBOLIC_ENDPOINT=https://api.hyperbolic.xyz
 
 ---
 
-### Phase 5 Milestone ✓
+### Phase 5 Milestone ⚠️
 
 **What you have now:**
-- Full GUI application
-- Inference testing interface
-- Analytics dashboard
-- Configuration management
-- Complete end-to-end functionality
+- Inference UI (Panel)
+- Analytics summary + provider comparison + recent table
+- Config loader in `src/study_query_llm/config.py`
 
-**Next:** Polish, testing, deployment
+**Still missing:**
+- Analytics charts/time-series + search UI
+- `.env.example`
+
+**Next:** Finish analytics UI + add config example
 
 ---
 
 ## Phase 6: Polish and Deployment
 **Goal:** Production readiness
 
-### Step 6.1: Error Handling and Logging ⬜
+### Step 6.1: Error Handling and Logging ⚠️
 
 Add comprehensive logging throughout:
 - Provider API calls
 - Database operations
 - User actions
 
-### Step 6.2: Unit Tests ⬜
+### Step 6.2: Unit Tests ✅
 
 Create test suite:
 - `tests/test_providers.py`
 - `tests/test_services.py`
 - `tests/test_repository.py`
 
-### Step 6.3: Documentation ⬜
+### Step 6.3: Documentation ✅
 
 Update:
 - README.md with full setup instructions
 - API documentation
 - User guide
 
-### Step 6.4: Docker Setup ⬜
+### Step 6.4: Docker Setup ✅
 
 **Runtime targets**
 - Python 3.11 slim image with `panel_app.app` exposed on port `5006`
@@ -1725,50 +1738,46 @@ Update:
 ## Summary: Implementation Checklist
 
 ### Phase 1: Provider Layer
-- [ ] Step 1.1: Base provider interface
-- [ ] Step 1.2: Azure provider
+- [x] Step 1.1: Base provider interface
+- [x] Step 1.2: Azure provider
 - [ ] Step 1.3: OpenAI provider
 - [ ] Step 1.4: Hyperbolic provider
-- [ ] Step 1.5: Provider factory
+- [ ] Step 1.5: Provider factory (partial - Azure only)
 
 ### Phase 2: Service Layer
-- [ ] Step 2.1: Basic inference service
-- [ ] Step 2.2: Add retry logic
-- [ ] Step 2.3: Add preprocessing
+- [x] Step 2.1: Basic inference service
+- [x] Step 2.2: Add retry logic
+- [x] Step 2.3: Add preprocessing
 - [ ] Step 2.4: Conversation service (optional)
-- [ ] Step 2.5: Batch service (optional)
+- [ ] Step 2.5: Batch service (partial - batching/sampling in InferenceService, no dedup)
 
 ### Phase 3: Database Layer
-- [ ] Step 3.1: Database models
-- [ ] Step 3.2: Database connection
-- [ ] Step 3.3: Repository writes
-- [ ] Step 3.4: Repository queries
-- [ ] Step 3.5: Service integration
+- [x] Step 3.1: Database models
+- [x] Step 3.2: Database connection
+- [x] Step 3.3: Repository writes
+- [x] Step 3.4: Repository queries
+- [x] Step 3.5: Service integration
 
 ### Phase 4: Analytics Layer
-- [ ] Step 4.1: Study service
+- [x] Step 4.1: Study service
 
 ### Phase 5: GUI Layer
-- [ ] Step 5.1: Inference UI
-- [ ] Step 5.2: Analytics dashboard
-- [ ] Step 5.3: Configuration
+- [x] Step 5.1: Inference UI
+- [ ] Step 5.2: Analytics dashboard (partial - tables/summary only)
+- [ ] Step 5.3: Configuration (partial - config exists, .env.example missing)
 
 ### Phase 6: Production
-- [ ] Step 6.1: Error handling
-- [ ] Step 6.2: Unit tests
-- [ ] Step 6.3: Documentation
-- [ ] Step 6.4: Docker setup
+- [ ] Step 6.1: Error handling (partial - logging exists)
+- [x] Step 6.2: Unit tests
+- [x] Step 6.3: Documentation
+- [x] Step 6.4: Docker setup
 
 ---
 
 ## Next Steps
-
-Ready to begin **Phase 1, Step 1.1: Base Provider Interface**
-
-This is the smallest possible starting point that:
-- Has zero dependencies
-- Is fully testable
-- Sets the foundation for everything else
-- Can be validated in < 5 minutes
-
-After confirming this works, each subsequent step builds on the previous one!
+- Implement OpenAI + Hyperbolic providers and expand `ProviderFactory`
+- Add conversation service if needed
+- Add request dedup batching service (or extend `InferenceService`)
+- Finish analytics UI charts/time-series + search
+- Add `.env.example`
+- Log failed/no-response calls

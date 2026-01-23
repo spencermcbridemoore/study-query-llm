@@ -16,66 +16,17 @@ Optional env vars:
 
 from __future__ import annotations
 
-import json
 import os
-import sys
-import time
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urlparse
-
-_DEBUG_LOG_PATH = r"c:\Users\spenc\Cursor Repos\study-query-llm\.cursor\debug.log"
-_DEBUG_FALLBACK_LOG_PATH = str(Path(__file__).resolve().parent / "azure_embeddings_smoke_debug.log")
-_DEBUG_FALLBACK_ROOT_LOG_PATH = str(Path(__file__).resolve().parents[1] / "azure_embeddings_smoke_debug.log")
-
-
-def _log_debug(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    payload = {
-        "sessionId": "debug-session",
-        "runId": "azure-embeddings-smoke",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    log_path = Path(_DEBUG_LOG_PATH)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with open(log_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
-        return
-    except Exception as exc:
-        print(f"[debug] Failed to write log file at {log_path}: {exc}")
-        payload["data"] = {
-            **payload.get("data", {}),
-            "primary_log_error": str(exc)[:200],
-            "primary_log_path": str(log_path),
-        }
-        for fallback in [_DEBUG_FALLBACK_LOG_PATH, _DEBUG_FALLBACK_ROOT_LOG_PATH]:
-            try:
-                fallback_path = Path(fallback)
-                with open(fallback_path, "a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
-                print(f"[debug] Wrote fallback log to {fallback_path}")
-                return
-            except Exception as fallback_exc:
-                print(f"[debug] Failed to write fallback log at {fallback}: {fallback_exc}")
-        raise
-
-
-# region agent log
-_log_debug(
-    "H0",
-    "scripts/azure_embeddings_smoke.py:module",
-    "module_imported",
-    {
-        "python_executable": sys.executable,
-        "cwd": str(Path.cwd()),
-        "script_path": str(Path(__file__).resolve()),
-    },
-)
-# endregion
+_DEFAULT_EMBEDDING_DEPLOYMENTS = [
+    "text-embedding-3-small",
+    "Cohere-embed-v3-english",
+    "text-embedding-ada-002",
+    "Cohere-embed-v3-multilingual",
+    "embed-v-4-0",
+    "text-embedding-3-large",
+]
 
 
 def _load_env() -> dict:
@@ -122,13 +73,8 @@ def _load_env_file(env_path: Path) -> int:
                 if key and key not in os.environ:
                     os.environ[key] = value
                     loaded += 1
-    except Exception as exc:
-        _log_debug(
-            "H1",
-            "scripts/azure_embeddings_smoke.py:_load_env_file",
-            "manual_env_load_failed",
-            {"error_type": type(exc).__name__, "error_message": str(exc)[:200]},
-        )
+    except Exception:
+        return loaded
     return loaded
 
 
@@ -156,11 +102,7 @@ def _get_deployments() -> Tuple[List[str], Optional[str]]:
     if single:
         return [single], "AZURE_OPENAI_EMBEDDING_DEPLOYMENT"
 
-    fallback = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
-    if fallback:
-        return [fallback], "AZURE_OPENAI_DEPLOYMENT"
-
-    return [], None
+    return _DEFAULT_EMBEDDING_DEPLOYMENTS, "DEFAULT_EMBEDDING_DEPLOYMENTS"
 
 
 def main() -> None:
@@ -170,38 +112,6 @@ def main() -> None:
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
     api_key = os.environ.get("AZURE_OPENAI_API_KEY")
     api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
-
-    # region agent log
-    _log_debug(
-        "H0",
-        "scripts/azure_embeddings_smoke.py:module",
-        "module_loaded",
-        {
-            "python_version": os.environ.get("PYTHON_VERSION"),
-            "cwd": str(Path.cwd()),
-            "script_path": str(Path(__file__).resolve()),
-        },
-    )
-    # endregion
-
-    # region agent log
-    _log_debug(
-        "H1",
-        "scripts/azure_embeddings_smoke.py:main",
-        "env_load_status",
-        {
-            "dotenv_available": load_info.get("dotenv_available"),
-            "env_path": load_info.get("env_path"),
-            "env_found": load_info.get("env_found"),
-            "loaded_from": load_info.get("loaded_from"),
-            "manual_loaded_keys": load_info.get("manual_loaded_keys"),
-            "alias_sources": alias_sources,
-            "endpoint_present": bool(endpoint),
-            "api_key_present": bool(api_key),
-            "api_version": api_version,
-        },
-    )
-    # endregion
 
     missing = [
         name
@@ -215,92 +125,36 @@ def main() -> None:
         raise SystemExit(f"Missing env vars: {', '.join(missing)}")
 
     deployments, source = _get_deployments()
-    # region agent log
-    _log_debug(
-        "H2",
-        "scripts/azure_embeddings_smoke.py:main",
-        "deployment_source",
-        {
-            "deployments_count": len(deployments),
-            "deployment_source": source,
-        },
-    )
-    # endregion
     if not deployments:
         raise SystemExit(
-            "Set AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "
+            "No embedding deployments configured. Set "
+            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "
             "AZURE_OPENAI_EMBEDDING_DEPLOYMENTS (comma-separated)."
         )
 
     from openai import AzureOpenAI
 
-    endpoint_host = urlparse(endpoint).netloc if endpoint else None
-    # region agent log
-    _log_debug(
-        "H5",
-        "scripts/azure_embeddings_smoke.py:main",
-        "client_init",
-        {"endpoint_host": endpoint_host, "api_version": api_version},
-    )
-    # endregion
     client = AzureOpenAI(
         api_key=api_key,
         api_version=api_version,
         azure_endpoint=endpoint,
     )
 
-    if source == "AZURE_OPENAI_DEPLOYMENT":
+    if source == "DEFAULT_EMBEDDING_DEPLOYMENTS":
         print(
-            "Using AZURE_OPENAI_DEPLOYMENT as embedding deployment. "
-            "Set AZURE_OPENAI_EMBEDDING_DEPLOYMENT(S) to be explicit."
+            "Using default embedding deployments. "
+            "Set AZURE_OPENAI_EMBEDDING_DEPLOYMENT(S) to override."
         )
-    # region agent log
-    _log_debug(
-        "H5",
-        "scripts/azure_embeddings_smoke.py:main",
-        "client_ready",
-        {"client_created": True, "deployment_count": len(deployments)},
-    )
-    # endregion
-
     inputs = ["first phrase", "second phrase", "third phrase"]
 
     print("Testing embedding deployments:")
     for name in deployments:
-        # region agent log
-        _log_debug(
-            "H4",
-            "scripts/azure_embeddings_smoke.py:main",
-            "embedding_request_start",
-            {"deployment": name, "inputs_count": len(inputs)},
-        )
-        # endregion
         try:
             response = client.embeddings.create(model=name, input=inputs)
             vector = response.data[0].embedding
             print(f"  {name}: OK (dim={len(vector)})")
-            # region agent log
-            _log_debug(
-                "H4",
-                "scripts/azure_embeddings_smoke.py:main",
-                "embedding_request_ok",
-                {"deployment": name, "dimension": len(vector)},
-            )
-            # endregion
         except Exception as exc:
             print(f"  {name}: FAIL ({exc})")
-            # region agent log
-            _log_debug(
-                "H4",
-                "scripts/azure_embeddings_smoke.py:main",
-                "embedding_request_fail",
-                {
-                    "deployment": name,
-                    "error_type": type(exc).__name__,
-                    "error_message": str(exc)[:200],
-                },
-            )
-            # endregion
 
 
 if __name__ == "__main__":

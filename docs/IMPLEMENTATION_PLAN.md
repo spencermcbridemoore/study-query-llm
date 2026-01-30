@@ -1735,6 +1735,62 @@ Update:
 
 ---
 
+## Phase 7: Immutable Capture + Grouping DB (Postgres)
+
+**Goal:** Add a v2 immutable raw capture schema that logs successes + failures across modalities, plus mutable grouping tables for experiments/batches/labels.
+
+**Dependencies:** Phase 3 (DB layer), PostgreSQL target
+
+### Step 7.1: V2 Schema (Immutable Raw Calls) ✅
+
+**Files created:**
+- `src/study_query_llm/db/models_v2.py` - V2 models (RawCall, Group, GroupMember, CallArtifact, EmbeddingVector)
+- `src/study_query_llm/db/raw_call_repository.py` - Repository for v2 operations
+- `src/study_query_llm/db/connection_v2.py` - Connection helper for v2 Postgres schema
+
+**Core tables:**
+- `RawCall`: `provider`, `model`, `modality`, `status`, `request_json`, `response_json`, `error_json`, `latency_ms`, `tokens_json`, `metadata_json`, `created_at`
+- `CallArtifact`: blob references for multimodal payloads (`uri`, `content_type`, `byte_size`, `metadata_json`)
+- `EmbeddingVector`: optional table for embeddings (`vector`, `dimension`, `norm`, `metadata_json`) with pgvector support
+- `Group`: mutable grouping metadata (`group_type`, `name`, `description`, `created_at`, `metadata_json`)
+- `GroupMember`: join table (`group_id`, `call_id`, `added_at`, `position`, `role`)
+
+**Test:** ✅ Created tables + insert/fetch for each table (`tests/test_db/test_models_v2.py`, `tests/test_db/test_repository_v2.py`)
+
+### Step 7.2: Log Success + Failure in RawCall ⬜
+
+**Update:** `src/study_query_llm/services/inference_service.py`
+
+- On success: `status="success"`, `response_json` set
+- On failure/exception: `status="failed"`, `response_json=null`, `error_json` set
+- Always record `request_json` + runtime metadata (tokens, latency, provider)
+
+**Test:** Verify failed calls still persist in v2 DB
+
+### Step 7.3: Migration Script (v1 → v2) ✅
+
+**File created:** `scripts/migrate_v1_to_v2.py`
+
+- Read legacy `inference_runs` via `LEGACY_DATABASE_URL`
+- Insert into `RawCall` with:
+  - `request_json={"prompt": prompt}`
+  - `response_json={"text": response}`
+  - `status="success"`
+- Convert `batch_id` into `Group` + `GroupMember` rows
+- Do not add legacy fields to v2 schema; keep translation in the script only
+
+**Test:** ✅ Row counts + sample spot checks (`tests/test_db/test_migration_v1_to_v2.py`)
+
+### Step 7.4: Backfill Validation ⬜
+
+- Compare v1 vs v2 counts
+- Verify batch sizes and timestamps match expected ranges
+- Sample prompts/responses and metadata parity
+
+**Design note:** v1 DB remains unchanged; v2 DB is a fresh Postgres schema so the new design is not constrained by legacy structure.
+
+---
+
 ## Summary: Implementation Checklist
 
 ### Phase 1: Provider Layer
@@ -1772,6 +1828,12 @@ Update:
 - [x] Step 6.3: Documentation
 - [x] Step 6.4: Docker setup
 
+### Phase 7: Immutable Capture + Grouping DB (Postgres)
+- [x] Step 7.1: V2 Schema (Immutable Raw Calls)
+- [ ] Step 7.2: Log Success + Failure in RawCall
+- [x] Step 7.3: Migration Script (v1 → v2)
+- [ ] Step 7.4: Backfill Validation
+
 ---
 
 ## Next Steps
@@ -1779,5 +1841,6 @@ Update:
 - Add conversation service if needed
 - Add request dedup batching service (or extend `InferenceService`)
 - Finish analytics UI charts/time-series + search
-- Add `.env.example`
-- Log failed/no-response calls
+- Integrate v2 schema into InferenceService to log failures (Phase 7.2)
+- Complete backfill validation for v1→v2 migration (Phase 7.4)
+- Add embedding provider integration with v2 EmbeddingVector storage

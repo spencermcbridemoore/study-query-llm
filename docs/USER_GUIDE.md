@@ -36,13 +36,23 @@ Study Query LLM is a web application for running LLM inference experiments acros
    Create a `.env` file in the project root:
    ```bash
    # Database (SQLite for development, PostgreSQL for production)
+   # V1 (Legacy) - SQLite database
    DATABASE_URL=sqlite:///study_query_llm.db
+   
+   # V2 (PostgreSQL) - New immutable capture schema with grouping support
+   # Uncomment to use v2 schema:
+   # DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm_v2
+   # To enable pgvector for embedding vectors: CREATE EXTENSION vector;
    
    # Azure OpenAI
    AZURE_OPENAI_API_KEY=your-azure-api-key
    AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
    AZURE_OPENAI_DEPLOYMENT=gpt-4o
    AZURE_OPENAI_API_VERSION=2024-02-15-preview
+   
+   # Azure OpenAI Embedding Deployments (optional)
+   # AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
+   # AZURE_OPENAI_EMBEDDING_DEPLOYMENTS=text-embedding-3-small,text-embedding-3-large
    
    # OpenAI (optional)
    OPENAI_API_KEY=your-openai-api-key
@@ -54,8 +64,22 @@ Study Query LLM is a web application for running LLM inference experiments acros
    ```
 
 5. **Initialize the database**
+   
+   **For V1 (SQLite) schema:**
    ```bash
    python -c "from study_query_llm.db.connection import DatabaseConnection; from study_query_llm.config import config; db = DatabaseConnection(config.database.connection_string); db.init_db()"
+   ```
+   
+   **For V2 (PostgreSQL) schema:**
+   ```bash
+   python -c "from study_query_llm.db.connection_v2 import DatabaseConnectionV2; import os; db = DatabaseConnectionV2(os.getenv('DATABASE_URL')); db.init_db()"
+   ```
+   
+   **Migrating from V1 to V2:**
+   ```bash
+   LEGACY_DATABASE_URL=sqlite:///study_query_llm.db \
+   DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm_v2 \
+   python scripts/migrate_v1_to_v2.py
    ```
 
 ### Running the Application

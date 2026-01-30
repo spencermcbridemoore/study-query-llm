@@ -36,7 +36,7 @@ from .preprocessors import PromptPreprocessor
 from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
-    from ..db.inference_repository import InferenceRepository
+    from ..db.raw_call_repository import RawCallRepository
 
 logger = get_logger(__name__)
 
@@ -58,7 +58,7 @@ class InferenceService:
     def __init__(
         self,
         provider: BaseLLMProvider,
-        repository: Optional["InferenceRepository"] = None,
+        repository: Optional["RawCallRepository"] = None,
         max_retries: int = 3,
         initial_wait: float = 1.0,
         max_wait: float = 10.0,
@@ -74,7 +74,7 @@ class InferenceService:
 
         Args:
             provider: Any LLM provider implementing BaseLLMProvider
-            repository: Optional database repository for logging (Phase 3)
+            repository: Optional v2 RawCallRepository for logging
             max_retries: Maximum number of retry attempts (default: 3)
             initial_wait: Initial wait time in seconds for exponential backoff (default: 1.0)
             max_wait: Maximum wait time in seconds between retries (default: 10.0)
@@ -163,13 +163,80 @@ class InferenceService:
                 template=template,
             )
 
+        # Build request_json for logging (before call, in case it fails)
+        request_json = {
+            'prompt': original_prompt,  # Store original prompt, not processed
+            'temperature': temperature,
+        }
+        if max_tokens is not None:
+            request_json['max_tokens'] = max_tokens
+        if template:
+            request_json['template'] = template
+
         # Call the provider with retry logic
-        provider_response: ProviderResponse = await self._call_with_retry(
-            prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs
-        )
+        try:
+            provider_response: ProviderResponse = await self._call_with_retry(
+                prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
+        except Exception as e:
+            # Log failure to v2 database if repository provided
+            if self.repository:
+                try:
+                    error_json = {
+                        'error_type': type(e).__name__,
+                        'error_message': str(e),
+                    }
+                    metadata_json = {}
+                    if batch_id:
+                        metadata_json['batch_id'] = batch_id
+                    
+                    # Extract model name from provider
+                    model_name = None
+                    if hasattr(self.provider, 'deployment_name'):
+                        model_name = self.provider.deployment_name
+                    elif hasattr(self.provider, 'model'):
+                        model_name = self.provider.model
+                    
+                    failed_call_id = self.repository.insert_raw_call(
+                        provider=self.provider.get_provider_name(),
+                        request_json=request_json,
+                        model=model_name,
+                        modality='text',
+                        status='failed',
+                        response_json=None,
+                        error_json=error_json,
+                        latency_ms=None,
+                        tokens_json=None,
+                        metadata_json=metadata_json,
+                    )
+                    
+                    # Add to group if batch_id provided
+                    if batch_id:
+                        # Find or create group for this batch_id
+                        # For simplicity, create new group (could be optimized)
+                        group_id = self.repository.create_group(
+                            group_type='batch',
+                            name=f'batch_{batch_id}',
+                            description=f'Batch inference group',
+                            metadata_json={'batch_id': batch_id}
+                        )
+                        self.repository.add_call_to_group(group_id, failed_call_id)
+                    
+                    logger.warning(
+                        f"Failed inference logged to database: id={failed_call_id}, "
+                        f"provider={self.provider.get_provider_name()}, error={str(e)}"
+                    )
+                except Exception as db_error:
+                    logger.error(
+                        f"Failed to log failed inference to database: {str(db_error)}",
+                        exc_info=True
+                    )
+            
+            # Re-raise the original exception
+            raise
 
         # Build standardized response
         result = {
@@ -192,19 +259,77 @@ class InferenceService:
             result['original_prompt'] = original_prompt
             result['processed_prompt'] = prompt
 
-        # Persist to database if repository provided
+        # Persist to database if repository provided (v2 schema)
         inference_id = None
         if self.repository:
             try:
-                inference_id = self.repository.insert_inference_run(
-                    prompt=original_prompt,  # Store original prompt, not processed
-                    response=provider_response.text,
+                # Build request_json with prompt
+                request_json = {
+                    'prompt': original_prompt,  # Store original prompt, not processed
+                    'temperature': temperature,
+                }
+                if max_tokens is not None:
+                    request_json['max_tokens'] = max_tokens
+                if template:
+                    request_json['template'] = template
+                
+                # Build response_json
+                response_json = {
+                    'text': provider_response.text,
+                }
+                
+                # Build tokens_json from provider response
+                tokens_json = None
+                if provider_response.tokens:
+                    tokens_json = {
+                        'total_tokens': provider_response.tokens,
+                    }
+                    if hasattr(provider_response, 'prompt_tokens'):
+                        tokens_json['prompt_tokens'] = provider_response.prompt_tokens
+                    if hasattr(provider_response, 'completion_tokens'):
+                        tokens_json['completion_tokens'] = provider_response.completion_tokens
+                
+                # Build metadata_json
+                metadata_json = provider_response.metadata or {}
+                if batch_id:
+                    metadata_json['batch_id'] = batch_id
+                
+                # Extract model name from provider or metadata
+                model_name = None
+                if hasattr(self.provider, 'deployment_name'):
+                    model_name = self.provider.deployment_name
+                elif hasattr(self.provider, 'model'):
+                    model_name = self.provider.model
+                elif provider_response.metadata:
+                    model_name = provider_response.metadata.get('model')
+                
+                # Insert into v2 RawCall table
+                inference_id = self.repository.insert_raw_call(
                     provider=provider_response.provider,
-                    tokens=provider_response.tokens,
+                    request_json=request_json,
+                    model=model_name,
+                    modality='text',
+                    status='success',
+                    response_json=response_json,
                     latency_ms=provider_response.latency_ms,
-                    metadata=provider_response.metadata,
-                    batch_id=batch_id
+                    tokens_json=tokens_json,
+                    metadata_json=metadata_json,
                 )
+                
+                # If batch_id provided, create/update group
+                if batch_id:
+                    # Try to find existing group with this batch_id
+                    # For now, create a new group for each batch_id
+                    # (Could be optimized to reuse groups)
+                    group_id = self.repository.create_group(
+                        group_type='batch',
+                        name=f'batch_{batch_id}',
+                        description=f'Batch inference group',
+                        metadata_json={'batch_id': batch_id}
+                    )
+                    self.repository.add_call_to_group(group_id, inference_id)
+                    result['group_id'] = group_id
+                
                 result['id'] = inference_id
                 if batch_id:
                     result['batch_id'] = batch_id

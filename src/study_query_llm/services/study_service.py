@@ -8,7 +8,7 @@ transforming raw database queries into analysis-ready DataFrames.
 import pandas as pd
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from ..db.inference_repository import InferenceRepository
+from ..db.raw_call_repository import RawCallRepository
 
 
 class StudyService:
@@ -21,7 +21,7 @@ class StudyService:
     
     Usage:
         with db.session_scope() as session:
-            repo = InferenceRepository(session)
+            repo = RawCallRepository(session)
             study = StudyService(repo)
             
             # Get provider comparison
@@ -31,12 +31,12 @@ class StudyService:
             recent = study.get_recent_inferences(limit=10)
     """
 
-    def __init__(self, repository: InferenceRepository):
+    def __init__(self, repository: RawCallRepository):
         """
         Initialize the study service.
         
         Args:
-            repository: InferenceRepository instance for database access
+            repository: RawCallRepository instance for database access (v2 schema)
         """
         self.repository = repository
 
@@ -87,26 +87,45 @@ class StudyService:
             - id, prompt (truncated), response (truncated), provider,
               tokens, latency_ms, created_at
         """
-        runs = self.repository.query_inferences(
+        calls = self.repository.query_raw_calls(
             provider=provider,
+            modality='text',
+            status='success',  # Only show successful calls
             limit=limit
         )
 
-        if not runs:
+        if not calls:
             return pd.DataFrame()
 
-        data = [
-            {
-                'id': run.id,
-                'prompt': run.prompt[:100] + '...' if len(run.prompt) > 100 else run.prompt,
-                'response': run.response[:100] + '...' if len(run.response) > 100 else run.response,
-                'provider': run.provider,
-                'tokens': run.tokens,
-                'latency_ms': run.latency_ms,
-                'created_at': run.created_at
-            }
-            for run in runs
-        ]
+        data = []
+        for call in calls:
+            # Extract prompt from request_json
+            request = call.request_json or {}
+            prompt = request.get('prompt', '') if isinstance(request, dict) else str(request)
+            
+            # Extract response from response_json
+            response = ''
+            if call.response_json and isinstance(call.response_json, dict):
+                response = call.response_json.get('text', '')
+            
+            # Extract tokens from tokens_json
+            tokens = None
+            if call.tokens_json and isinstance(call.tokens_json, dict):
+                tokens = (
+                    call.tokens_json.get('total_tokens') or
+                    call.tokens_json.get('totalTokens') or
+                    0
+                )
+            
+            data.append({
+                'id': call.id,
+                'prompt': prompt[:100] + '...' if len(str(prompt)) > 100 else str(prompt),
+                'response': response[:100] + '...' if len(str(response)) > 100 else str(response),
+                'provider': call.provider,
+                'tokens': tokens,
+                'latency_ms': call.latency_ms,
+                'created_at': call.created_at
+            })
 
         df = pd.DataFrame(data)
         
@@ -139,23 +158,35 @@ class StudyService:
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
 
-        runs = self.repository.query_inferences(
+        calls = self.repository.query_raw_calls(
+            modality='text',
+            status='success',  # Only successful calls
             date_range=(start_date, end_date),
             limit=10000  # Large limit for aggregation
         )
 
-        if not runs:
+        if not calls:
             return pd.DataFrame()
 
-        df = pd.DataFrame([
-            {
-                'created_at': run.created_at,
-                'provider': run.provider,
-                'tokens': run.tokens or 0,
-                'latency_ms': run.latency_ms or 0.0
-            }
-            for run in runs
-        ])
+        data = []
+        for call in calls:
+            # Extract tokens from tokens_json
+            tokens = 0
+            if call.tokens_json and isinstance(call.tokens_json, dict):
+                tokens = (
+                    call.tokens_json.get('total_tokens') or
+                    call.tokens_json.get('totalTokens') or
+                    0
+                )
+            
+            data.append({
+                'created_at': call.created_at,
+                'provider': call.provider,
+                'tokens': tokens,
+                'latency_ms': call.latency_ms or 0.0
+            })
+
+        df = pd.DataFrame(data)
 
         if df.empty:
             return pd.DataFrame()
@@ -191,21 +222,29 @@ class StudyService:
             Columns include: id, prompt, response (truncated), provider, created_at
             Empty DataFrame if no matches found.
         """
-        runs = self.repository.search_by_prompt(search_term, limit=limit)
+        calls = self.repository.search_by_prompt(search_term, limit=limit)
 
-        if not runs:
+        if not calls:
             return pd.DataFrame()
 
-        data = [
-            {
-                'id': run.id,
-                'prompt': run.prompt,
-                'response': run.response[:200] + '...' if len(run.response) > 200 else run.response,
-                'provider': run.provider,
-                'created_at': run.created_at
-            }
-            for run in runs
-        ]
+        data = []
+        for call in calls:
+            # Extract prompt from request_json
+            request = call.request_json or {}
+            prompt = request.get('prompt', '') if isinstance(request, dict) else str(request)
+            
+            # Extract response from response_json
+            response = ''
+            if call.response_json and isinstance(call.response_json, dict):
+                response = call.response_json.get('text', '')
+            
+            data.append({
+                'id': call.id,
+                'prompt': str(prompt),
+                'response': str(response)[:200] + '...' if len(str(response)) > 200 else str(response),
+                'provider': call.provider,
+                'created_at': call.created_at
+            })
 
         df = pd.DataFrame(data)
         

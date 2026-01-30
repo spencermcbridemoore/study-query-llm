@@ -1,30 +1,30 @@
 """
-Tests for batch tracking in InferenceService.
+Tests for batch tracking in InferenceService (v2 schema).
 
 Tests that run_sampling_inference and run_batch_inference properly
-generate and use batch_id for grouping runs.
+generate and use batch_id for grouping runs via v2 Group/GroupMember tables.
 """
 
 import pytest
 import uuid
 from study_query_llm.services.inference_service import InferenceService
-from study_query_llm.db.connection import DatabaseConnection
-from study_query_llm.db.inference_repository import InferenceRepository
+from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.raw_call_repository import RawCallRepository
 
 
 @pytest.fixture
 def db_connection():
-    """Fixture for in-memory SQLite database."""
-    db = DatabaseConnection("sqlite:///:memory:")
+    """Fixture for in-memory SQLite database (v2 schema)."""
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
     db.init_db()
     return db
 
 
 @pytest.mark.asyncio
 async def test_sampling_inference_generates_batch_id(counting_provider, db_connection):
-    """Test that sampling inference generates a batch_id."""
+    """Test that sampling inference generates a batch_id (v2)."""
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
         results = await service.run_sampling_inference("Test prompt", n=3)
@@ -41,9 +41,9 @@ async def test_sampling_inference_generates_batch_id(counting_provider, db_conne
 
 @pytest.mark.asyncio
 async def test_sampling_inference_with_custom_batch_id(counting_provider, db_connection):
-    """Test that sampling inference can use a custom batch_id."""
+    """Test that sampling inference can use a custom batch_id (v2)."""
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         custom_batch_id = str(uuid.uuid4())
         
@@ -60,9 +60,9 @@ async def test_sampling_inference_with_custom_batch_id(counting_provider, db_con
 
 @pytest.mark.asyncio
 async def test_batch_inference_generates_batch_id(counting_provider, db_connection):
-    """Test that batch inference generates a batch_id."""
+    """Test that batch inference generates a batch_id (v2)."""
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
         results = await service.run_batch_inference(
@@ -78,9 +78,9 @@ async def test_batch_inference_generates_batch_id(counting_provider, db_connecti
 
 @pytest.mark.asyncio
 async def test_batch_inference_with_custom_batch_id(counting_provider, db_connection):
-    """Test that batch inference can use a custom batch_id."""
+    """Test that batch inference can use a custom batch_id (v2)."""
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         custom_batch_id = str(uuid.uuid4())
         
@@ -96,9 +96,9 @@ async def test_batch_inference_with_custom_batch_id(counting_provider, db_connec
 
 @pytest.mark.asyncio
 async def test_single_inference_without_batch_id(counting_provider, db_connection):
-    """Test that single inference doesn't require batch_id."""
+    """Test that single inference doesn't require batch_id (v2)."""
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
         result = await service.run_inference("Test prompt")
@@ -109,9 +109,9 @@ async def test_single_inference_without_batch_id(counting_provider, db_connectio
 
 @pytest.mark.asyncio
 async def test_single_inference_with_batch_id(counting_provider, db_connection):
-    """Test that single inference can accept batch_id."""
+    """Test that single inference can accept batch_id (v2)."""
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         batch_id = str(uuid.uuid4())
         
@@ -122,9 +122,9 @@ async def test_single_inference_with_batch_id(counting_provider, db_connection):
 
 @pytest.mark.asyncio
 async def test_sampling_inference_stored_in_database(counting_provider, db_connection):
-    """Test that sampling inference runs are stored with batch_id in database."""
+    """Test that sampling inference runs are stored with batch_id in database (v2)."""
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
         results = await service.run_sampling_inference("Test prompt", n=3)
@@ -132,20 +132,32 @@ async def test_sampling_inference_stored_in_database(counting_provider, db_conne
         
         session.commit()
     
-    # Verify in database
+    # Verify in database via groups
+    from study_query_llm.db.models_v2 import Group
+    
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
-        batch_runs = repo.get_inferences_by_batch_id(batch_id)
+        repo = RawCallRepository(session)
+        # Find group with this batch_id
+        groups = session.query(Group).filter_by(group_type='batch').all()
+        # Find the group with matching batch_id in metadata
+        matching_group = None
+        for group in groups:
+            if group.metadata_json and group.metadata_json.get('batch_id') == batch_id:
+                matching_group = group
+                break
         
-        assert len(batch_runs) == 3
-        assert all(run.batch_id == batch_id for run in batch_runs)
+        assert matching_group is not None
+        batch_calls = repo.get_calls_in_group(matching_group.id)
+        assert len(batch_calls) == 3
 
 
 @pytest.mark.asyncio
 async def test_batch_inference_stored_in_database(counting_provider, db_connection):
-    """Test that batch inference runs are stored with batch_id in database."""
+    """Test that batch inference runs are stored with batch_id in database (v2)."""
+    from study_query_llm.db.models_v2 import Group
+    
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
         results = await service.run_batch_inference(
@@ -155,20 +167,30 @@ async def test_batch_inference_stored_in_database(counting_provider, db_connecti
         
         session.commit()
     
-    # Verify in database
+    # Verify in database via groups
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
-        batch_runs = repo.get_inferences_by_batch_id(batch_id)
+        repo = RawCallRepository(session)
+        # Find group with this batch_id
+        groups = session.query(Group).filter_by(group_type='batch').all()
+        # Find the group with matching batch_id in metadata
+        matching_group = None
+        for group in groups:
+            if group.metadata_json and group.metadata_json.get('batch_id') == batch_id:
+                matching_group = group
+                break
         
-        assert len(batch_runs) == 3
-        assert all(run.batch_id == batch_id for run in batch_runs)
+        assert matching_group is not None
+        batch_calls = repo.get_calls_in_group(matching_group.id)
+        assert len(batch_calls) == 3
 
 
 @pytest.mark.asyncio
 async def test_different_batches_have_different_ids(counting_provider, db_connection):
-    """Test that different batch operations generate different batch_ids."""
+    """Test that different batch operations generate different batch_ids (v2)."""
+    from study_query_llm.db.models_v2 import Group
+    
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
+        repo = RawCallRepository(session)
         service = InferenceService(counting_provider, repository=repo)
         
         # Run two separate sampling inferences
@@ -183,12 +205,26 @@ async def test_different_batches_have_different_ids(counting_provider, db_connec
         
         session.commit()
     
-    # Verify they're separate in database
+    # Verify they're separate in database via groups
     with db_connection.session_scope() as session:
-        repo = InferenceRepository(session)
-        batch_1_runs = repo.get_inferences_by_batch_id(batch_id_1)
-        batch_2_runs = repo.get_inferences_by_batch_id(batch_id_2)
+        repo = RawCallRepository(session)
+        groups = session.query(Group).filter_by(group_type='batch').all()
         
-        assert len(batch_1_runs) == 2
-        assert len(batch_2_runs) == 2
+        group_1 = None
+        group_2 = None
+        for group in groups:
+            if group.metadata_json and group.metadata_json.get('batch_id') == batch_id_1:
+                group_1 = group
+            if group.metadata_json and group.metadata_json.get('batch_id') == batch_id_2:
+                group_2 = group
+        
+        assert group_1 is not None
+        assert group_2 is not None
+        assert group_1.id != group_2.id
+        
+        batch_1_calls = repo.get_calls_in_group(group_1.id)
+        batch_2_calls = repo.get_calls_in_group(group_2.id)
+        
+        assert len(batch_1_calls) == 2
+        assert len(batch_2_calls) == 2
 

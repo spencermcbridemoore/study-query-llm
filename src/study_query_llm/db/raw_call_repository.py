@@ -192,23 +192,74 @@ class RawCallRepository:
         """
         Get aggregate statistics by provider.
         
+        Extracts token counts from tokens_json and calculates averages/totals.
+        
         Returns:
-            List of dicts with provider statistics
+            List of dicts with provider statistics:
+            [
+                {
+                    'provider': 'azure_openai_gpt-4',
+                    'count': 100,
+                    'avg_tokens': 150.5,
+                    'avg_latency_ms': 1250.3,
+                    'total_tokens': 15050
+                },
+                ...
+            ]
         """
-        results = self.session.query(
-            RawCall.provider,
-            func.count(RawCall.id).label('count'),
-            func.avg(RawCall.latency_ms).label('avg_latency_ms'),
-        ).group_by(RawCall.provider).all()
-
-        return [
-            {
-                'provider': r.provider,
-                'count': r.count,
-                'avg_latency_ms': round(float(r.avg_latency_ms), 2) if r.avg_latency_ms else 0,
-            }
-            for r in results
-        ]
+        # Get all raw calls to extract tokens from tokens_json
+        all_calls = self.session.query(RawCall).all()
+        
+        # Group by provider and calculate stats
+        provider_data = {}
+        for call in all_calls:
+            provider = call.provider
+            if provider not in provider_data:
+                provider_data[provider] = {
+                    'count': 0,
+                    'latencies': [],
+                    'tokens': []
+                }
+            
+            provider_data[provider]['count'] += 1
+            if call.latency_ms:
+                provider_data[provider]['latencies'].append(call.latency_ms)
+            
+            # Extract total tokens from tokens_json
+            if call.tokens_json and isinstance(call.tokens_json, dict):
+                # Try common token field names
+                total_tokens = (
+                    call.tokens_json.get('total_tokens') or
+                    call.tokens_json.get('totalTokens') or
+                    call.tokens_json.get('usage', {}).get('total_tokens') or
+                    call.tokens_json.get('usage', {}).get('totalTokens') or
+                    0
+                )
+                if total_tokens:
+                    provider_data[provider]['tokens'].append(total_tokens)
+        
+        # Build result list
+        results = []
+        for provider, data in provider_data.items():
+            avg_latency = (
+                sum(data['latencies']) / len(data['latencies'])
+                if data['latencies'] else 0
+            )
+            avg_tokens = (
+                sum(data['tokens']) / len(data['tokens'])
+                if data['tokens'] else 0
+            )
+            total_tokens = sum(data['tokens']) if data['tokens'] else 0
+            
+            results.append({
+                'provider': provider,
+                'count': data['count'],
+                'avg_tokens': round(float(avg_tokens), 2),
+                'avg_latency_ms': round(float(avg_latency), 2),
+                'total_tokens': int(total_tokens)
+            })
+        
+        return results
 
     def get_total_count(self) -> int:
         """
@@ -218,6 +269,76 @@ class RawCallRepository:
             Total count of raw calls
         """
         return self.session.query(func.count(RawCall.id)).scalar()
+
+    def get_count_by_provider(self, provider: str) -> int:
+        """
+        Get count of raw calls for a specific provider.
+        
+        Args:
+            provider: Provider name to count
+        
+        Returns:
+            Count of raw calls for the provider
+        """
+        return self.session.query(func.count(RawCall.id))\
+            .filter(RawCall.provider == provider)\
+            .scalar()
+
+    def search_by_prompt(self, search_term: str, limit: int = 50) -> List[RawCall]:
+        """
+        Search raw calls by prompt content in request_json.
+        
+        Performs case-insensitive substring search on prompt text extracted
+        from request_json. Looks for 'prompt', 'messages', or 'input' fields.
+        
+        Args:
+            search_term: Text to search for in prompts
+            limit: Maximum number of results (default: 50)
+        
+        Returns:
+            List of matching RawCall objects, ordered by created_at descending
+        """
+        # Get all text modality calls and filter in Python
+        # (JSON search in SQLAlchemy is database-specific)
+        all_calls = self.session.query(RawCall)\
+            .filter(RawCall.modality == 'text')\
+            .order_by(desc(RawCall.created_at))\
+            .limit(limit * 10)  # Get more to filter from
+            .all()
+        
+        matches = []
+        search_lower = search_term.lower()
+        
+        for call in all_calls:
+            if len(matches) >= limit:
+                break
+                
+            # Extract prompt text from request_json
+            request = call.request_json or {}
+            prompt_text = None
+            
+            # Try common prompt field names
+            if isinstance(request, dict):
+                prompt_text = (
+                    request.get('prompt') or
+                    request.get('input') or
+                    ''
+                )
+                
+                # If messages array, extract text from first user message
+                if not prompt_text and 'messages' in request:
+                    messages = request.get('messages', [])
+                    if messages and isinstance(messages, list):
+                        for msg in messages:
+                            if isinstance(msg, dict) and msg.get('role') == 'user':
+                                prompt_text = msg.get('content', '')
+                                break
+            
+            # Search in prompt text
+            if prompt_text and search_lower in str(prompt_text).lower():
+                matches.append(call)
+        
+        return matches[:limit]
 
     # ========== GROUP OPERATIONS ==========
 

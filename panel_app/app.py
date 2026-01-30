@@ -14,8 +14,8 @@ import traceback
 
 # Import core functionality
 from study_query_llm.config import config
-from study_query_llm.db.connection import DatabaseConnection
-from study_query_llm.db.inference_repository import InferenceRepository
+from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.providers.factory import ProviderFactory
 from study_query_llm.services.inference_service import InferenceService
 from study_query_llm.services.study_service import StudyService
@@ -46,20 +46,20 @@ pn.extension(
 
 
 # Global state for database and services
-_db_connection: Optional[DatabaseConnection] = None
+_db_connection: Optional[DatabaseConnectionV2] = None
 _inference_service: Optional[InferenceService] = None
 _inference_service_provider: Optional[str] = None  # Track which provider the service is for
 _study_service: Optional[StudyService] = None
 
 
-def get_db_connection() -> DatabaseConnection:
-    """Get or create database connection."""
+def get_db_connection() -> DatabaseConnectionV2:
+    """Get or create v2 database connection."""
     global _db_connection
     if _db_connection is None:
-        logger.info("Initializing database connection...")
-        _db_connection = DatabaseConnection(config.database.connection_string)
+        logger.info("Initializing v2 database connection...")
+        _db_connection = DatabaseConnectionV2(config.database.connection_string)
         _db_connection.init_db()
-        logger.info("Database connection established")
+        logger.info("V2 database connection established")
     return _db_connection
 
 
@@ -93,7 +93,7 @@ def get_inference_service(provider_name: str, deployment_name: Optional[str] = N
     # Create repository for database logging (use session scope for proper transaction handling)
     db = get_db_connection()
     session = db.get_session()
-    repository = InferenceRepository(session)
+    repository = RawCallRepository(session)
     
     # Create service with repository (always create new to ensure fresh provider)
     service = InferenceService(provider, repository=repository)
@@ -108,7 +108,7 @@ def get_study_service() -> StudyService:
     if _study_service is None:
         db = get_db_connection()
         session = db.get_session()
-        repository = InferenceRepository(session)
+        repository = RawCallRepository(session)
         _study_service = StudyService(repository)
     return _study_service
 
@@ -296,8 +296,9 @@ def create_inference_ui() -> pn.viewable.Viewable:
             # Run inference within database session scope
             db = get_db_connection()
             with db.session_scope() as session:
-                # Update repository session
-                service.repository.session = session
+                # Create new repository with session for this transaction
+                repository = RawCallRepository(session)
+                service.repository = repository
                 
                 result = await service.run_inference(
                     prompt_input.value,
@@ -379,7 +380,7 @@ def create_analytics_ui() -> pn.viewable.Viewable:
             logger.debug("Updating analytics display...")
             db = get_db_connection()
             with db.session_scope() as session:
-                repository = InferenceRepository(session)
+                repository = RawCallRepository(session)
                 study_service = StudyService(repository)
                 
                 # Get summary stats

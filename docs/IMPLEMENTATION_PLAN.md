@@ -133,386 +133,77 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ### Step 2.1: Basic Inference Service ✅
 
-**Files to create:**
-- `panel_app/services/__init__.py`
-- `panel_app/services/inference_service.py`
+**Implementation:** [`src/study_query_llm/services/inference_service.py`](src/study_query_llm/services/inference_service.py)
 
-**What to build:**
+**Design:**
+- Wraps `BaseLLMProvider` with business logic layer
+- Standardized response format (dict with 'response' and 'metadata')
+- Optional repository parameter for database logging (added in Phase 3)
 
-```python
-# panel_app/services/inference_service.py
-
-from typing import Optional
-from panel_app.providers.base import BaseLLMProvider, ProviderResponse
-
-class InferenceService:
-    """
-    Core service for running LLM inferences.
-    Handles business logic like retry, preprocessing, logging.
-    """
-
-    def __init__(
-        self,
-        provider: BaseLLMProvider,
-        repository=None  # Optional - we'll add this in Phase 3
-    ):
-        self.provider = provider
-        self.repository = repository
-
-    async def run_inference(self, prompt: str, **kwargs) -> dict:
-        """
-        Run a single inference through the provider.
-
-        Args:
-            prompt: User prompt
-            **kwargs: Provider-specific parameters
-
-        Returns:
-            Dict with response and metadata
-        """
-        # For now, just pass through to provider
-        response = await self.provider.complete(prompt, **kwargs)
-
-        return {
-            'response': response.text,
-            'metadata': {
-                'provider': response.provider,
-                'tokens': response.tokens,
-                'latency_ms': response.latency_ms,
-            }
-        }
-```
-
-**Test:**
-```python
-# test_inference_service.py
-from panel_app.providers import ProviderFactory
-from panel_app.services.inference_service import InferenceService
-
-async def test_service():
-    provider = ProviderFactory.create(
-        "openai",
-        api_key="YOUR_KEY",
-        model="gpt-4"
-    )
-
-    service = InferenceService(provider)
-    result = await service.run_inference("Count to 5")
-
-    print(f"Response: {result['response']}")
-    print(f"Metadata: {result['metadata']}")
-
-import asyncio
-asyncio.run(test_service())
-```
-
-**Validation:** ✓ Service wraps provider correctly
+**Tests:** [`tests/test_services/test_inference.py`](tests/test_services/test_inference.py)
 
 ---
 
 ### Step 2.2: Add Retry Logic ✅
 
-**Update:** `panel_app/services/inference_service.py`
+**Implementation:** [`src/study_query_llm/services/inference_service.py`](src/study_query_llm/services/inference_service.py)
 
-**Dependencies:**
-- Install: `pip install tenacity` (for retry decorators)
+**Design:**
+- Uses `tenacity` library for retry decorators
+- Exponential backoff (1s → 10s max)
+- Retries on `TimeoutError`, `ConnectionError`, and other transient exceptions
+- Configurable max_retries and initial_wait
 
-**What to add:**
+**Dependencies:** `pip install tenacity`
 
-```python
-import asyncio
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type
-)
-
-class InferenceService:
-    def __init__(
-        self,
-        provider: BaseLLMProvider,
-        repository=None,
-        max_retries: int = 3,
-        initial_wait: float = 1.0
-    ):
-        self.provider = provider
-        self.repository = repository
-        self.max_retries = max_retries
-        self.initial_wait = initial_wait
-
-    async def run_inference(self, prompt: str, **kwargs) -> dict:
-        """Run inference with retry logic"""
-        response = await self._call_with_retry(prompt, **kwargs)
-
-        return {
-            'response': response.text,
-            'metadata': {
-                'provider': response.provider,
-                'tokens': response.tokens,
-                'latency_ms': response.latency_ms,
-            }
-        }
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((TimeoutError, ConnectionError))
-    )
-    async def _call_with_retry(self, prompt: str, **kwargs) -> ProviderResponse:
-        """Internal method with retry decorator"""
-        return await self.provider.complete(prompt, **kwargs)
-```
-
-**Test:** Simulate network errors and verify retry behavior
-
-**Validation:** ✓ Service retries on transient errors
+**Test strategy:** Simulate network errors and verify retry behavior
 
 ---
 
 ### Step 2.3: Add Prompt Preprocessing ✅
 
-**Files to create:**
-- `panel_app/services/preprocessors.py`
+**Implementation:** 
+- [`src/study_query_llm/services/preprocessors.py`](src/study_query_llm/services/preprocessors.py)
+- Integrated into [`src/study_query_llm/services/inference_service.py`](src/study_query_llm/services/inference_service.py)
 
-**What to build:**
+**Design:**
+- `PromptPreprocessor` class with static methods:
+  - `clean_whitespace()`: Normalize whitespace
+  - `apply_template()`: Apply prompt templates
+  - `truncate()`: Limit prompt length (default 10k chars)
+  - `remove_pii()`: Basic PII removal (emails, phone numbers)
+- Optional preprocessing flag in `InferenceService`
 
-```python
-# panel_app/services/preprocessors.py
-
-import re
-from typing import Optional
-
-class PromptPreprocessor:
-    """Utilities for preprocessing prompts before sending to LLM"""
-
-    @staticmethod
-    def clean_whitespace(prompt: str) -> str:
-        """Normalize whitespace"""
-        return " ".join(prompt.split())
-
-    @staticmethod
-    def apply_template(prompt: str, template: str) -> str:
-        """Apply a prompt template"""
-        return template.format(user_input=prompt)
-
-    @staticmethod
-    def truncate(prompt: str, max_chars: int = 10000) -> str:
-        """Truncate to max length"""
-        if len(prompt) > max_chars:
-            return prompt[:max_chars] + "..."
-        return prompt
-
-    @staticmethod
-    def remove_pii(prompt: str) -> str:
-        """Basic PII removal (emails, phone numbers)"""
-        # Remove emails
-        prompt = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]', prompt)
-        # Remove phone numbers (US format)
-        prompt = re.sub(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', '[PHONE]', prompt)
-        return prompt
-```
-
-**Update:** `panel_app/services/inference_service.py`
-
-```python
-from .preprocessors import PromptPreprocessor
-
-class InferenceService:
-    def __init__(self, provider, repository=None, preprocess: bool = True):
-        self.provider = provider
-        self.repository = repository
-        self.preprocess = preprocess
-
-    async def run_inference(self, prompt: str, template: Optional[str] = None, **kwargs) -> dict:
-        """Run inference with preprocessing"""
-
-        # Preprocess prompt
-        if self.preprocess:
-            prompt = PromptPreprocessor.clean_whitespace(prompt)
-            prompt = PromptPreprocessor.truncate(prompt)
-            if template:
-                prompt = PromptPreprocessor.apply_template(prompt, template)
-
-        # Call provider with retry
-        response = await self._call_with_retry(prompt, **kwargs)
-
-        return {...}
-```
-
-**Test:**
-```python
-def test_preprocessing():
-    preprocessor = PromptPreprocessor()
-
-    # Test whitespace
-    assert preprocessor.clean_whitespace("hello   world") == "hello world"
-
-    # Test PII removal
-    text = "Contact me at test@example.com or 555-123-4567"
-    cleaned = preprocessor.remove_pii(text)
-    assert "@" not in cleaned
-    assert "555" not in cleaned
-```
-
-**Validation:** ✓ Prompts are preprocessed correctly
+**Tests:** [`tests/test_services/test_preprocessing.py`](tests/test_services/test_preprocessing.py)
 
 ---
 
-### Step 2.4: Multi-Turn Conversation Service ⬜ (Optional for now)
+### Step 2.4: Multi-Turn Conversation Service ⬜ (Optional)
 
 **Files to create:**
-- `panel_app/services/conversation_service.py`
+- `src/study_query_llm/services/conversation_service.py`
 
-**What to build:**
+**Design:**
+- Manages conversation state (in-memory dict keyed by conversation_id)
+- Supports system prompts
+- Maintains message history (role/content pairs)
+- Assumes OpenAI-style chat format (messages array)
 
-```python
-# panel_app/services/conversation_service.py
-
-from typing import Optional
-from panel_app.providers.base import BaseLLMProvider
-
-class ConversationService:
-    """Manage multi-turn conversations with LLMs"""
-
-    def __init__(self, provider: BaseLLMProvider):
-        self.provider = provider
-        self.conversations: dict[str, list[dict]] = {}
-
-    def start_conversation(self, conversation_id: str, system_prompt: Optional[str] = None):
-        """Initialize a new conversation"""
-        self.conversations[conversation_id] = []
-        if system_prompt:
-            self.conversations[conversation_id].append({
-                "role": "system",
-                "content": system_prompt
-            })
-
-    async def send_message(self, conversation_id: str, message: str) -> dict:
-        """Send message in conversation context"""
-        if conversation_id not in self.conversations:
-            self.start_conversation(conversation_id)
-
-        # Add user message
-        self.conversations[conversation_id].append({
-            "role": "user",
-            "content": message
-        })
-
-        # Get response (provider needs to support messages parameter)
-        # Note: This assumes OpenAI-style chat format
-        response = await self.provider.complete(
-            messages=self.conversations[conversation_id]
-        )
-
-        # Add assistant response
-        self.conversations[conversation_id].append({
-            "role": "assistant",
-            "content": response.text
-        })
-
-        return {
-            'response': response.text,
-            'history_length': len(self.conversations[conversation_id])
-        }
-
-    def get_conversation(self, conversation_id: str) -> list[dict]:
-        """Retrieve conversation history"""
-        return self.conversations.get(conversation_id, [])
-
-    def clear_conversation(self, conversation_id: str):
-        """Clear conversation history"""
-        if conversation_id in self.conversations:
-            del self.conversations[conversation_id]
-```
-
-**Test:** Have a multi-turn conversation
-
-**Validation:** ✓ Conversation context maintained across turns
+**Test strategy:** Verify conversation context maintained across multiple turns
 
 ---
 
 ### Step 2.5: Request Batching Service ⚠️ (batching/sampling in InferenceService; no dedup)
 
-**Files to create:**
-- `panel_app/services/batch_service.py`
+**Design:**
+- Batching and sampling functionality exists in `InferenceService`
+- Deduplication service not yet implemented
 
-**What to build:**
+**Still missing:**
+- Request deduplication service for identical concurrent requests
+- Hash-based request identity for de-duping
 
-```python
-# panel_app/services/batch_service.py
-
-import asyncio
-import hashlib
-from typing import Optional
-from panel_app.providers.base import BaseLLMProvider
-
-class BatchInferenceService:
-    """Deduplicate and batch identical concurrent requests"""
-
-    def __init__(self, provider: BaseLLMProvider):
-        self.provider = provider
-        self.pending_requests: dict[str, asyncio.Future] = {}
-
-    async def run_inference_with_dedup(self, prompt: str, **kwargs) -> dict:
-        """Run inference, deduplicating identical concurrent requests"""
-
-        # Hash prompt + kwargs to create request ID
-        request_hash = self._hash_request(prompt, **kwargs)
-
-        # Check if identical request is already in flight
-        if request_hash in self.pending_requests:
-            # Wait for existing request
-            return await self.pending_requests[request_hash]
-
-        # Create new future for this request
-        future = asyncio.create_task(self._execute_request(prompt, **kwargs))
-        self.pending_requests[request_hash] = future
-
-        try:
-            result = await future
-            return result
-        finally:
-            # Clean up
-            del self.pending_requests[request_hash]
-
-    async def _execute_request(self, prompt: str, **kwargs) -> dict:
-        """Execute the actual provider call"""
-        response = await self.provider.complete(prompt, **kwargs)
-        return {
-            'response': response.text,
-            'metadata': {
-                'provider': response.provider,
-                'tokens': response.tokens,
-            }
-        }
-
-    @staticmethod
-    def _hash_request(prompt: str, **kwargs) -> str:
-        """Create hash of prompt + parameters"""
-        content = f"{prompt}:{sorted(kwargs.items())}"
-        return hashlib.sha256(content.encode()).hexdigest()
-```
-
-**Test:**
-```python
-async def test_dedup():
-    provider = ProviderFactory.create("openai", api_key="...")
-    batch_service = BatchInferenceService(provider)
-
-    # Send 5 identical requests concurrently
-    tasks = [
-        batch_service.run_inference_with_dedup("Say hello")
-        for _ in range(5)
-    ]
-
-    results = await asyncio.gather(*tasks)
-
-    # Should only call provider once
-    print(f"Got {len(results)} results from 1 API call")
-```
-
-**Validation:** ✓ Duplicate requests share single API call
+**Test strategy:** Verify duplicate concurrent requests share single API call
 
 ---
 

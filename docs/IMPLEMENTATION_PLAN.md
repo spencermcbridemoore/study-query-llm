@@ -356,126 +356,54 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ### Step 5.1: Simple Inference UI ✅
 
-**Update:** `panel_app/app.py`
+**Implementation:** [`panel_app/app.py`](panel_app/app.py)
 
-**Dependencies:**
-- Install: `pip install hvplot holoviews bokeh`
+**Design:**
+- Panel-based web interface
+- Provider selection dropdown
+- Prompt input text area
+- Run inference button
+- Response display with metadata (tokens, latency)
 
-**What to build:**
+**Dependencies:** `pip install panel hvplot holoviews bokeh`
 
-See the detailed GUI implementation in ARCHITECTURE.md under "Presentation Layer"
-
-Key components:
-1. Provider selection dropdown
-2. Prompt input text area
-3. Run inference button
-4. Response display
-5. Metadata display (tokens, latency)
-
-**Test:** Run inference through GUI, verify it appears in database
+**Test strategy:** Run inference through GUI, verify it appears in database
 
 ---
 
 ### Step 5.2: Analytics Dashboard ⚠️ (tables/summary only)
 
-**What to add:**
-1. Provider comparison bar chart
-2. Time-series line chart
-3. Recent inferences table
-4. Summary statistics cards
-5. Search interface
+**Implementation:** [`panel_app/app.py`](panel_app/app.py)
 
-**Test:** Verify charts update with real data
+**Design:**
+- Provider comparison bar chart
+- Time-series line chart
+- Recent inferences table
+- Summary statistics cards
+- Search interface
+
+**Still missing:**
+- Full analytics charts/time-series visualization
+- Search UI integration
+
+**Test strategy:** Verify charts update with real data from `StudyService`
 
 ---
 
 ### Step 5.3: Configuration Management ⚠️ (config exists; `.env.example` missing)
 
-**Files to create:**
-- `.env.example` (missing)
-- `src/study_query_llm/config.py` (already implemented)
+**Implementation:** [`src/study_query_llm/config.py`](src/study_query_llm/config.py)
 
-**What to build:**
+**Design:**
+- Loads from environment variables (via `python-dotenv`)
+- `ProviderConfig` dataclass for each provider
+- `DatabaseConfig` for database connection
+- `AppConfig` class aggregates all configs
 
-```python
-# panel_app/config.py
+**Still missing:**
+- `.env.example` file with template environment variables
 
-import os
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class ProviderConfig:
-    """Configuration for a specific LLM provider"""
-    name: str
-    api_key: str
-    endpoint: Optional[str] = None
-    model: Optional[str] = None
-    deployment_name: Optional[str] = None
-
-@dataclass
-class DatabaseConfig:
-    """Database configuration"""
-    connection_string: str
-
-class AppConfig:
-    """Application configuration"""
-
-    def __init__(self):
-        self.database = DatabaseConfig(
-            connection_string=os.getenv(
-                "DATABASE_URL",
-                "sqlite:///study_query_llm.db"
-            )
-        )
-
-        self.providers = {
-            'azure': ProviderConfig(
-                name='azure',
-                api_key=os.getenv('AZURE_API_KEY', ''),
-                endpoint=os.getenv('AZURE_ENDPOINT', ''),
-                deployment_name=os.getenv('AZURE_DEPLOYMENT', 'gpt-4')
-            ),
-            'openai': ProviderConfig(
-                name='openai',
-                api_key=os.getenv('OPENAI_API_KEY', ''),
-                model=os.getenv('OPENAI_MODEL', 'gpt-4')
-            ),
-            'hyperbolic': ProviderConfig(
-                name='hyperbolic',
-                api_key=os.getenv('HYPERBOLIC_API_KEY', ''),
-                endpoint=os.getenv('HYPERBOLIC_ENDPOINT', '')
-            )
-        }
-
-    def get_provider_config(self, provider_name: str) -> ProviderConfig:
-        """Get configuration for specific provider"""
-        if provider_name not in self.providers:
-            raise ValueError(f"Unknown provider: {provider_name}")
-        return self.providers[provider_name]
-```
-
-**Create:** `.env.example`
-
-```bash
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm
-
-# Azure OpenAI
-AZURE_API_KEY=your-azure-key
-AZURE_ENDPOINT=https://your-endpoint.openai.azure.com/
-AZURE_DEPLOYMENT=gpt-4
-
-# OpenAI
-OPENAI_API_KEY=your-openai-key
-OPENAI_MODEL=gpt-4
-
-# Hyperbolic
-HYPERBOLIC_API_KEY=your-hyperbolic-key
-HYPERBOLIC_ENDPOINT=https://api.hyperbolic.xyz
-```
-
-**Test:** Load configuration from environment
+**Test strategy:** Verify configuration loads correctly from environment
 
 ---
 

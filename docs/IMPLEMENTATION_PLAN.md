@@ -1791,6 +1791,612 @@ Update:
 
 ---
 
+### Step 7.5: Embedding Service with Deterministic Caching ⬜
+
+**Goal:** Create a first-class embedding service that handles deployment validation, retry/backoff, deterministic caching, and persistence to v2 DB tables. This ensures embedding calls are de-duplicated, transient errors don't crash long runs, and all embeddings are stored with consistent metadata for reuse.
+
+**Dependencies:**
+- Phase 7.1 (V2 Schema with `RawCall` and `EmbeddingVector` tables)
+- Phase 1 (Provider layer for embedding clients)
+- Install: `pip install tenacity` (for retry decorators)
+
+**Files to create:**
+- `src/study_query_llm/services/embedding_service.py`
+
+**Files to update:**
+- `src/study_query_llm/services/__init__.py` (export `EmbeddingService`)
+
+**What to build:**
+
+```python
+# src/study_query_llm/services/embedding_service.py
+
+import hashlib
+import time
+from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+import numpy as np
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type
+)
+from openai import (
+    AzureOpenAI,
+    OpenAI,
+    BadRequestError,
+    InternalServerError,
+    APIConnectionError,
+    RateLimitError,
+    NotFoundError
+)
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
+
+from study_query_llm.db.models_v2 import RawCall, EmbeddingVector
+from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+
+
+@dataclass
+class EmbeddingRequest:
+    """Request parameters for embedding generation"""
+    text: str
+    model: str
+    dimensions: Optional[int] = None
+    encoding_format: str = "float"
+    provider: str = "azure_openai"
+
+
+@dataclass
+class EmbeddingResponse:
+    """Response from embedding service"""
+    vector: np.ndarray
+    model: str
+    dimension: int
+    request_hash: str
+    cached: bool
+    raw_call_id: Optional[int] = None
+
+
+class EmbeddingService:
+    """
+    Service for generating and caching embeddings with deterministic de-duplication.
+    
+    Features:
+    - Deterministic request hashing for cache hits
+    - Deployment validation (probe once, filter invalid deployments)
+    - Retry/backoff for transient API errors (502/429/timeout)
+    - DB persistence to v2 tables (RawCall + EmbeddingVector)
+    - Failure logging with error_json
+    - Optional grouping support for sweep runs
+    """
+
+    def __init__(
+        self,
+        db: DatabaseConnectionV2,
+        embedding_client: Any,  # AzureOpenAI or OpenAI
+        provider_name: str = "azure_openai",
+        max_retries: int = 6,
+        initial_wait: float = 1.0,
+        validate_deployments: bool = True
+    ):
+        """
+        Initialize embedding service.
+
+        Args:
+            db: DatabaseConnectionV2 instance
+            embedding_client: AzureOpenAI or OpenAI client instance
+            provider_name: Provider identifier ("azure_openai", "openai", etc.)
+            max_retries: Maximum retry attempts for transient errors
+            initial_wait: Initial wait time in seconds for exponential backoff
+            validate_deployments: If True, validate deployments before use
+        """
+        self.db = db
+        self.client = embedding_client
+        self.provider_name = provider_name
+        self.max_retries = max_retries
+        self.initial_wait = initial_wait
+        self.validate_deployments = validate_deployments
+        self._validated_deployments: Dict[str, bool] = {}
+
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text for consistent hashing"""
+        # Remove null bytes, strip whitespace
+        return text.replace("\x00", "").strip()
+
+    def _compute_request_hash(
+        self,
+        text: str,
+        model: str,
+        dimensions: Optional[int] = None,
+        encoding_format: str = "float",
+        provider: str = None
+    ) -> str:
+        """
+        Compute deterministic hash for request identity.
+
+        Hash includes: model + normalized_text + dimensions + encoding_format + provider
+        """
+        provider = provider or self.provider_name
+        normalized = self._normalize_text(text)
+        content = f"{model}:{normalized}:{dimensions}:{encoding_format}:{provider}"
+        return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+    def _check_cache(
+        self,
+        session: Session,
+        text: str,
+        model: str
+    ) -> Optional[EmbeddingVector]:
+        """
+        Check if embedding exists in cache (DB) for this text and model.
+
+        Returns:
+            EmbeddingVector if found, None otherwise
+        """
+        normalized_text = self._normalize_text(text)
+        existing = (
+            session.query(EmbeddingVector, RawCall)
+            .join(RawCall, EmbeddingVector.call_id == RawCall.id)
+            .filter(
+                RawCall.modality == "embedding",
+                RawCall.model == model,
+                RawCall.status == "success",
+                RawCall.request_json["input"].as_string() == normalized_text
+            )
+            .order_by(RawCall.id.desc())
+            .first()
+        )
+
+        if existing:
+            vector, _ = existing
+            return vector
+        return None
+
+    def _validate_deployment(self, deployment: str) -> bool:
+        """
+        Validate that a deployment exists and is accessible.
+
+        Returns:
+            True if valid, False otherwise
+        """
+        if deployment in self._validated_deployments:
+            return self._validated_deployments[deployment]
+
+        try:
+            # Cheap probe with minimal input
+            self.client.embeddings.create(model=deployment, input=["ping"])
+            self._validated_deployments[deployment] = True
+            return True
+        except NotFoundError:
+            self._validated_deployments[deployment] = False
+            return False
+        except Exception:
+            # Other errors might be transient; don't cache as invalid
+            return False
+
+    @retry(
+        stop=stop_after_attempt(6),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        retry=retry_if_exception_type((
+            InternalServerError,
+            APIConnectionError,
+            RateLimitError,
+            OperationalError
+        ))
+    )
+    def _create_embedding_with_retry(
+        self,
+        model: str,
+        text: str,
+        dimensions: Optional[int] = None,
+        encoding_format: str = "float"
+    ) -> Any:
+        """
+        Create embedding with retry logic for transient errors.
+
+        Handles:
+        - 502 Bad Gateway (InternalServerError)
+        - Connection errors (APIConnectionError)
+        - Rate limits (RateLimitError)
+        - DB connection drops (OperationalError)
+        """
+        params = {
+            "model": model,
+            "input": [text],
+        }
+        if dimensions:
+            params["dimensions"] = dimensions
+        if encoding_format:
+            params["encoding_format"] = encoding_format
+
+        return self.client.embeddings.create(**params)
+
+    def get_embedding(
+        self,
+        text: str,
+        model: str,
+        dimensions: Optional[int] = None,
+        encoding_format: str = "float",
+        group_id: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> EmbeddingResponse:
+        """
+        Get embedding for text, using cache if available.
+
+        Args:
+            text: Input text to embed
+            model: Embedding model/deployment name
+            dimensions: Optional dimension override
+            encoding_format: Encoding format ("float" or "base64")
+            group_id: Optional group ID for sweep runs
+            metadata: Optional metadata to store (e.g., seed, library versions)
+
+        Returns:
+            EmbeddingResponse with vector and metadata
+
+        Raises:
+            BadRequestError: If input is invalid (not retried)
+            NotFoundError: If deployment doesn't exist (not retried)
+        """
+        # Normalize and validate input
+        normalized_text = self._normalize_text(text)
+        if not normalized_text:
+            raise ValueError("Input text cannot be empty after normalization")
+
+        # Validate deployment if enabled
+        if self.validate_deployments and not self._validate_deployment(model):
+            raise NotFoundError(f"Deployment '{model}' not found or inaccessible")
+
+        # Compute request hash for cache lookup
+        request_hash = self._compute_request_hash(
+            normalized_text, model, dimensions, encoding_format
+        )
+
+        # Check cache
+        while True:
+            try:
+                with self.db.session_scope() as session:
+                    cached = self._check_cache(session, normalized_text, model)
+                    if cached:
+                        return EmbeddingResponse(
+                            vector=np.array(cached.vector, dtype=np.float64),
+                            model=model,
+                            dimension=cached.dimension,
+                            request_hash=request_hash,
+                            cached=True,
+                            raw_call_id=cached.call_id
+                        )
+
+                    # Not in cache; create new embedding
+                    start_time = time.perf_counter()
+                    response = self._create_embedding_with_retry(
+                        model, normalized_text, dimensions, encoding_format
+                    )
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+
+                    embedding = response.data[0].embedding
+                    usage = getattr(response, "usage", None)
+
+                    # Store RawCall
+                    raw_call = RawCall(
+                        provider=self.provider_name,
+                        model=model,
+                        modality="embedding",
+                        status="success",
+                        request_json={
+                            "input": normalized_text,
+                            "dimensions": dimensions,
+                            "encoding_format": encoding_format
+                        },
+                        response_json={
+                            "model": model,
+                            "embedding_dim": len(embedding),
+                            "object": "list"
+                        },
+                        latency_ms=elapsed_ms,
+                        tokens_json={"total": usage.total_tokens} if usage else None,
+                        metadata_json={
+                            "request_hash": request_hash,
+                            "group_id": group_id,
+                            **(metadata or {})
+                        }
+                    )
+                    session.add(raw_call)
+                    session.flush()
+                    session.refresh(raw_call)
+
+                    # Store EmbeddingVector
+                    vector_row = EmbeddingVector(
+                        call_id=raw_call.id,
+                        vector=embedding,
+                        dimension=len(embedding),
+                        norm=np.linalg.norm(embedding),
+                        metadata_json={"model": model}
+                    )
+                    session.add(vector_row)
+
+                    return EmbeddingResponse(
+                        vector=np.array(embedding, dtype=np.float64),
+                        model=model,
+                        dimension=len(embedding),
+                        request_hash=request_hash,
+                        cached=False,
+                        raw_call_id=raw_call.id
+                    )
+
+            except OperationalError:
+                # DB connection dropped; recreate and retry
+                self.db = DatabaseConnectionV2(
+                    self.db.connection_string,
+                    enable_pgvector=True
+                )
+                self.db.init_db()
+                time.sleep(1)
+            except (BadRequestError, NotFoundError):
+                # Non-retryable errors; log failure and re-raise
+                self._log_failure(normalized_text, model, dimensions, encoding_format)
+                raise
+
+    def _log_failure(
+        self,
+        text: str,
+        model: str,
+        dimensions: Optional[int],
+        encoding_format: str
+    ):
+        """Log failed embedding request to RawCall with error_json"""
+        try:
+            with self.db.session_scope() as session:
+                raw_call = RawCall(
+                    provider=self.provider_name,
+                    model=model,
+                    modality="embedding",
+                    status="failed",
+                    request_json={
+                        "input": text,
+                        "dimensions": dimensions,
+                        "encoding_format": encoding_format
+                    },
+                    response_json=None,
+                    error_json={"error_type": "BadRequestError or NotFoundError"},
+                    metadata_json={}
+                )
+                session.add(raw_call)
+        except Exception:
+            # Don't fail if logging fails
+            pass
+
+    def get_embeddings_batch(
+        self,
+        texts: List[str],
+        model: str,
+        dimensions: Optional[int] = None,
+        encoding_format: str = "float",
+        group_id: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> List[EmbeddingResponse]:
+        """
+        Get embeddings for multiple texts, with caching per item.
+
+        Args:
+            texts: List of input texts
+            model: Embedding model/deployment name
+            dimensions: Optional dimension override
+            encoding_format: Encoding format
+            group_id: Optional group ID for sweep runs
+            metadata: Optional metadata to store
+
+        Returns:
+            List of EmbeddingResponse objects
+        """
+        return [
+            self.get_embedding(
+                text, model, dimensions, encoding_format, group_id, metadata
+            )
+            for text in texts
+        ]
+
+    def filter_valid_deployments(self, deployments: List[str]) -> List[str]:
+        """
+        Filter list of deployments to only those that exist and are accessible.
+
+        Args:
+            deployments: List of deployment names to validate
+
+        Returns:
+            List of valid deployment names
+        """
+        if not self.validate_deployments:
+            return deployments
+
+        valid = []
+        for dep in deployments:
+            if self._validate_deployment(dep):
+                valid.append(dep)
+            else:
+                print(f"Skipping missing deployment: {dep}")
+        return valid
+```
+
+**Update:** `src/study_query_llm/services/__init__.py`
+
+```python
+# Add to existing exports
+from .embedding_service import EmbeddingService, EmbeddingRequest, EmbeddingResponse
+
+__all__ = [
+    # ... existing exports ...
+    "EmbeddingService",
+    "EmbeddingRequest",
+    "EmbeddingResponse",
+]
+```
+
+**Test:**
+
+```python
+# tests/test_services/test_embedding_service.py
+
+import pytest
+import numpy as np
+from unittest.mock import Mock, patch
+from openai import NotFoundError, InternalServerError
+from study_query_llm.services.embedding_service import EmbeddingService
+from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.models_v2 import RawCall, EmbeddingVector
+
+
+def test_cache_hit_returns_without_provider_call():
+    """Test that cache hit returns stored vector without calling provider"""
+    # Setup
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    
+    mock_client = Mock()
+    service = EmbeddingService(db, mock_client, validate_deployments=False)
+    
+    text = "test prompt"
+    model = "text-embedding-3-small"
+    
+    # First call - should hit provider
+    with patch.object(service, '_create_embedding_with_retry') as mock_create:
+        mock_create.return_value.data = [Mock(embedding=[0.1, 0.2, 0.3])]
+        response1 = service.get_embedding(text, model)
+        assert not response1.cached
+        assert mock_create.called
+    
+    # Second call - should use cache
+    mock_create.reset_mock()
+    response2 = service.get_embedding(text, model)
+    assert response2.cached
+    assert not mock_create.called
+    assert np.array_equal(response1.vector, response2.vector)
+
+
+def test_invalid_deployment_skipped_and_logged_once():
+    """Test that invalid deployment is skipped and logged once"""
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    
+    mock_client = Mock()
+    mock_client.embeddings.create.side_effect = NotFoundError(
+        "DeploymentNotFound", response=Mock(), body={}
+    )
+    
+    service = EmbeddingService(db, mock_client, validate_deployments=True)
+    
+    # First validation attempt
+    valid = service.filter_valid_deployments(["invalid-deployment"])
+    assert len(valid) == 0
+    assert mock_client.embeddings.create.call_count == 1
+    
+    # Second validation attempt - should use cache
+    mock_client.embeddings.create.reset_mock()
+    valid = service.filter_valid_deployments(["invalid-deployment"])
+    assert len(valid) == 0
+    assert mock_client.embeddings.create.call_count == 0  # Cached
+
+
+def test_retry_resolves_transient_5xx_errors():
+    """Test that retry resolves transient 5xx errors"""
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    
+    mock_client = Mock()
+    service = EmbeddingService(db, mock_client, validate_deployments=False)
+    
+    # First two calls fail, third succeeds
+    mock_client.embeddings.create.side_effect = [
+        InternalServerError("502 Bad Gateway", response=Mock(), body={}),
+        InternalServerError("502 Bad Gateway", response=Mock(), body={}),
+        Mock(data=[Mock(embedding=[0.1, 0.2, 0.3])])
+    ]
+    
+    response = service.get_embedding("test", "text-embedding-3-small")
+    assert response.vector is not None
+    assert mock_client.embeddings.create.call_count == 3
+
+
+def test_failed_calls_persisted_with_status_failed():
+    """Test that failed calls are persisted with status='failed'"""
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    
+    mock_client = Mock()
+    mock_client.embeddings.create.side_effect = BadRequestError(
+        "Invalid input", response=Mock(), body={}
+    )
+    
+    service = EmbeddingService(db, mock_client, validate_deployments=False)
+    
+    with pytest.raises(BadRequestError):
+        service.get_embedding("invalid input with null\x00", "text-embedding-3-small")
+    
+    # Check that failure was logged
+    with db.session_scope() as session:
+        failed_call = session.query(RawCall).filter_by(
+            status="failed",
+            modality="embedding"
+        ).first()
+        assert failed_call is not None
+        assert failed_call.error_json is not None
+        assert failed_call.response_json is None
+
+
+def test_deterministic_hashing_same_input_same_hash():
+    """Test that same input produces same hash"""
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    
+    mock_client = Mock()
+    service = EmbeddingService(db, mock_client, validate_deployments=False)
+    
+    text = "same text"
+    model = "text-embedding-3-small"
+    
+    hash1 = service._compute_request_hash(text, model)
+    hash2 = service._compute_request_hash(text, model)
+    
+    assert hash1 == hash2
+
+
+def test_normalization_removes_null_bytes():
+    """Test that text normalization removes null bytes"""
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    
+    mock_client = Mock()
+    service = EmbeddingService(db, mock_client, validate_deployments=False)
+    
+    text_with_null = "text\x00with\x00nulls"
+    normalized = service._normalize_text(text_with_null)
+    
+    assert "\x00" not in normalized
+    assert normalized == "textwithnulls"
+```
+
+**Validation:**
+- ✓ Cache hit returns stored vector without provider call
+- ✓ Invalid deployment is skipped and logged once (not repeatedly)
+- ✓ Retry resolves transient 5xx errors (502, 429, connection errors)
+- ✓ Failed calls are persisted with `status="failed"` and `error_json`
+- ✓ Deterministic hashing ensures same input produces same hash
+- ✓ Text normalization removes null bytes and normalizes whitespace
+- ✓ Batch operations work correctly with caching per item
+
+**Design notes:**
+- **Request identity:** Hash includes `model + normalized_text + dimensions + encoding_format + provider` for deterministic cache hits
+- **Deterministic caching:** If hash exists in DB, return stored vector and skip API call entirely
+- **Retry policy:** Exponential backoff (1s → 30s max), max 6 attempts, retries on `InternalServerError`, `APIConnectionError`, `RateLimitError`, `OperationalError`
+- **Deployment validation:** Preflight `embeddings.create` with minimal "ping" input; cache validation results to avoid repeated probes
+- **Failure logging:** On non-retryable errors (`BadRequestError`, `NotFoundError`), store failed `RawCall` with `status="failed"` and `error_json`
+- **Result grouping:** Optional `group_id` parameter stored in `metadata_json` to support sweep runs and experiment tracking
+- **Metadata/provenance:** Store `request_hash`, `group_id`, and custom metadata (seed, library versions, etc.) in `RawCall.metadata_json`
+
+---
+
 ## Summary: Implementation Checklist
 
 ### Phase 1: Provider Layer
@@ -1833,6 +2439,7 @@ Update:
 - [ ] Step 7.2: Log Success + Failure in RawCall
 - [x] Step 7.3: Migration Script (v1 → v2)
 - [ ] Step 7.4: Backfill Validation
+- [ ] Step 7.5: Embedding Service with Deterministic Caching
 
 ---
 
@@ -1843,4 +2450,4 @@ Update:
 - Finish analytics UI charts/time-series + search
 - Integrate v2 schema into InferenceService to log failures (Phase 7.2)
 - Complete backfill validation for v1→v2 migration (Phase 7.4)
-- Add embedding provider integration with v2 EmbeddingVector storage
+- Implement Embedding Service with deterministic caching (Phase 7.5)

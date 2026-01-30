@@ -35,397 +35,78 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ### Step 1.1: Base Provider Interface ✅
 
-**Files to create:**
-- `panel_app/providers/__init__.py`
-- `panel_app/providers/base.py`
+**Implementation:** [`src/study_query_llm/providers/base.py`](src/study_query_llm/providers/base.py)
 
-**What to build:**
+**Design:**
+- Abstract base class `BaseLLMProvider` with `complete()` method
+- Standardized `ProviderResponse` dataclass (text, provider, tokens, latency_ms, metadata, raw_response)
+- All providers must implement `get_provider_name()`
 
-```python
-# panel_app/providers/base.py
-
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Optional
-
-@dataclass
-class ProviderResponse:
-    """Standardized response from any LLM provider"""
-    text: str
-    provider: str
-    tokens: Optional[int] = None
-    latency_ms: Optional[float] = None
-    metadata: dict[str, Any] = None
-    raw_response: Any = None
-
-class BaseLLMProvider(ABC):
-    """Abstract base class all providers must implement"""
-
-    @abstractmethod
-    async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
-        """
-        Send a completion request to the LLM provider.
-
-        Args:
-            prompt: The input prompt
-            **kwargs: Provider-specific parameters (temperature, max_tokens, etc.)
-
-        Returns:
-            ProviderResponse with standardized fields
-        """
-        pass
-
-    @abstractmethod
-    def get_provider_name(self) -> str:
-        """Return the name of this provider (e.g., 'azure', 'openai')"""
-        pass
-```
-
-**Test:**
-```python
-# test_base_provider.py (manual test)
-from panel_app.providers.base import ProviderResponse, BaseLLMProvider
-
-# Create a mock provider for testing
-class MockProvider(BaseLLMProvider):
-    async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
-        return ProviderResponse(
-            text=f"Mock response to: {prompt}",
-            provider="mock",
-            tokens=10,
-            latency_ms=50.0
-        )
-
-    def get_provider_name(self) -> str:
-        return "mock"
-
-# Test it
-import asyncio
-
-async def test():
-    provider = MockProvider()
-    response = await provider.complete("Hello!")
-    print(f"Provider: {response.provider}")
-    print(f"Response: {response.text}")
-    print(f"Tokens: {response.tokens}")
-
-asyncio.run(test())
-```
-
-**Validation:** ✓ Mock provider returns standardized response
+**Tests:** [`tests/test_providers/test_base.py`](tests/test_providers/test_base.py)
 
 ---
 
 ### Step 1.2: Azure Provider Implementation ✅
 
-**Files to create:**
-- `panel_app/providers/azure_provider.py`
+**Implementation:** [`src/study_query_llm/providers/azure_provider.py`](src/study_query_llm/providers/azure_provider.py)
 
-**Dependencies:**
-- Install: `pip install openai` (Azure uses OpenAI SDK)
+**Design:**
+- Uses `AsyncAzureOpenAI` from OpenAI SDK
+- Configurable: api_key, endpoint, deployment_name, api_version
+- Measures latency and extracts token usage from response
+- Returns standardized `ProviderResponse`
 
-**What to build:**
+**Dependencies:** `pip install openai`
 
-```python
-# panel_app/providers/azure_provider.py
-
-import time
-from openai import AsyncAzureOpenAI
-from .base import BaseLLMProvider, ProviderResponse
-
-class AzureProvider(BaseLLMProvider):
-    """Azure OpenAI provider implementation"""
-
-    def __init__(
-        self,
-        api_key: str,
-        endpoint: str,
-        deployment_name: str,
-        api_version: str = "2024-02-15-preview"
-    ):
-        self.client = AsyncAzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=api_version
-        )
-        self.deployment_name = deployment_name
-
-    async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
-        """Send completion request to Azure OpenAI"""
-        start_time = time.time()
-
-        # Default parameters
-        params = {
-            "model": self.deployment_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": kwargs.get("temperature", 0.7),
-            "max_tokens": kwargs.get("max_tokens", 1000),
-        }
-
-        # Make API call
-        response = await self.client.chat.completions.create(**params)
-
-        # Calculate latency
-        latency_ms = (time.time() - start_time) * 1000
-
-        return ProviderResponse(
-            text=response.choices[0].message.content,
-            provider="azure",
-            tokens=response.usage.total_tokens,
-            latency_ms=latency_ms,
-            metadata={
-                "model": self.deployment_name,
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            },
-            raw_response=response
-        )
-
-    def get_provider_name(self) -> str:
-        return "azure"
-```
-
-**Test:**
-```python
-# test_azure.py (manual test - requires API key)
-import asyncio
-from panel_app.providers.azure_provider import AzureProvider
-
-async def test_azure():
-    provider = AzureProvider(
-        api_key="YOUR_API_KEY",
-        endpoint="https://YOUR_ENDPOINT.openai.azure.com/",
-        deployment_name="gpt-4"
-    )
-
-    response = await provider.complete("Say hello in 5 words")
-    print(f"Response: {response.text}")
-    print(f"Tokens: {response.tokens}")
-    print(f"Latency: {response.latency_ms}ms")
-
-asyncio.run(test_azure())
-```
-
-**Validation:** ✓ Azure API returns real response with tokens and latency
+**Tests:** [`tests/test_providers/test_azure.py`](tests/test_providers/test_azure.py)
 
 ---
 
 ### Step 1.3: OpenAI Provider Implementation ⬜
 
 **Files to create:**
-- `panel_app/providers/openai_provider.py`
+- `src/study_query_llm/providers/openai_provider.py`
 
-**What to build:**
+**Design:**
+- Similar structure to Azure provider but uses `AsyncOpenAI` client
+- Configurable model name (default: "gpt-4")
+- Standardized response format matching `BaseLLMProvider` interface
 
-```python
-# panel_app/providers/openai_provider.py
+**Dependencies:** `pip install openai`
 
-import time
-from openai import AsyncOpenAI
-from .base import BaseLLMProvider, ProviderResponse
-
-class OpenAIProvider(BaseLLMProvider):
-    """OpenAI API provider implementation"""
-
-    def __init__(self, api_key: str, model: str = "gpt-4"):
-        self.client = AsyncOpenAI(api_key=api_key)
-        self.model = model
-
-    async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
-        """Send completion request to OpenAI"""
-        start_time = time.time()
-
-        params = {
-            "model": kwargs.get("model", self.model),
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": kwargs.get("temperature", 0.7),
-            "max_tokens": kwargs.get("max_tokens", 1000),
-        }
-
-        response = await self.client.chat.completions.create(**params)
-        latency_ms = (time.time() - start_time) * 1000
-
-        return ProviderResponse(
-            text=response.choices[0].message.content,
-            provider="openai",
-            tokens=response.usage.total_tokens,
-            latency_ms=latency_ms,
-            metadata={
-                "model": params["model"],
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            },
-            raw_response=response
-        )
-
-    def get_provider_name(self) -> str:
-        return "openai"
-```
-
-**Test:** Similar to Azure test above
-
-**Validation:** ✓ OpenAI API returns real response
+**Test strategy:** Verify API calls return standardized `ProviderResponse` with tokens and latency
 
 ---
 
 ### Step 1.4: Hyperbolic Provider Implementation ⬜
 
 **Files to create:**
-- `panel_app/providers/hyperbolic_provider.py`
+- `src/study_query_llm/providers/hyperbolic_provider.py`
 
-**Note:** Implementation depends on Hyperbolic's API structure. Adjust as needed.
+**Design:**
+- HTTP-based provider using `httpx` for async requests
+- Configurable base_url (default: "https://api.hyperbolic.xyz")
+- Adapt to Hyperbolic's actual API structure (may differ from OpenAI format)
 
-**What to build:**
+**Dependencies:** `pip install httpx`
 
-```python
-# panel_app/providers/hyperbolic_provider.py
-
-import time
-import httpx
-from .base import BaseLLMProvider, ProviderResponse
-
-class HyperbolicProvider(BaseLLMProvider):
-    """Hyperbolic API provider implementation"""
-
-    def __init__(self, api_key: str, base_url: str = "https://api.hyperbolic.xyz"):
-        self.api_key = api_key
-        self.base_url = base_url
-
-    async def complete(self, prompt: str, **kwargs) -> ProviderResponse:
-        """Send completion request to Hyperbolic"""
-        start_time = time.time()
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/v1/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "prompt": prompt,
-                    "max_tokens": kwargs.get("max_tokens", 1000),
-                    "temperature": kwargs.get("temperature", 0.7),
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        latency_ms = (time.time() - start_time) * 1000
-
-        return ProviderResponse(
-            text=data["choices"][0]["text"],
-            provider="hyperbolic",
-            tokens=data.get("usage", {}).get("total_tokens"),
-            latency_ms=latency_ms,
-            metadata=data.get("usage", {}),
-            raw_response=data
-        )
-
-    def get_provider_name(self) -> str:
-        return "hyperbolic"
-```
-
-**Test:** Adjust based on Hyperbolic API documentation
-
-**Validation:** ✓ Hyperbolic API returns response
+**Test strategy:** Verify API calls return standardized `ProviderResponse` (adjust based on Hyperbolic API docs)
 
 ---
 
 ### Step 1.5: Provider Factory ⚠️ (Azure only)
 
-**Files to create:**
-- `panel_app/providers/factory.py`
+**Implementation:** [`src/study_query_llm/providers/factory.py`](src/study_query_llm/providers/factory.py)
 
-**What to build:**
+**Design:**
+- Static factory method `create(provider_name, **config)` returns `BaseLLMProvider`
+- Currently supports Azure only
+- `get_available_providers()` returns list of supported provider names
 
-```python
-# panel_app/providers/factory.py
+**Still missing:**
+- Factory support for OpenAI and Hyperbolic providers
 
-from typing import Optional
-from .base import BaseLLMProvider
-from .azure_provider import AzureProvider
-from .openai_provider import OpenAIProvider
-from .hyperbolic_provider import HyperbolicProvider
-
-class ProviderFactory:
-    """Factory for creating LLM provider instances"""
-
-    @staticmethod
-    def create(provider_name: str, **config) -> BaseLLMProvider:
-        """
-        Create a provider instance by name.
-
-        Args:
-            provider_name: Name of provider ('azure', 'openai', 'hyperbolic')
-            **config: Provider-specific configuration
-
-        Returns:
-            BaseLLMProvider instance
-
-        Raises:
-            ValueError: If provider_name is unknown
-        """
-        provider_name = provider_name.lower()
-
-        if provider_name == "azure":
-            return AzureProvider(**config)
-        elif provider_name == "openai":
-            return OpenAIProvider(**config)
-        elif provider_name == "hyperbolic":
-            return HyperbolicProvider(**config)
-        else:
-            raise ValueError(f"Unknown provider: {provider_name}")
-
-    @staticmethod
-    def get_available_providers() -> list[str]:
-        """Return list of supported provider names"""
-        return ["azure", "openai", "hyperbolic"]
-```
-
-**Update:** `panel_app/providers/__init__.py`
-
-```python
-# panel_app/providers/__init__.py
-
-from .base import BaseLLMProvider, ProviderResponse
-from .factory import ProviderFactory
-from .azure_provider import AzureProvider
-from .openai_provider import OpenAIProvider
-from .hyperbolic_provider import HyperbolicProvider
-
-__all__ = [
-    "BaseLLMProvider",
-    "ProviderResponse",
-    "ProviderFactory",
-    "AzureProvider",
-    "OpenAIProvider",
-    "HyperbolicProvider",
-]
-```
-
-**Test:**
-```python
-# test_factory.py
-from panel_app.providers import ProviderFactory
-
-async def test_factory():
-    # Create Azure provider via factory
-    azure = ProviderFactory.create(
-        "azure",
-        api_key="...",
-        endpoint="...",
-        deployment_name="gpt-4"
-    )
-
-    response = await azure.complete("Hello!")
-    print(f"Factory created {response.provider} provider")
-
-    # List available providers
-    print(f"Available: {ProviderFactory.get_available_providers()}")
-
-import asyncio
-asyncio.run(test_factory())
-```
-
-**Validation:** ✓ Factory creates correct provider instances
+**Tests:** [`tests/test_providers/test_factory.py`](tests/test_providers/test_factory.py)
 
 ---
 

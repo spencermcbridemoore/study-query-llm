@@ -226,468 +226,75 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 **Dependencies:** Phase 1 (Providers), Phase 2 (Services)
 
+**Note:** This phase implements the v1 database schema. See Phase 7 for the v2 immutable schema.
+
 ### Step 3.1: Database Models ✅
 
-**Files to create:**
-- `panel_app/db/__init__.py`
-- `panel_app/db/models.py`
+**Implementation:** [`src/study_query_llm/db/models.py`](src/study_query_llm/db/models.py)
 
-**Dependencies:**
-- Install: `pip install sqlalchemy psycopg2-binary`
+**Design:**
+- `InferenceRun` model: stores prompt, response, provider, tokens, latency_ms, metadata, created_at
+- SQLAlchemy declarative base
+- Indexed fields: provider, created_at
 
-**What to build:**
+**Dependencies:** `pip install sqlalchemy psycopg2-binary`
 
-```python
-# panel_app/db/models.py
-
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Float, Text
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
-
-class InferenceRun(Base):
-    """Model for storing LLM inference runs"""
-    __tablename__ = 'inference_runs'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    prompt = Column(Text, nullable=False)
-    response = Column(Text, nullable=False)
-    provider = Column(String(50), nullable=False, index=True)
-    tokens = Column(Integer, nullable=True)
-    latency_ms = Column(Float, nullable=True)
-    metadata = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-
-    def __repr__(self):
-        return f"<InferenceRun(id={self.id}, provider={self.provider}, created_at={self.created_at})>"
-```
-
-**Test:**
-```python
-# test_models.py
-from panel_app.db.models import Base, InferenceRun
-from sqlalchemy import create_engine
-
-# Create in-memory SQLite database
-engine = create_engine('sqlite:///:memory:')
-Base.metadata.create_all(engine)
-
-print("Tables created successfully!")
-```
-
-**Validation:** ✓ Tables can be created
+**Tests:** [`tests/test_db/test_models.py`](tests/test_db/test_models.py)
 
 ---
 
 ### Step 3.2: Database Connection ✅
 
-**Files to create:**
-- `panel_app/db/connection.py`
+**Implementation:** [`src/study_query_llm/db/connection.py`](src/study_query_llm/db/connection.py)
 
-**What to build:**
+**Design:**
+- `DatabaseConnection` class manages SQLAlchemy engine and sessions
+- `session_scope()` context manager for transactional operations
+- Supports PostgreSQL and SQLite connection strings
+- `init_db()` creates all tables
 
-```python
-# panel_app/db/connection.py
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from contextlib import contextmanager
-from .models import Base
-
-class DatabaseConnection:
-    """Manages database connections and sessions"""
-
-    def __init__(self, connection_string: str):
-        """
-        Initialize database connection.
-
-        Args:
-            connection_string: SQLAlchemy connection string
-                Examples:
-                - PostgreSQL: "postgresql://user:pass@localhost:5432/dbname"
-                - SQLite: "sqlite:///path/to/db.sqlite"
-        """
-        self.engine = create_engine(connection_string, echo=False)
-        self.SessionLocal = sessionmaker(
-            autocommit=False,
-            autoflush=False,
-            bind=self.engine
-        )
-
-    def init_db(self):
-        """Create all tables"""
-        Base.metadata.create_all(bind=self.engine)
-
-    def get_session(self) -> Session:
-        """Get a new database session"""
-        return self.SessionLocal()
-
-    @contextmanager
-    def session_scope(self):
-        """Provide a transactional scope for operations"""
-        session = self.get_session()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-```
-
-**Test:**
-```python
-# test_connection.py
-from panel_app.db.connection import DatabaseConnection
-
-# Test with SQLite
-db = DatabaseConnection("sqlite:///test.db")
-db.init_db()
-
-with db.session_scope() as session:
-    # Session works
-    print("Database connection successful!")
-```
-
-**Validation:** ✓ Can connect and create tables
+**Tests:** [`tests/test_db/test_connection.py`](tests/test_db/test_connection.py)
 
 ---
 
 ### Step 3.3: Repository - Write Operations ✅
 
-**Files to create:**
-- `panel_app/db/inference_repository.py`
+**Implementation:** [`src/study_query_llm/db/inference_repository.py`](src/study_query_llm/db/inference_repository.py)
 
-**What to build:**
+**Design:**
+- `InferenceRepository` class with session-based operations
+- `insert_inference_run()`: Insert single record, returns ID
+- `batch_insert_inferences()`: Batch insert multiple records
 
-```python
-# panel_app/db/inference_repository.py
-
-from typing import Optional
-from sqlalchemy.orm import Session
-from .models import InferenceRun
-
-class InferenceRepository:
-    """
-    Repository for all database operations on inference runs.
-    Handles both writes (logging inferences) and queries (analytics).
-    """
-
-    def __init__(self, session: Session):
-        self.session = session
-
-    # ========== WRITE OPERATIONS ==========
-
-    def insert_inference_run(
-        self,
-        prompt: str,
-        response: str,
-        provider: str,
-        tokens: Optional[int] = None,
-        latency_ms: Optional[float] = None,
-        metadata: Optional[dict] = None
-    ) -> int:
-        """
-        Insert a single inference run.
-
-        Returns:
-            The ID of the inserted record
-        """
-        inference = InferenceRun(
-            prompt=prompt,
-            response=response,
-            provider=provider,
-            tokens=tokens,
-            latency_ms=latency_ms,
-            metadata=metadata or {}
-        )
-
-        self.session.add(inference)
-        self.session.commit()
-        self.session.refresh(inference)
-
-        return inference.id
-
-    def batch_insert_inferences(self, inferences: list[dict]) -> list[int]:
-        """
-        Batch insert multiple inference runs.
-
-        Args:
-            inferences: List of dicts with inference data
-
-        Returns:
-            List of inserted IDs
-        """
-        inference_objects = [
-            InferenceRun(**inf) for inf in inferences
-        ]
-
-        self.session.add_all(inference_objects)
-        self.session.commit()
-
-        return [inf.id for inf in inference_objects]
-```
-
-**Test:**
-```python
-# test_repository_write.py
-from panel_app.db.connection import DatabaseConnection
-from panel_app.db.inference_repository import InferenceRepository
-
-db = DatabaseConnection("sqlite:///test.db")
-db.init_db()
-
-with db.session_scope() as session:
-    repo = InferenceRepository(session)
-
-    # Insert single record
-    inference_id = repo.insert_inference_run(
-        prompt="Test prompt",
-        response="Test response",
-        provider="azure",
-        tokens=100,
-        latency_ms=500.0
-    )
-
-    print(f"Inserted inference with ID: {inference_id}")
-```
-
-**Validation:** ✓ Can write records to database
+**Tests:** [`tests/test_db/test_repository.py`](tests/test_db/test_repository.py)
 
 ---
 
 ### Step 3.4: Repository - Query Operations ✅
 
-**Update:** `panel_app/db/inference_repository.py`
+**Implementation:** [`src/study_query_llm/db/inference_repository.py`](src/study_query_llm/db/inference_repository.py)
 
-**What to add:**
+**Design:**
+- `get_inference_by_id()`: Retrieve by ID
+- `query_inferences()`: Filter by provider, date_range, pagination
+- `get_provider_stats()`: Aggregate statistics by provider (count, avg_tokens, avg_latency, total_tokens)
+- `search_by_prompt()`: Text search in prompts
+- `get_total_count()`: Total inference count
 
-```python
-from datetime import datetime
-from typing import Optional, Tuple
-from sqlalchemy import func
-
-class InferenceRepository:
-    # ... write operations above ...
-
-    # ========== QUERY OPERATIONS ==========
-
-    def get_inference_by_id(self, inference_id: int) -> Optional[InferenceRun]:
-        """Retrieve a specific inference run by ID"""
-        return self.session.query(InferenceRun).filter_by(id=inference_id).first()
-
-    def query_inferences(
-        self,
-        provider: Optional[str] = None,
-        date_range: Optional[Tuple[datetime, datetime]] = None,
-        limit: int = 100,
-        offset: int = 0
-    ) -> list[InferenceRun]:
-        """
-        Query inferences with filters.
-
-        Args:
-            provider: Filter by provider name
-            date_range: Tuple of (start_date, end_date)
-            limit: Maximum results
-            offset: Pagination offset
-
-        Returns:
-            List of InferenceRun objects
-        """
-        query = self.session.query(InferenceRun)
-
-        if provider:
-            query = query.filter(InferenceRun.provider == provider)
-
-        if date_range:
-            start_date, end_date = date_range
-            query = query.filter(InferenceRun.created_at.between(start_date, end_date))
-
-        query = query.order_by(InferenceRun.created_at.desc())
-        query = query.limit(limit).offset(offset)
-
-        return query.all()
-
-    def get_provider_stats(self) -> list[dict]:
-        """
-        Get aggregate statistics by provider.
-
-        Returns:
-            List of dicts with provider stats
-        """
-        results = self.session.query(
-            InferenceRun.provider,
-            func.count(InferenceRun.id).label('count'),
-            func.avg(InferenceRun.tokens).label('avg_tokens'),
-            func.avg(InferenceRun.latency_ms).label('avg_latency_ms'),
-            func.sum(InferenceRun.tokens).label('total_tokens')
-        ).group_by(InferenceRun.provider).all()
-
-        return [
-            {
-                'provider': r.provider,
-                'count': r.count,
-                'avg_tokens': round(r.avg_tokens, 2) if r.avg_tokens else 0,
-                'avg_latency_ms': round(r.avg_latency_ms, 2) if r.avg_latency_ms else 0,
-                'total_tokens': r.total_tokens or 0
-            }
-            for r in results
-        ]
-
-    def search_by_prompt(self, search_term: str, limit: int = 50) -> list[InferenceRun]:
-        """
-        Search inferences by prompt content.
-
-        Args:
-            search_term: Text to search for in prompts
-            limit: Maximum results
-
-        Returns:
-            List of matching InferenceRun objects
-        """
-        return self.session.query(InferenceRun)\
-            .filter(InferenceRun.prompt.ilike(f'%{search_term}%'))\
-            .order_by(InferenceRun.created_at.desc())\
-            .limit(limit)\
-            .all()
-
-    def get_total_count(self) -> int:
-        """Get total number of inference runs"""
-        return self.session.query(func.count(InferenceRun.id)).scalar()
-```
-
-**Test:**
-```python
-# test_repository_query.py
-from panel_app.db.connection import DatabaseConnection
-from panel_app.db.inference_repository import InferenceRepository
-
-db = DatabaseConnection("sqlite:///test.db")
-
-with db.session_scope() as session:
-    repo = InferenceRepository(session)
-
-    # Insert test data
-    for i in range(10):
-        repo.insert_inference_run(
-            prompt=f"Test prompt {i}",
-            response=f"Response {i}",
-            provider="azure" if i % 2 == 0 else "openai",
-            tokens=100 + i * 10,
-            latency_ms=500 + i * 50
-        )
-
-    # Query by provider
-    azure_runs = repo.query_inferences(provider="azure")
-    print(f"Azure runs: {len(azure_runs)}")
-
-    # Get stats
-    stats = repo.get_provider_stats()
-    print(f"Provider stats: {stats}")
-
-    # Search
-    results = repo.search_by_prompt("prompt 5")
-    print(f"Search results: {len(results)}")
-```
-
-**Validation:** ✓ Can query and aggregate data
+**Tests:** [`tests/test_db/test_repository.py`](tests/test_db/test_repository.py)
 
 ---
 
 ### Step 3.5: Integrate Services with Repository ✅
 
-**Update:** `panel_app/services/inference_service.py`
+**Implementation:** [`src/study_query_llm/services/inference_service.py`](src/study_query_llm/services/inference_service.py)
 
-**What to change:**
+**Design:**
+- Optional `repository` parameter in `InferenceService.__init__()`
+- If repository provided, `run_inference()` automatically persists results
+- Returns dict with 'id' field when persisted
 
-```python
-from typing import Optional
-from panel_app.providers.base import BaseLLMProvider
-from panel_app.db.inference_repository import InferenceRepository
-
-class InferenceService:
-    def __init__(
-        self,
-        provider: BaseLLMProvider,
-        repository: Optional[InferenceRepository] = None,  # Now optional
-        preprocess: bool = True
-    ):
-        self.provider = provider
-        self.repository = repository
-        self.preprocess = preprocess
-
-    async def run_inference(self, prompt: str, **kwargs) -> dict:
-        """Run inference and optionally persist to database"""
-
-        # Preprocess if enabled
-        if self.preprocess:
-            # ... preprocessing logic ...
-            pass
-
-        # Call provider with retry
-        response = await self._call_with_retry(prompt, **kwargs)
-
-        # Persist to database if repository provided
-        inference_id = None
-        if self.repository:
-            inference_id = self.repository.insert_inference_run(
-                prompt=prompt,
-                response=response.text,
-                provider=response.provider,
-                tokens=response.tokens,
-                latency_ms=response.latency_ms,
-                metadata=response.metadata
-            )
-
-        return {
-            'id': inference_id,
-            'response': response.text,
-            'metadata': {
-                'provider': response.provider,
-                'tokens': response.tokens,
-                'latency_ms': response.latency_ms,
-            }
-        }
-```
-
-**Test:**
-```python
-# test_service_with_db.py
-from panel_app.providers import ProviderFactory
-from panel_app.services.inference_service import InferenceService
-from panel_app.db.connection import DatabaseConnection
-from panel_app.db.inference_repository import InferenceRepository
-
-async def test():
-    # Setup database
-    db = DatabaseConnection("sqlite:///test.db")
-    db.init_db()
-
-    # Create provider and service
-    provider = ProviderFactory.create("openai", api_key="YOUR_KEY")
-
-    with db.session_scope() as session:
-        repo = InferenceRepository(session)
-        service = InferenceService(provider, repository=repo)
-
-        # Run inference - should save to DB
-        result = await service.run_inference("Hello world!")
-
-        print(f"Saved with ID: {result['id']}")
-        print(f"Response: {result['response']}")
-
-        # Verify it's in database
-        saved = repo.get_inference_by_id(result['id'])
-        print(f"Retrieved from DB: {saved.prompt}")
-
-import asyncio
-asyncio.run(test())
-```
-
-**Validation:** ✓ Inferences are automatically saved to database
+**Tests:** [`tests/test_services/test_inference_with_db.py`](tests/test_services/test_inference_with_db.py)
 
 ---
 

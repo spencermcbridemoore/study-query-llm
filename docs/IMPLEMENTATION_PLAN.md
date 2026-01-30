@@ -594,6 +594,33 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
+### Step 7.6: Panel App Integration (v2 RawCall + Grouping) ⬜
+
+**Goal:** Update the Panel UI to read/write the v2 immutable capture schema and expose grouping/batching in the interface.
+
+**Dependencies:**
+- Phase 7.1 (V2 Schema)
+- Phase 7.2 (Log Success + Failure in RawCall)
+
+**Files to update:**
+- `panel_app/app.py`
+- `src/study_query_llm/services/inference_service.py` (optional adapter for v2 persistence)
+- `src/study_query_llm/services/study_service.py` (v2 analytics entry points)
+
+**Design:**
+- Replace v1 `InferenceRepository` usage with v2 `RawCallRepository` (or add a service adapter that abstracts v1/v2).
+- Log all inference calls to `RawCall` with `status`, `request_json`, `response_json`, `error_json`.
+- Add UI controls for `group_type`, `group_name`, and optional `role/position`.
+- Persist group metadata to `Group` and link `RawCall` via `GroupMember`.
+- Update analytics widgets to pull from v2 tables (e.g., recent calls, provider stats, time series).
+
+**Test strategy:**
+- Run inference in the UI and verify a `RawCall` row is created.
+- Create a group in the UI and verify `Group` + `GroupMember` rows.
+- Verify analytics panels read from v2 data (counts, recent table, charts).
+
+---
+
 ## Summary: Implementation Checklist
 
 ### Phase 1: Provider Layer

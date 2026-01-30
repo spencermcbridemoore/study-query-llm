@@ -83,6 +83,7 @@ def migrate_inference_run_to_raw_call(inference_run: InferenceRun) -> Dict:
         "latency_ms": inference_run.latency_ms,
         "tokens_json": tokens_json,
         "metadata_json": inference_run.metadata_json or {},
+        "created_at": inference_run.created_at,
     }
 
 

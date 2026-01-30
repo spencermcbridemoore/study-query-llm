@@ -303,8 +303,8 @@ class RawCallRepository:
         all_calls = self.session.query(RawCall)\
             .filter(RawCall.modality == 'text')\
             .order_by(desc(RawCall.created_at))\
-            .limit(limit * 10)  # Get more to filter from
-            .all()
+            .limit(limit * 10)\
+            .all()  # Get more to filter from
         
         matches = []
         search_lower = search_term.lower()

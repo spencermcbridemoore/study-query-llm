@@ -215,14 +215,32 @@ class InferenceService:
                     
                     # Add to group if batch_id provided
                     if batch_id:
-                        # Find or create group for this batch_id
-                        # For simplicity, create new group (could be optimized)
-                        group_id = self.repository.create_group(
-                            group_type='batch',
-                            name=f'batch_{batch_id}',
-                            description=f'Batch inference group',
-                            metadata_json={'batch_id': batch_id}
-                        )
+                        # Try to find existing group with this batch_id
+                        from ..db.models_v2 import Group
+                        # Query all batch groups and filter in Python (works across DBs)
+                        all_batch_groups = self.repository.session.query(Group).filter(
+                            Group.group_type == 'batch'
+                        ).all()
+                        
+                        existing_group = None
+                        for group in all_batch_groups:
+                            if (group.metadata_json and 
+                                isinstance(group.metadata_json, dict) and
+                                group.metadata_json.get('batch_id') == batch_id):
+                                existing_group = group
+                                break
+                        
+                        if existing_group:
+                            group_id = existing_group.id
+                        else:
+                            # Create new group for this batch_id
+                            group_id = self.repository.create_group(
+                                group_type='batch',
+                                name=f'batch_{batch_id}',
+                                description=f'Batch inference group',
+                                metadata_json={'batch_id': batch_id}
+                            )
+                        
                         self.repository.add_call_to_group(group_id, failed_call_id)
                     
                     logger.warning(
@@ -319,14 +337,31 @@ class InferenceService:
                 # If batch_id provided, create/update group
                 if batch_id:
                     # Try to find existing group with this batch_id
-                    # For now, create a new group for each batch_id
-                    # (Could be optimized to reuse groups)
-                    group_id = self.repository.create_group(
-                        group_type='batch',
-                        name=f'batch_{batch_id}',
-                        description=f'Batch inference group',
-                        metadata_json={'batch_id': batch_id}
-                    )
+                    from ..db.models_v2 import Group
+                    # Query all batch groups and filter in Python (works across DBs)
+                    all_batch_groups = self.repository.session.query(Group).filter(
+                        Group.group_type == 'batch'
+                    ).all()
+                    
+                    existing_group = None
+                    for group in all_batch_groups:
+                        if (group.metadata_json and 
+                            isinstance(group.metadata_json, dict) and
+                            group.metadata_json.get('batch_id') == batch_id):
+                            existing_group = group
+                            break
+                    
+                    if existing_group:
+                        group_id = existing_group.id
+                    else:
+                        # Create new group for this batch_id
+                        group_id = self.repository.create_group(
+                            group_type='batch',
+                            name=f'batch_{batch_id}',
+                            description=f'Batch inference group',
+                            metadata_json={'batch_id': batch_id}
+                        )
+                    
                     self.repository.add_call_to_group(group_id, inference_id)
                     result['group_id'] = group_id
                 

@@ -427,41 +427,54 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ### Step 6.1: Error Handling and Logging ⚠️
 
-Add comprehensive logging throughout:
-- Provider API calls
-- Database operations
-- User actions
+**Implementation:** [`src/study_query_llm/utils/logging_config.py`](src/study_query_llm/utils/logging_config.py)
+
+**Design:**
+- Comprehensive logging throughout application
+- Provider API calls logged
+- Database operations logged
+- User actions logged
+
+**Still missing:**
+- Enhanced error handling in some components
+
+---
 
 ### Step 6.2: Unit Tests ✅
 
-Create test suite:
-- `tests/test_providers.py`
-- `tests/test_services.py`
-- `tests/test_repository.py`
+**Implementation:** Test suite in [`tests/`](tests/) directory
+
+**Test coverage:**
+- [`tests/test_providers/`](tests/test_providers/): Provider tests
+- [`tests/test_services/`](tests/test_services/): Service layer tests
+- [`tests/test_db/`](tests/test_db/): Database and repository tests
+
+---
 
 ### Step 6.3: Documentation ✅
 
-Update:
-- README.md with full setup instructions
-- API documentation
-- User guide
+**Implementation:**
+- [`README.md`](README.md): Setup instructions
+- [`docs/API.md`](docs/API.md): API documentation
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md): User guide
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): Architecture overview
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md): Deployment guide
+
+---
 
 ### Step 6.4: Docker Setup ✅
 
-**Runtime targets**
-- Python 3.11 slim image with `panel_app.app` exposed on port `5006`
-- Default SQLite database persisted via container volume (`study_query_llm.db`)
-- Optional Postgres connection through `DATABASE_URL`
+**Implementation:**
+- [`Dockerfile`](Dockerfile): Multi-stage build (Python 3.11 slim, non-root user)
+- [`docker-compose.yml`](docker-compose.yml): App service with optional Postgres profile
 
-**Required env vars**
-- Azure: `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_API_VERSION`
-- Optional providers: `OPENAI_API_KEY`, `OPENAI_MODEL`, `HYPERBOLIC_API_KEY`, `HYPERBOLIC_ENDPOINT`
-- App: `PANEL_ADDRESS` (default `0.0.0.0`), `PANEL_PORT` (default `5006`), `DATABASE_URL`
+**Design:**
+- Runtime: Python 3.11 slim image, `panel_app.app` exposed on port `5006`
+- Default SQLite database persisted via container volume
+- Optional Postgres connection through `DATABASE_URL` env var
+- Required env vars: Azure OpenAI credentials, optional provider keys, `PANEL_ADDRESS`, `PANEL_PORT`
 
-**Deliverables**
-- Multi-stage `Dockerfile` (build dependencies, runtime, non-root user)
-- `docker-compose.yml` with app service, optional Postgres profile, healthcheck
-- Deployment guide covering `docker build`, `docker compose up`, secrets, and volume usage
+**Deployment:** See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for full deployment guide
 
 ---
 

@@ -16,11 +16,13 @@ All services are provider-agnostic and work with any BaseLLMProvider implementat
 """
 
 from .inference_service import InferenceService
+from .model_registry import ModelRegistry
 from .preprocessors import PromptPreprocessor
 from .study_service import StudyService
 
 __all__ = [
     "InferenceService",
+    "ModelRegistry",
     "PromptPreprocessor",
     "StudyService",
 ]

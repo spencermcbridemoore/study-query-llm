@@ -103,3 +103,33 @@ async def test_inference_service_handles_db_errors_gracefully(mock_provider):
     assert result['response'] is not None
     # ID might not be set if DB failed, but that's OK
 
+
+@pytest.mark.asyncio
+async def test_inference_service_logs_failed_calls(permanently_failing_provider, db_connection):
+    """Test that failed inference calls are logged to database with status='failed' and error_json (v2)."""
+    service = InferenceService(permanently_failing_provider, max_retries=1)
+    
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service.repository = repo
+        
+        # This should fail and be logged
+        with pytest.raises(Exception, match="401 Unauthorized"):
+            await service.run_inference("Test prompt that will fail")
+        
+        # Verify failed call was logged
+        failed_calls = repo.query_raw_calls(status="failed", limit=10)
+        assert len(failed_calls) > 0
+        
+        # Check the most recent failed call
+        failed_call = failed_calls[0]
+        assert failed_call.status == "failed"
+        assert failed_call.response_json is None
+        assert failed_call.error_json is not None
+        assert "error_type" in failed_call.error_json
+        assert "error_message" in failed_call.error_json
+        assert "401" in failed_call.error_json["error_message"]
+        assert failed_call.request_json is not None
+        assert failed_call.request_json.get("prompt") == "Test prompt that will fail"
+        assert failed_call.provider == "permanently_failing_provider"
+        assert failed_call.modality == "text"

@@ -503,7 +503,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.2: Log Success + Failure in RawCall ⬜
+### Step 7.2: Log Success + Failure in RawCall ✅
 
 **Update:** [`src/study_query_llm/services/inference_service.py`](src/study_query_llm/services/inference_service.py)
 

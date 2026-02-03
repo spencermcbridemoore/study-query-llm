@@ -541,7 +541,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.5: Embedding Service with Deterministic Caching ⬜
+### Step 7.5: Embedding Service with Deterministic Caching ✅
 
 **Goal:** Create a first-class embedding service that handles deployment validation, retry/backoff, deterministic caching, and persistence to v2 DB tables. This ensures embedding calls are de-duplicated, transient errors don't crash long runs, and all embeddings are stored with consistent metadata for reuse.
 

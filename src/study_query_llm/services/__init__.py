@@ -19,10 +19,14 @@ from .inference_service import InferenceService
 from .model_registry import ModelRegistry
 from .preprocessors import PromptPreprocessor
 from .study_service import StudyService
+from .embedding_service import EmbeddingService, EmbeddingRequest, EmbeddingResponse
 
 __all__ = [
     "InferenceService",
     "ModelRegistry",
     "PromptPreprocessor",
     "StudyService",
+    "EmbeddingService",
+    "EmbeddingRequest",
+    "EmbeddingResponse",
 ]

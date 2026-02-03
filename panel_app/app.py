@@ -239,6 +239,49 @@ def create_inference_ui() -> pn.viewable.Viewable:
         width=150
     )
     
+    # Grouping controls
+    enable_grouping = pn.widgets.Checkbox(
+        name="Enable Grouping",
+        value=False,
+        width=150
+    )
+    
+    group_type_select = pn.widgets.Select(
+        name="Group Type",
+        options=["batch", "experiment", "label", "custom"],
+        value="batch",
+        width=150,
+        visible=False
+    )
+    
+    group_name_input = pn.widgets.TextInput(
+        name="Group Name",
+        placeholder="Enter group name...",
+        width=200,
+        visible=False
+    )
+    
+    group_role_input = pn.widgets.TextInput(
+        name="Role (optional)",
+        placeholder="e.g., 'input', 'output'",
+        width=150,
+        visible=False
+    )
+    
+    # Show/hide grouping controls
+    def update_grouping_ui(event):
+        """Update UI when grouping checkbox changes."""
+        if enable_grouping.value:
+            group_type_select.visible = True
+            group_name_input.visible = True
+            group_role_input.visible = True
+        else:
+            group_type_select.visible = False
+            group_name_input.visible = False
+            group_role_input.visible = False
+    
+    enable_grouping.param.watch(update_grouping_ui, 'value')
+    
     run_button = pn.widgets.Button(
         name="Run Inference",
         button_type="primary",
@@ -300,23 +343,81 @@ def create_inference_ui() -> pn.viewable.Viewable:
                 repository = RawCallRepository(session)
                 service.repository = repository
                 
+                # Handle grouping if enabled
+                batch_id = None
+                group_id = None
+                if enable_grouping.value and group_name_input.value:
+                    # Create or find group
+                    from study_query_llm.db.models_v2 import Group
+                    import uuid
+                    
+                    # Generate a unique batch_id for this group
+                    batch_id = str(uuid.uuid4())
+                    
+                    # Check if group with this name already exists
+                    existing_groups = session.query(Group).filter(
+                        Group.group_type == group_type_select.value,
+                        Group.name == group_name_input.value
+                    ).all()
+                    
+                    if existing_groups:
+                        # Use existing group
+                        group_id = existing_groups[0].id
+                    else:
+                        # Create new group
+                        group_id = repository.create_group(
+                            group_type=group_type_select.value,
+                            name=group_name_input.value,
+                            description=f"Group created from Panel UI",
+                            metadata_json={"batch_id": batch_id}
+                        )
+                
                 result = await service.run_inference(
                     prompt_input.value,
                     temperature=temperature_slider.value,
-                    max_tokens=max_tokens_input.value if max_tokens_input.value else None
+                    max_tokens=max_tokens_input.value if max_tokens_input.value else None,
+                    batch_id=batch_id
                 )
+                
+                # If grouping enabled and we have a group, ensure the call is linked
+                if enable_grouping.value and group_name_input.value and result.get('id') and group_id:
+                    # The InferenceService should have already linked it via batch_id,
+                    # but let's verify and add role/position if specified
+                    if group_role_input.value:
+                        from study_query_llm.db.models_v2 import GroupMember
+                        # Check if already linked
+                        existing_member = session.query(GroupMember).filter_by(
+                            group_id=group_id,
+                            call_id=result['id']
+                        ).first()
+                        
+                        if existing_member:
+                            # Update role if provided
+                            existing_member.role = group_role_input.value
+                        else:
+                            # Create new member with role
+                            repository.add_call_to_group(
+                                group_id=group_id,
+                                call_id=result['id'],
+                                role=group_role_input.value
+                            )
             
             # Display results
             response_output.object = result.get('response', 'No response')
             
             # Format metadata
             metadata = result.get('metadata', {})
+            group_info = ""
+            if enable_grouping.value and group_name_input.value and result.get('group_id'):
+                group_info = f"**Group ID:** {result.get('group_id', 'N/A')}  \n"
+            
             metadata_text = f"""
 **Provider:** {metadata.get('provider', 'N/A')}  
 **Tokens:** {metadata.get('tokens', 'N/A')}  
 **Latency:** {metadata.get('latency_ms', 'N/A'):.2f} ms  
 **Temperature:** {metadata.get('temperature', 'N/A')}  
-**Inference ID:** {result.get('id', 'N/A')}
+**Inference ID:** {result.get('id', 'N/A')}  
+{group_info}
 """
             metadata_output.object = metadata_text
             status_output.object = "✅ Inference complete!"
@@ -348,6 +449,13 @@ def create_inference_ui() -> pn.viewable.Viewable:
             temperature_slider,
             pn.Spacer(width=20),
             max_tokens_input,
+        ),
+        pn.pane.Markdown("### Grouping (Optional)"),
+        pn.Row(
+            enable_grouping,
+            group_type_select,
+            group_name_input,
+            group_role_input,
         ),
         prompt_input,
         run_button,
@@ -441,15 +549,111 @@ def create_analytics_ui() -> pn.viewable.Viewable:
     )
 
 
+def create_groups_ui() -> pn.viewable.Viewable:
+    """Create the groups management UI."""
+    
+    refresh_button = pn.widgets.Button(
+        name="Refresh",
+        button_type="primary",
+        width=100
+    )
+    
+    groups_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=400)
+    group_members_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=400)
+    
+    def update_groups():
+        """Update groups display."""
+        try:
+            db = get_db_connection()
+            with db.session_scope() as session:
+                from study_query_llm.db.models_v2 import Group, GroupMember
+                import pandas as pd
+                
+                # Get all groups
+                groups = session.query(Group).order_by(Group.created_at.desc()).limit(50).all()
+                
+                if groups:
+                    groups_data = []
+                    for group in groups:
+                        # Count members
+                        member_count = session.query(GroupMember).filter_by(group_id=group.id).count()
+                        
+                        groups_data.append({
+                            'id': group.id,
+                            'group_type': group.group_type,
+                            'name': group.name,
+                            'description': group.description or '',
+                            'member_count': member_count,
+                            'created_at': group.created_at.isoformat() if group.created_at else '',
+                        })
+                    
+                    groups_df = pd.DataFrame(groups_data)
+                    groups_table.object = groups_df
+                else:
+                    groups_table.object = None
+                
+                # Get group members for selected group (if any)
+                # For now, show all members
+                members = session.query(GroupMember).order_by(GroupMember.added_at.desc()).limit(100).all()
+                
+                if members:
+                    members_data = []
+                    for member in members:
+                        # Get group and call info
+                        group = session.query(Group).filter_by(id=member.group_id).first()
+                        from study_query_llm.db.models_v2 import RawCall
+                        call = session.query(RawCall).filter_by(id=member.call_id).first()
+                        
+                        members_data.append({
+                            'group_id': member.group_id,
+                            'group_name': group.name if group else 'N/A',
+                            'call_id': member.call_id,
+                            'role': member.role or '',
+                            'position': member.position or '',
+                            'provider': call.provider if call else 'N/A',
+                            'status': call.status if call else 'N/A',
+                            'added_at': member.added_at.isoformat() if member.added_at else '',
+                        })
+                    
+                    members_df = pd.DataFrame(members_data)
+                    group_members_table.object = members_df
+                else:
+                    group_members_table.object = None
+                    
+        except Exception as e:
+            error_msg = f"Error loading groups: {str(e)}"
+            logger.error(f"Failed to update groups: {str(e)}", exc_info=True)
+            groups_table.object = None
+            group_members_table.object = None
+    
+    refresh_button.on_click(lambda e: update_groups())
+    
+    # Initial load
+    update_groups()
+    
+    return pn.Column(
+        pn.pane.Markdown("## Groups Management"),
+        pn.Row(refresh_button, pn.Spacer()),
+        pn.pane.Markdown("### Groups"),
+        groups_table,
+        pn.pane.Markdown("### Group Members"),
+        group_members_table,
+        sizing_mode='stretch_width',
+        margin=(10, 20)
+    )
+
+
 def create_dashboard() -> pn.viewable.Viewable:
     """Create the main dashboard with tabs."""
     
     inference_tab = create_inference_ui()
     analytics_tab = create_analytics_ui()
+    groups_tab = create_groups_ui()
     
     tabs = pn.Tabs(
         ("Inference", inference_tab),
         ("Analytics", analytics_tab),
+        ("Groups", groups_tab),
         sizing_mode='stretch_width'
     )
     

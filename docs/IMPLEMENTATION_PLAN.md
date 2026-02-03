@@ -596,7 +596,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.6: Panel App Integration (v2 RawCall + Grouping) ⬜
+### Step 7.6: Panel App Integration (v2 RawCall + Grouping) ✅
 
 **Goal:** Update the Panel UI to read/write the v2 immutable capture schema and expose grouping/batching in the interface.
 

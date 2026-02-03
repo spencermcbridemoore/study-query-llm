@@ -275,9 +275,10 @@ class EmbeddingService:
                     azure_endpoint=provider_config.endpoint,
                 )
 
-                # Try a minimal embedding call
+                # Try a minimal embedding call (without dimensions to let model use default)
+                # Some models don't support dimensions parameter, and some only accept specific values
                 await client.embeddings.create(
-                    model=deployment, input=["test"], dimensions=1
+                    model=deployment, input=["test"]
                 )
 
                 # Cache success

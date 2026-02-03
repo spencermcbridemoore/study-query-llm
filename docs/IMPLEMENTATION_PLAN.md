@@ -437,6 +437,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 **Still missing:**
 - Enhanced error handling in some components
+- Database connection resiliency (pool_pre_ping, pool_recycle) for long-running processes and environments with connection timeouts (e.g., Colab, cloud DBs with SSL)
 
 ---
 
@@ -574,7 +575,8 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 **Features:**
 - **Deterministic caching:** Hash-based cache lookup (model + normalized_text + dimensions + encoding_format + provider)
-- **Deployment validation:** One-time probe with cached results
+- **Deployment validation:** One-time probe with cached results per deployment name; validates deployment exists and supports embedding API before use
+- **Environment refresh:** Creates fresh `Config()` instance per deployment to ensure environment variable changes (e.g., `AZURE_OPENAI_DEPLOYMENT`) are picked up correctly
 - **Retry/backoff:** Exponential backoff (1s → 30s), max 6 attempts, handles `InternalServerError`, `APIConnectionError`, `RateLimitError`, `OperationalError`
 - **DB persistence:** Stores to `RawCall` (success/failure) and `EmbeddingVector` (vector data)
 - **Failure logging:** Non-retryable errors logged with `status="failed"` and `error_json`
@@ -621,6 +623,224 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
+### Step 7.7: Algorithm Core Library (minimal deps) ⬜
+
+**Goal:** Extract core algorithm implementations (PCA/KLLMeans sweep, multi-restart clustering, stability metrics) into reusable modules in `src/` with minimal dependencies, separate from notebooks/scripts.
+
+**Dependencies:**
+- Phase 7.1 (V2 Schema) - for optional provenance integration
+- Install: `pip install numpy scipy` (core algorithm dependencies)
+
+**Files to create:**
+- `src/study_query_llm/algorithms/__init__.py`
+- `src/study_query_llm/algorithms/clustering.py` (KLLMeans, multi-restart, stability metrics)
+- `src/study_query_llm/algorithms/dimensionality_reduction.py` (PCA/SVD projection)
+- `src/study_query_llm/algorithms/sweep.py` (sweep orchestration, config dataclasses)
+
+**Files to update:**
+- `scripts/pca_kllmeans_sweep.py` (refactor to use new algorithm modules)
+
+**Design:**
+
+**Core Classes:**
+- `SweepConfig`: Dataclass for sweep parameters (pca_dim, rank_r, k_min, k_max, max_iter, base_seed)
+- `ClusteringResult`: Result dataclass (labels, objective, representatives, metadata)
+- `SweepResult`: Aggregated results by K (by_k dict, pca_meta, stability metrics)
+
+**Key Functions:**
+- `mean_pool_tokens()`: Pool token embeddings to item-level embeddings
+- `pca_svd_project()`: PCA/SVD dimensionality reduction
+- `k_subspaces_kllmeans()`: K-subspaces KLLMeans clustering with rank-r approximation
+- `run_sweep()`: Orchestrate sweep across K range with optional paraphraser
+- `compute_stability_metrics()`: Pairwise ARI, silhouette scores, coverage metrics
+- `select_representatives()`: Choose cluster representatives (closest to centroid)
+
+**Features:**
+- **Minimal dependencies:** Only numpy/scipy for core algorithms; no DB/LLM dependencies in core
+- **Multi-restart support:** Run multiple initializations per K, compute stability metrics
+- **Optional paraphraser:** Accept callable for post-processing representatives (LLM summarization)
+- **Testable in isolation:** Pure functions with clear inputs/outputs
+
+**Test strategy:**
+- Unit tests for each algorithm function with synthetic data
+- Verify sweep produces consistent results across runs (with fixed seed)
+- Test stability metrics on known cluster structures
+- Verify multi-restart produces expected ARI distributions
+
+---
+
+### Step 7.8: Run/Experiment Provenance via Groups ⬜
+
+**Goal:** Establish standard conventions for using `Group` and `GroupMember` to track algorithm runs, experiments, and data provenance.
+
+**Dependencies:**
+- Phase 7.1 (V2 Schema with Group/GroupMember tables)
+
+**Files to create:**
+- `src/study_query_llm/services/provenance_service.py`
+
+**Files to update:**
+- `src/study_query_llm/db/models_v2.py` (document group_type conventions in docstrings)
+
+**Design:**
+
+**Standard Group Types:**
+- `dataset`: Input data collection (links to embedding RawCalls)
+- `embedding_batch`: Batch of embeddings created together
+- `run`: Complete algorithm execution (e.g., PCA+KLLMeans sweep)
+- `step`: Individual step within a run (e.g., "pca_projection", "clustering_k=5")
+- `metrics`: Computed metrics/analysis results
+- `summarization_batch`: Batch of LLM summarization calls
+
+**ProvenanceService Methods:**
+- `create_run_group()`: Create a run group with metadata (algorithm, config, timestamp)
+- `link_raw_calls_to_group()`: Add RawCalls to a group via GroupMember
+- `link_artifacts_to_group()`: Create CallArtifact entries and link to group
+- `get_run_provenance()`: Query all RawCalls, artifacts, and sub-groups for a run
+- `create_step_group()`: Create a step group within a run
+
+**Conventions:**
+- Run groups store algorithm config in `metadata_json` (k_range, pca_dim, embedding_model, etc.)
+- Step groups reference parent run via `metadata_json.parent_run_id`
+- RawCalls linked to groups via `GroupMember` with optional `role` (e.g., "input", "output", "intermediate")
+- Artifacts stored as files (JSON/NPY/CSV) with URIs in `CallArtifact`, linked to relevant RawCall or Group
+
+**Test strategy:**
+- Create a run group and verify it links to embedding RawCalls
+- Verify step groups can reference parent runs
+- Query provenance for a run and verify all linked RawCalls/artifacts are returned
+
+---
+
+### Step 7.9: Summarization Service ⬜
+
+**Goal:** Create a service for LLM-based summarization/paraphrasing that logs all calls to RawCall and integrates with grouping for experiment tracking.
+
+**Dependencies:**
+- Phase 1 (Provider layer)
+- Phase 2 (InferenceService)
+- Phase 7.1 (V2 Schema)
+- Phase 7.8 (Provenance via Groups)
+
+**Files to create:**
+- `src/study_query_llm/services/summarization_service.py`
+
+**Files to update:**
+- `src/study_query_llm/services/__init__.py` (export `SummarizationService`)
+
+**Design:**
+
+**Core Classes:**
+- `SummarizationService`: Main service class
+- `SummarizationRequest`: Request parameters dataclass (texts, llm_deployment, temperature, max_tokens, group_id)
+- `SummarizationResponse`: Response dataclass (summaries, raw_call_ids, metadata)
+
+**Key Methods:**
+- `summarize_batch()`: Summarize a batch of texts using specified LLM deployment
+- `create_paraphraser_for_llm()`: Factory function to create paraphraser callable for a specific deployment
+- `_log_summarization_call()`: Persist each summarization call to RawCall with modality="text"
+
+**Features:**
+- **LLM deployment selection:** Accept deployment name, create fresh Config() per deployment to pick up env var changes
+- **Batch processing:** Process multiple texts concurrently with asyncio
+- **RawCall logging:** Every summarization call logged to RawCall (success/failure)
+- **Group integration:** Optional `group_id` to link summarization calls to experiment runs
+- **Error handling:** Failed calls logged with `status="failed"` and `error_json`
+- **Deployment validation:** Optional pre-validation of deployment before batch processing
+
+**Test strategy:**
+- Verify summarization calls are logged to RawCall
+- Test batch processing with multiple texts
+- Verify group linkage works correctly
+- Test error handling for invalid deployments
+
+---
+
+### Step 7.10: Analysis Artifacts ⬜
+
+**Goal:** Store algorithm outputs (cluster labels, metrics, PCA components, sweep results) as artifacts linked to runs via CallArtifact and/or Group metadata.
+
+**Dependencies:**
+- Phase 7.1 (V2 Schema with CallArtifact)
+- Phase 7.7 (Algorithm Core Library)
+- Phase 7.8 (Provenance via Groups)
+
+**Files to create:**
+- `src/study_query_llm/services/artifact_service.py`
+
+**Files to update:**
+- `src/study_query_llm/algorithms/sweep.py` (optional integration with artifact service)
+
+**Design:**
+
+**ArtifactService Methods:**
+- `store_sweep_results()`: Save sweep results (by_k dict, metrics) as JSON artifact
+- `store_cluster_labels()`: Save cluster labels array as NPY artifact
+- `store_pca_components()`: Save PCA components/vectors as NPY artifact
+- `store_metrics()`: Save computed metrics (silhouette, ARI, coverage) as JSON artifact
+- `link_artifact_to_group()`: Create CallArtifact entry and link to Group via metadata
+
+**Artifact Storage:**
+- **File-based:** Store artifacts as files (JSON/NPY/CSV) in configurable directory
+- **URI format:** Use relative paths or full URIs in `CallArtifact.uri`
+- **Metadata:** Store artifact type, dimensions, and provenance in `CallArtifact.metadata_json`
+- **Group linkage:** Link artifacts to run groups via `CallArtifact` entries or `Group.metadata_json.artifacts`
+
+**Conventions:**
+- Artifact URIs follow pattern: `artifacts/{run_id}/{step_name}/{artifact_type}.{ext}`
+- JSON artifacts for structured data (sweep results, metrics)
+- NPY artifacts for numpy arrays (embeddings, cluster labels, PCA components)
+- CSV artifacts for tabular data (representatives, metrics tables)
+
+**Test strategy:**
+- Store sweep results and verify CallArtifact entry is created
+- Verify artifacts can be loaded back from URIs
+- Test group linkage and artifact retrieval
+
+---
+
+### Step 7.11: Group-of-Groups / RunStep Schema ⬜
+
+**Goal:** Add a schema table to explicitly model relationships between groups (e.g., run steps, parent-child relationships, execution order).
+
+**Dependencies:**
+- Phase 7.1 (V2 Schema)
+- Phase 7.8 (Provenance via Groups)
+
+**Files to create:**
+- Update `src/study_query_llm/db/models_v2.py` (add `GroupLink` model)
+- `src/study_query_llm/db/migrations/add_group_links.py` (migration script)
+
+**Design:**
+
+**New Table: GroupLink**
+- `id`: Primary key
+- `parent_group_id`: Foreign key to `Group` (parent group)
+- `child_group_id`: Foreign key to `Group` (child group)
+- `link_type`: Type of relationship ('step', 'contains', 'depends_on', 'generates')
+- `position`: Optional ordering within parent (for step sequences)
+- `metadata_json`: Additional relationship metadata
+- `created_at`: Timestamp
+
+**Use Cases:**
+- **Run steps:** Link step groups to parent run group with `link_type='step'` and `position` for ordering
+- **Data flow:** Link groups that depend on each other with `link_type='depends_on'`
+- **Generation:** Link groups that generate other groups (e.g., embedding batch generates run) with `link_type='generates'`
+- **Containment:** Link groups that contain other groups with `link_type='contains'`
+
+**Repository Methods:**
+- `create_group_link()`: Create a link between two groups
+- `get_group_children()`: Get all child groups for a parent
+- `get_group_parents()`: Get all parent groups for a child
+- `get_run_step_sequence()`: Get ordered step sequence for a run
+
+**Test strategy:**
+- Create run with multiple steps and verify GroupLink entries
+- Query step sequence and verify correct ordering
+- Test dependency traversal (get all dependencies for a group)
+
+---
+
 ## Summary: Implementation Checklist
 
 ### Phase 1: Provider Layer
@@ -664,6 +884,12 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - [x] Step 7.3: Migration Script (v1 → v2)
 - [ ] Step 7.4: Backfill Validation
 - [ ] Step 7.5: Embedding Service with Deterministic Caching
+- [ ] Step 7.6: Panel App Integration (v2 RawCall + Grouping)
+- [ ] Step 7.7: Algorithm Core Library (minimal deps)
+- [ ] Step 7.8: Run/Experiment Provenance via Groups
+- [ ] Step 7.9: Summarization Service
+- [ ] Step 7.10: Analysis Artifacts
+- [ ] Step 7.11: Group-of-Groups / RunStep Schema
 
 ---
 

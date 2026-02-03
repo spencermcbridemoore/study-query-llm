@@ -465,8 +465,28 @@ class EmbeddingService:
             EmbeddingResponse with vector and metadata
 
         Raises:
+            ValueError: If text is empty or becomes empty after normalization
             Exception: If embedding generation fails after retries
         """
+        # Validate text is not empty after normalization
+        normalized_text = self._normalize_text(request.text)
+        if not normalized_text:
+            error = ValueError(
+                "Cannot generate embedding for empty text (after normalization). "
+                "Text must contain at least one non-whitespace character."
+            )
+            # Log failure if repository is available
+            if self.repository:
+                request_hash = self._compute_request_hash(
+                    request.text,
+                    request.deployment,
+                    request.dimensions,
+                    request.encoding_format,
+                    request.provider,
+                )
+                self._log_failure(request, request_hash, error)
+            raise error
+
         # Compute request hash
         request_hash = self._compute_request_hash(
             request.text,

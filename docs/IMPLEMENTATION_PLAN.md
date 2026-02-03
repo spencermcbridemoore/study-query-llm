@@ -577,6 +577,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - **Deterministic caching:** Hash-based cache lookup (model + normalized_text + dimensions + encoding_format + provider)
 - **Deployment validation:** One-time probe with cached results per deployment name; validates deployment exists and supports embedding API before use
 - **Environment refresh:** Creates fresh `Config()` instance per deployment to ensure environment variable changes (e.g., `AZURE_OPENAI_DEPLOYMENT`) are picked up correctly
+- **Empty string validation:** Rejects empty strings, whitespace-only strings, and strings that become empty after normalization (null bytes, whitespace) before making API calls; logs failures to database
 - **Retry/backoff:** Exponential backoff (1s → 30s), max 6 attempts, handles `InternalServerError`, `APIConnectionError`, `RateLimitError`, `OperationalError`
 - **DB persistence:** Stores to `RawCall` (success/failure) and `EmbeddingVector` (vector data)
 - **Failure logging:** Non-retryable errors logged with `status="failed"` and `error_json`

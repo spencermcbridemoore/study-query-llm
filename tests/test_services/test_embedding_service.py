@@ -205,6 +205,103 @@ async def test_normalize_text():
 
 
 @pytest.mark.asyncio
+async def test_get_embedding_rejects_empty_string(db_connection):
+    """Test that empty strings are rejected before API calls."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        request = EmbeddingRequest(
+            text="",
+            deployment="text-embedding-ada-002",
+        )
+
+        with pytest.raises(ValueError, match="Cannot generate embedding for empty text"):
+            await service.get_embedding(request)
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_rejects_whitespace_only(db_connection):
+    """Test that whitespace-only strings are rejected."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        # Test various whitespace-only strings
+        whitespace_strings = ["   ", "\n\t\n", "  \r\n  ", "\t"]
+
+        for text in whitespace_strings:
+            request = EmbeddingRequest(
+                text=text,
+                deployment="text-embedding-ada-002",
+            )
+
+            with pytest.raises(ValueError, match="Cannot generate embedding for empty text"):
+                await service.get_embedding(request)
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_rejects_null_bytes_only(db_connection):
+    """Test that strings with only null bytes are rejected."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        request = EmbeddingRequest(
+            text="\x00\x00",
+            deployment="text-embedding-ada-002",
+        )
+
+        with pytest.raises(ValueError, match="Cannot generate embedding for empty text"):
+            await service.get_embedding(request)
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_rejects_whitespace_and_null_bytes(db_connection):
+    """Test that strings with only whitespace and null bytes are rejected."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        request = EmbeddingRequest(
+            text="  \x00  \n\t",
+            deployment="text-embedding-ada-002",
+        )
+
+        with pytest.raises(ValueError, match="Cannot generate embedding for empty text"):
+            await service.get_embedding(request)
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_logs_failure_for_empty_string(db_connection):
+    """Test that empty string failures are logged to the database."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        request = EmbeddingRequest(
+            text="   ",
+            deployment="text-embedding-ada-002",
+        )
+
+        with pytest.raises(ValueError):
+            await service.get_embedding(request)
+
+        # Check that failure was logged
+        from study_query_llm.db.models_v2 import RawCall
+        failed_calls = (
+            session.query(RawCall)
+            .filter(RawCall.modality == "embedding")
+            .filter(RawCall.status == "failed")
+            .all()
+        )
+
+        assert len(failed_calls) == 1
+        error_message = failed_calls[0].error_json.get("error_message", "")
+        assert "empty text" in error_message.lower()
+
+
+@pytest.mark.asyncio
 async def test_get_embeddings_batch(mock_embedding_response, db_connection):
     """Test that batch operations work correctly with caching per item."""
     with db_connection.session_scope() as session:

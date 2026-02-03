@@ -530,7 +530,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.4: Backfill Validation ⬜
+### Step 7.4: Backfill Validation ✅
 
 **Design:**
 - Compare v1 vs v2 row counts

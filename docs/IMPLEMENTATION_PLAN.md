@@ -799,7 +799,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.11: Group-of-Groups / RunStep Schema ⬜
+### Step 7.11: Group-of-Groups / RunStep Schema ✅
 
 **Goal:** Add a schema table to explicitly model relationships between groups (e.g., run steps, parent-child relationships, execution order).
 

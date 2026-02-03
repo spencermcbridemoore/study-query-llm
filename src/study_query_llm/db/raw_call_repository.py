@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_
-from .models_v2 import RawCall, Group, GroupMember, CallArtifact, EmbeddingVector
+from .models_v2 import RawCall, Group, GroupMember, CallArtifact, EmbeddingVector, GroupLink
 from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -475,3 +475,145 @@ class RawCallRepository:
         return self.session.query(Group).filter(
             Group.id.in_(group_ids)
         ).all()
+
+    # ========== GROUP LINK OPERATIONS ==========
+
+    def create_group_link(
+        self,
+        parent_group_id: int,
+        child_group_id: int,
+        link_type: str,
+        position: Optional[int] = None,
+        metadata_json: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Create a link between two groups.
+
+        Args:
+            parent_group_id: ID of the parent group
+            child_group_id: ID of the child group
+            link_type: Type of relationship ('step', 'contains', 'depends_on', 'generates')
+            position: Optional ordering within parent (for step sequences)
+            metadata_json: Optional additional relationship metadata
+
+        Returns:
+            GroupLink ID
+        """
+        # Check if link already exists
+        existing = self.session.query(GroupLink).filter_by(
+            parent_group_id=parent_group_id,
+            child_group_id=child_group_id,
+            link_type=link_type,
+        ).first()
+
+        if existing:
+            logger.debug(
+                f"Link already exists: parent={parent_group_id}, "
+                f"child={child_group_id}, type={link_type}"
+            )
+            return existing.id
+
+        link = GroupLink(
+            parent_group_id=parent_group_id,
+            child_group_id=child_group_id,
+            link_type=link_type,
+            position=position,
+            metadata_json=metadata_json or {},
+        )
+
+        self.session.add(link)
+        self.session.flush()
+        self.session.refresh(link)
+
+        logger.debug(
+            f"Created group link: id={link.id}, parent={parent_group_id}, "
+            f"child={child_group_id}, type={link_type}, position={position}"
+        )
+
+        return link.id
+
+    def get_group_children(
+        self,
+        parent_group_id: int,
+        link_type: Optional[str] = None,
+    ) -> List[Group]:
+        """
+        Get all child groups for a parent.
+
+        Args:
+            parent_group_id: ID of the parent group
+            link_type: Optional filter by link type
+
+        Returns:
+            List of child Group objects, ordered by position if available
+        """
+        query = self.session.query(GroupLink).filter_by(
+            parent_group_id=parent_group_id
+        )
+
+        if link_type:
+            query = query.filter_by(link_type=link_type)
+
+        links = query.order_by(GroupLink.position, GroupLink.created_at).all()
+
+        child_ids = [link.child_group_id for link in links]
+        if not child_ids:
+            return []
+
+        return self.session.query(Group).filter(Group.id.in_(child_ids)).all()
+
+    def get_group_parents(
+        self,
+        child_group_id: int,
+        link_type: Optional[str] = None,
+    ) -> List[Group]:
+        """
+        Get all parent groups for a child.
+
+        Args:
+            child_group_id: ID of the child group
+            link_type: Optional filter by link type
+
+        Returns:
+            List of parent Group objects
+        """
+        query = self.session.query(GroupLink).filter_by(
+            child_group_id=child_group_id
+        )
+
+        if link_type:
+            query = query.filter_by(link_type=link_type)
+
+        links = query.order_by(GroupLink.created_at).all()
+
+        parent_ids = [link.parent_group_id for link in links]
+        if not parent_ids:
+            return []
+
+        return self.session.query(Group).filter(Group.id.in_(parent_ids)).all()
+
+    def get_run_step_sequence(self, run_id: int) -> List[Group]:
+        """
+        Get ordered step sequence for a run.
+
+        Args:
+            run_id: ID of the run group
+
+        Returns:
+            List of step Group objects, ordered by position
+        """
+        links = self.session.query(GroupLink).filter_by(
+            parent_group_id=run_id,
+            link_type="step",
+        ).order_by(GroupLink.position, GroupLink.created_at).all()
+
+        step_ids = [link.child_group_id for link in links]
+        if not step_ids:
+            return []
+
+        # Get groups and preserve order
+        groups = self.session.query(Group).filter(Group.id.in_(step_ids)).all()
+        group_dict = {g.id: g for g in groups}
+
+        # Return in link order
+        return [group_dict[step_id] for step_id in step_ids if step_id in group_dict]

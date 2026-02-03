@@ -255,6 +255,68 @@ class CallArtifact(BaseV2):
         }
 
 
+class GroupLink(BaseV2):
+    """
+    Table for explicitly modeling relationships between groups.
+    
+    Supports parent-child relationships, step sequences, dependencies, and generation chains.
+    This allows tracking how groups relate to each other (e.g., run steps, data flow).
+    
+    Link Types:
+    - `step`: Step groups within a run (ordered by position)
+    - `contains`: One group contains another
+    - `depends_on`: One group depends on another (data flow)
+    - `generates`: One group generates another (e.g., embedding batch generates run)
+    
+    Attributes:
+        id: Primary key
+        parent_group_id: Foreign key to Group (parent group)
+        child_group_id: Foreign key to Group (child group)
+        link_type: Type of relationship ('step', 'contains', 'depends_on', 'generates')
+        position: Optional ordering within parent (for step sequences)
+        metadata_json: Additional relationship metadata
+        created_at: Timestamp when link was created
+    """
+    __tablename__ = 'group_links'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    parent_group_id = Column(Integer, ForeignKey('groups.id', ondelete='CASCADE'), nullable=False, index=True)
+    child_group_id = Column(Integer, ForeignKey('groups.id', ondelete='CASCADE'), nullable=False, index=True)
+    link_type = Column(String(50), nullable=False, index=True)
+    position = Column(Integer, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    
+    # Relationships
+    parent_group = relationship("Group", foreign_keys=[parent_group_id], backref="child_links")
+    child_group = relationship("Group", foreign_keys=[child_group_id], backref="parent_links")
+    
+    __table_args__ = (
+        Index('idx_group_links_parent_child', 'parent_group_id', 'child_group_id'),
+        Index('idx_group_links_type', 'link_type'),
+        Index('idx_group_links_parent_position', 'parent_group_id', 'position'),
+    )
+    
+    def __repr__(self) -> str:
+        return (
+            f"<GroupLink(id={self.id}, parent={self.parent_group_id}, "
+            f"child={self.child_group_id}, type={self.link_type}, "
+            f"position={self.position})>"
+        )
+    
+    def to_dict(self) -> dict:
+        """Convert model instance to dictionary."""
+        return {
+            'id': self.id,
+            'parent_group_id': self.parent_group_id,
+            'child_group_id': self.child_group_id,
+            'link_type': self.link_type,
+            'position': self.position,
+            'metadata_json': self.metadata_json,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class EmbeddingVector(BaseV2):
     """
     Table for storing embedding vectors.

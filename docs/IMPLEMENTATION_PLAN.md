@@ -756,7 +756,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.10: Analysis Artifacts ⬜
+### Step 7.10: Analysis Artifacts ✅
 
 **Goal:** Store algorithm outputs (cluster labels, metrics, PCA components, sweep results) as artifacts linked to runs via CallArtifact and/or Group metadata.
 

@@ -26,6 +26,7 @@ from .summarization_service import (
     SummarizationRequest,
     SummarizationResponse,
 )
+from .artifact_service import ArtifactService
 
 __all__ = [
     "InferenceService",
@@ -39,4 +40,5 @@ __all__ = [
     "SummarizationService",
     "SummarizationRequest",
     "SummarizationResponse",
+    "ArtifactService",
 ]

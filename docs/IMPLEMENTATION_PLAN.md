@@ -623,7 +623,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.7: Algorithm Core Library (minimal deps) ⬜
+### Step 7.7: Algorithm Core Library (minimal deps) ✅
 
 **Goal:** Extract core algorithm implementations (PCA/KLLMeans sweep, multi-restart clustering, stability metrics) into reusable modules in `src/` with minimal dependencies, separate from notebooks/scripts.
 
@@ -885,7 +885,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - [ ] Step 7.4: Backfill Validation
 - [ ] Step 7.5: Embedding Service with Deterministic Caching
 - [ ] Step 7.6: Panel App Integration (v2 RawCall + Grouping)
-- [ ] Step 7.7: Algorithm Core Library (minimal deps)
+- [x] Step 7.7: Algorithm Core Library (minimal deps)
 - [ ] Step 7.8: Run/Experiment Provenance via Groups
 - [ ] Step 7.9: Summarization Service
 - [ ] Step 7.10: Analysis Artifacts
@@ -901,3 +901,8 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - Integrate v2 schema into InferenceService to log failures (Phase 7.2)
 - Complete backfill validation for v1→v2 migration (Phase 7.4)
 - Implement Embedding Service with deterministic caching (Phase 7.5)
+- Extract algorithm core library from scripts/notebooks (Phase 7.7)
+- Implement provenance service and group conventions (Phase 7.8)
+- Implement summarization service with RawCall logging (Phase 7.9)
+- Add artifact storage service for algorithm outputs (Phase 7.10)
+- Add GroupLink schema for explicit group relationships (Phase 7.11)

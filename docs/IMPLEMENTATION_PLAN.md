@@ -712,7 +712,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.9: Summarization Service ⬜
+### Step 7.9: Summarization Service ✅
 
 **Goal:** Create a service for LLM-based summarization/paraphrasing that logs all calls to RawCall and integrates with grouping for experiment tracking.
 

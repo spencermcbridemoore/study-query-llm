@@ -21,6 +21,11 @@ from .preprocessors import PromptPreprocessor
 from .study_service import StudyService
 from .embedding_service import EmbeddingService, EmbeddingRequest, EmbeddingResponse
 from .provenance_service import ProvenanceService
+from .summarization_service import (
+    SummarizationService,
+    SummarizationRequest,
+    SummarizationResponse,
+)
 
 __all__ = [
     "InferenceService",
@@ -31,4 +36,7 @@ __all__ = [
     "EmbeddingRequest",
     "EmbeddingResponse",
     "ProvenanceService",
+    "SummarizationService",
+    "SummarizationRequest",
+    "SummarizationResponse",
 ]

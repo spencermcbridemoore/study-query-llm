@@ -20,6 +20,7 @@ from .model_registry import ModelRegistry
 from .preprocessors import PromptPreprocessor
 from .study_service import StudyService
 from .embedding_service import EmbeddingService, EmbeddingRequest, EmbeddingResponse
+from .provenance_service import ProvenanceService
 
 __all__ = [
     "InferenceService",
@@ -29,4 +30,5 @@ __all__ = [
     "EmbeddingService",
     "EmbeddingRequest",
     "EmbeddingResponse",
+    "ProvenanceService",
 ]

@@ -669,7 +669,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
-### Step 7.8: Run/Experiment Provenance via Groups ⬜
+### Step 7.8: Run/Experiment Provenance via Groups ✅
 
 **Goal:** Establish standard conventions for using `Group` and `GroupMember` to track algorithm runs, experiments, and data provenance.
 

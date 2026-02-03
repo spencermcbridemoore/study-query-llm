@@ -98,13 +98,25 @@ class Group(BaseV2):
     Groups can be created/modified/deleted without affecting immutable RawCall records.
     Multiple groups can reference the same RawCall via GroupMember.
     
+    Standard Group Types (see ProvenanceService for conventions):
+    - `dataset`: Input data collection (links to embedding RawCalls)
+    - `embedding_batch`: Batch of embeddings created together
+    - `run`: Complete algorithm execution (e.g., PCA+KLLMeans sweep)
+    - `step`: Individual step within a run (e.g., "pca_projection", "clustering_k=5")
+    - `metrics`: Computed metrics/analysis results
+    - `summarization_batch`: Batch of LLM summarization calls
+    - `batch`: Generic batch (legacy, use specific types above when possible)
+    - `experiment`: Generic experiment (legacy, use 'run' for algorithm executions)
+    - `label`: Generic label (legacy)
+    - `custom`: Custom group type
+    
     Attributes:
         id: Primary key
-        group_type: Type of group ('batch', 'experiment', 'label', etc.)
+        group_type: Type of group (see standard types above)
         name: Group name/identifier
         description: Optional description
         created_at: When group was created
-        metadata_json: Additional metadata as JSON
+        metadata_json: Additional metadata as JSON (algorithm config, parent_run_id, etc.)
     """
     __tablename__ = 'groups'
     

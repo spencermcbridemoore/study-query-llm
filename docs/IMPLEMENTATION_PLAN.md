@@ -880,16 +880,16 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ### Phase 7: Immutable Capture + Grouping DB (Postgres)
 - [x] Step 7.1: V2 Schema (Immutable Raw Calls)
-- [ ] Step 7.2: Log Success + Failure in RawCall
+- [x] Step 7.2: Log Success + Failure in RawCall
 - [x] Step 7.3: Migration Script (v1 → v2)
-- [ ] Step 7.4: Backfill Validation
-- [ ] Step 7.5: Embedding Service with Deterministic Caching
-- [ ] Step 7.6: Panel App Integration (v2 RawCall + Grouping)
+- [x] Step 7.4: Backfill Validation
+- [x] Step 7.5: Embedding Service with Deterministic Caching
+- [x] Step 7.6: Panel App Integration (v2 RawCall + Grouping)
 - [x] Step 7.7: Algorithm Core Library (minimal deps)
-- [ ] Step 7.8: Run/Experiment Provenance via Groups
-- [ ] Step 7.9: Summarization Service
-- [ ] Step 7.10: Analysis Artifacts
-- [ ] Step 7.11: Group-of-Groups / RunStep Schema
+- [x] Step 7.8: Run/Experiment Provenance via Groups
+- [x] Step 7.9: Summarization Service
+- [x] Step 7.10: Analysis Artifacts
+- [x] Step 7.11: Group-of-Groups / RunStep Schema
 
 ---
 

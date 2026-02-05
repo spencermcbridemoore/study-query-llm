@@ -19,8 +19,9 @@ import time
 import pickle
 from datetime import datetime
 from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
-from tqdm import tqdm
+from tqdm.asyncio import tqdm as async_tqdm
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -335,26 +336,49 @@ async def main():
         )
         print(f"✅ Created run group: id={run_group_id}")
 
-    # Run sweep for each LLM summarizer
-    print(f"\n🔄 Running sweeps...")
-    all_results = {}
-
-    for llm_deployment in tqdm(LLM_SUMMARIZERS, desc="LLM Summarizers"):
+    # Run sweep for each LLM summarizer concurrently
+    print(f"\n🔄 Running sweeps concurrently...")
+    
+    async def run_single_sweep(llm_deployment: str) -> tuple[str, Any]:
+        """Run a single sweep for a given LLM deployment."""
         summarizer_name = "None" if llm_deployment is None else llm_deployment
-        print(f"\n{'=' * 60}")
-        print(f"Running sweep with summarizer: {summarizer_name}")
-        print(f"{'=' * 60}")
-
+        
         # Create paraphraser
         paraphraser = create_paraphraser_for_llm(llm_deployment, db)
-
-        # Run sweep
-        result = run_sweep(texts, embeddings, SWEEP_CONFIG, paraphraser=paraphraser)
+        
+        # Run sweep in thread pool executor (CPU-bound work)
+        # The paraphraser will handle async internally
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            result = await loop.run_in_executor(
+                executor,
+                lambda: run_sweep(texts, embeddings, SWEEP_CONFIG, paraphraser=paraphraser)
+            )
+        
+        print(f"✅ Completed {summarizer_name}. Ks: {sorted([int(k) for k in result.by_k.keys()])}")
+        return summarizer_name, result
+    
+    # Create tasks for all sweeps
+    tasks = [
+        run_single_sweep(llm_deployment)
+        for llm_deployment in LLM_SUMMARIZERS
+    ]
+    
+    # Run all sweeps concurrently with progress tracking
+    results_list = await async_tqdm.gather(
+        *tasks,
+        desc="LLM Summarizers",
+        return_exceptions=True
+    )
+    
+    # Process results and check for errors
+    all_results = {}
+    for result_item in results_list:
+        if isinstance(result_item, Exception):
+            print(f"❌ Error in sweep: {result_item}")
+            raise result_item
+        summarizer_name, result = result_item
         all_results[summarizer_name] = result
-
-        print(
-            f"✅ Completed. Ks: {sorted([int(k) for k in result.by_k.keys()])}"
-        )
 
     # Summary
     print(f"\n{'=' * 60}")

@@ -322,8 +322,9 @@ async def main():
         provenance = ProvenanceService(repository=repo)
 
         run_group_id = provenance.create_run_group(
+            algorithm="pca_kllmeans_sweep",
             name=f"pca_kllmeans_sweep_{EMBEDDING_DEPLOYMENT}",
-            metadata={
+            config={
                 "embedding_deployment": EMBEDDING_DEPLOYMENT,
                 "n_texts": len(texts),
                 "k_range": f"{SWEEP_CONFIG.k_min}-{SWEEP_CONFIG.k_max}",

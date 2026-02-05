@@ -45,7 +45,24 @@ class DatabaseConnectionV2:
         """
         self.connection_string = connection_string
         self.enable_pgvector = enable_pgvector
-        self.engine = create_engine(connection_string, echo=echo)
+        # #region agent log
+        import json
+        from datetime import datetime, timezone
+        try:
+            with open(r'c:\Users\spenc\Cursor Repos\study-query-llm\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "pre-fix", "hypothesisId": "B", "location": "connection_v2.py:__init__", "message": "Creating engine with connection pool settings", "data": {"has_ssl": "sslmode" in connection_string.lower()}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + '\n')
+        except Exception:
+            pass
+        # #endregion
+        # Add connection pool settings to handle stale SSL connections
+        # pool_pre_ping: Test connections before using them (handles stale SSL connections)
+        # pool_recycle: Recycle connections after 1 hour to avoid SSL timeouts
+        self.engine = create_engine(
+            connection_string,
+            echo=echo,
+            pool_pre_ping=True,  # Test connections before using (handles stale SSL connections)
+            pool_recycle=3600,   # Recycle connections after 1 hour
+        )
         self.SessionLocal = sessionmaker(
             autocommit=False,
             autoflush=False,
@@ -135,14 +152,37 @@ class DatabaseConnectionV2:
         Yields:
             SQLAlchemy Session instance
         """
+        # #region agent log
+        import json
+        from datetime import datetime, timezone
+        try:
+            with open(r'c:\Users\spenc\Cursor Repos\study-query-llm\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "pre-fix", "hypothesisId": "B", "location": "connection_v2.py:session_scope", "message": "Creating new session", "data": {}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + '\n')
+        except Exception:
+            pass
+        # #endregion
         session = self.get_session()
         try:
             yield session
             session.commit()
             logger.debug("Database transaction committed")
+            # #region agent log
+            try:
+                with open(r'c:\Users\spenc\Cursor Repos\study-query-llm\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "B", "location": "connection_v2.py:session_scope", "message": "Transaction committed successfully", "data": {}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + '\n')
+            except Exception:
+                pass
+            # #endregion
         except Exception as e:
             session.rollback()
             logger.error(f"Database transaction rolled back: {str(e)}", exc_info=True)
+            # #region agent log
+            try:
+                with open(r'c:\Users\spenc\Cursor Repos\study-query-llm\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "pre-fix", "hypothesisId": "B", "location": "connection_v2.py:session_scope", "message": "Transaction rolled back due to error", "data": {"error_type": type(e).__name__, "error_msg": str(e)[:200]}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + '\n')
+            except Exception:
+                pass
+            # #endregion
             raise
         finally:
             session.close()

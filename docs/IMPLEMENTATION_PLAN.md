@@ -427,7 +427,9 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ### Step 6.1: Error Handling and Logging ⚠️
 
-**Implementation:** [`src/study_query_llm/utils/logging_config.py`](src/study_query_llm/utils/logging_config.py)
+**Implementation:** 
+- [`src/study_query_llm/utils/logging_config.py`](src/study_query_llm/utils/logging_config.py) - Logging infrastructure
+- [`src/study_query_llm/db/connection_v2.py`](src/study_query_llm/db/connection_v2.py) - Database connection resiliency
 
 **Design:**
 - Comprehensive logging throughout application
@@ -437,7 +439,9 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 **Still missing:**
 - Enhanced error handling in some components
-- Database connection resiliency (pool_pre_ping, pool_recycle) for long-running processes and environments with connection timeouts (e.g., Colab, cloud DBs with SSL)
+
+**Completed:**
+- Database connection resiliency (pool_pre_ping, pool_recycle) for long-running processes and environments with connection timeouts (e.g., Colab, cloud DBs with SSL) - Implemented in [`src/study_query_llm/db/connection_v2.py`](src/study_query_llm/db/connection_v2.py)
 
 ---
 

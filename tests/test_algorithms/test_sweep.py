@@ -76,6 +76,54 @@ def test_run_sweep_with_paraphraser():
     assert all(r.startswith("paraphrased_") for r in reps)
 
 
+def test_run_sweep_with_embedder():
+    """Test sweep with embedder function for re-embedding summarized representatives."""
+    n, d = 20, 8
+    rng = np.random.default_rng(42)
+    texts = [f"text_{i}" for i in range(n)]
+    embeddings = rng.standard_normal((n, d))
+    cfg = SweepConfig(k_min=2, k_max=3, n_restarts=2, compute_stability=True)
+
+    def paraphraser(texts_list):
+        return [f"summarized_{t}" for t in texts_list]
+
+    # Create an embedder that returns different embeddings for summarized texts
+    def embedder(texts_list):
+        # Return embeddings that are different from original (shifted)
+        base_embeddings = rng.standard_normal((len(texts_list), d))
+        # Add a shift to make them clearly different
+        return base_embeddings + 1.0
+
+    result = run_sweep(texts, embeddings, cfg, paraphraser=paraphraser, embedder=embedder)
+
+    # Verify representatives are summarized
+    reps = result.by_k["2"]["representatives"]
+    assert all(r.startswith("summarized_") for r in reps)
+
+    # Verify stability metrics exist (computed from re-embedded summaries)
+    assert "stability" in result.by_k["2"]
+    assert "silhouette" in result.by_k["2"]["stability"]
+
+
+def test_run_sweep_embedder_without_paraphraser():
+    """Test that embedder is only used when paraphraser is also provided."""
+    n, d = 20, 8
+    rng = np.random.default_rng(42)
+    texts = [f"text_{i}" for i in range(n)]
+    embeddings = rng.standard_normal((n, d))
+    cfg = SweepConfig(k_min=2, k_max=3)
+
+    def embedder(texts_list):
+        return rng.standard_normal((len(texts_list), d))
+
+    # Without paraphraser, embedder should be ignored
+    result = run_sweep(texts, embeddings, cfg, embedder=embedder)
+
+    # Representatives should be original texts (not re-embedded)
+    reps = result.by_k["2"]["representatives"]
+    assert all(r in texts for r in reps)
+
+
 def test_run_sweep_validation():
     """Test sweep input validation."""
     n, d = 10, 5

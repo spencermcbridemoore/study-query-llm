@@ -365,11 +365,9 @@ async def main():
     ]
     
     # Run all sweeps concurrently with progress tracking
-    results_list = await async_tqdm.gather(
-        *tasks,
-        desc="LLM Summarizers",
-        return_exceptions=True
-    )
+    # Note: async_tqdm.gather() doesn't support return_exceptions parameter
+    # Use asyncio.gather() with return_exceptions=True
+    results_list = await asyncio.gather(*tasks, return_exceptions=True)
     
     # Process results and check for errors
     all_results = {}

@@ -107,8 +107,10 @@ This document establishes consistent practices for all development work on this 
 ## Git Workflow Consistency
 
 ### Commit Practices
-- Stage/commit at logical milestones
-- Stage/commit/push when finishing checklists
+- **Stage/commit at sensible checkpoints**: Complete a feature, fix a bug, finish a logical unit of work
+- Commit after making related changes that form a coherent unit (e.g., all changes for one feature, all fixes for one bug)
+- Avoid committing broken/incomplete code that would break the build or tests
+- Stage/commit/push when finishing checklists or completing tasks
 - Use descriptive commit messages
 - Never commit `.env` files or API keys
 

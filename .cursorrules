@@ -31,8 +31,10 @@
 - Test structure should mirror `src/` structure (e.g., `tests/test_services/` mirrors `src/study_query_llm/services/`)
 
 ## Git Workflow
-- Stage/commit at logical milestones (per user preference)
-- Stage/commit/push when finishing checklists (per user preference)
+- Stage/commit at sensible checkpoints (completing a feature, fixing a bug, finishing a logical unit of work)
+- Stage/commit/push when finishing checklists or completing tasks
+- Commit after making related changes that form a coherent unit (e.g., all changes for one feature, all fixes for one bug)
+- Avoid committing broken/incomplete code that would break the build or tests
 - Never commit `.env` files or API keys (see `SECURITY.md`)
 - Use descriptive commit messages
 

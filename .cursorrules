@@ -1,0 +1,81 @@
+# Study Query LLM - AI Assistant Rules
+
+## Source of Truth
+- **Implementation Status**: Always check `docs/IMPLEMENTATION_PLAN.md` for current phase and status
+- **Architecture Decisions**: Refer to `docs/ARCHITECTURE.md` for design patterns and layer responsibilities
+- **Planning**: Update `IMPLEMENTATION_PLAN.md` when completing phases or adding new work
+- **Status Markers**: Use ✅ (implemented), ⚠️ (partial), ⬜ (not implemented) in IMPLEMENTATION_PLAN.md
+
+## Code Style & Conventions
+- Use `encoding='utf-8'` in all Python file operations (open, read_text, write_text) for Windows compatibility
+- Follow bottom-up, incremental development approach (see IMPLEMENTATION_PLAN.md philosophy)
+- Each component must be testable in isolation
+- Use async/await for all I/O operations (LLM API calls, database operations)
+- Services receive dependencies via constructor injection (no global state)
+- Follow repository pattern for database access (see ARCHITECTURE.md)
+
+## Documentation Requirements
+- Update `IMPLEMENTATION_PLAN.md` status markers (✅ ⚠️ ⬜) when completing work
+- Add docstrings to all public classes and functions
+- Update relevant docs when changing architecture or adding features:
+  - Architecture changes → update `docs/ARCHITECTURE.md`
+  - New features → update `docs/IMPLEMENTATION_PLAN.md` and `README.md`
+  - API changes → update `docs/API.md`
+- Keep README.md status section current with implementation progress
+
+## Testing Requirements
+- Write tests for all new components (see `tests/` structure)
+- Use pytest fixtures from `tests/conftest.py`
+- Mark API-dependent tests with `@pytest.mark.requires_api`
+- Run `pytest` before committing
+- Test structure should mirror `src/` structure (e.g., `tests/test_services/` mirrors `src/study_query_llm/services/`)
+
+## Git Workflow
+- Stage/commit at logical milestones (per user preference)
+- Stage/commit/push when finishing checklists (per user preference)
+- Never commit `.env` files or API keys (see `SECURITY.md`)
+- Use descriptive commit messages
+
+## Project Structure
+- Core package: `src/study_query_llm/` (framework-agnostic)
+  - `providers/` - LLM provider abstractions
+  - `services/` - Business logic layer
+  - `db/` - Database models and repositories
+  - `algorithms/` - Core algorithm implementations (minimal dependencies)
+  - `utils/` - Utilities (logging, etc.)
+- GUI: `panel_app/` - Panel web interface
+- Tests: `tests/` (mirror `src/` structure)
+- Scripts: `scripts/` - Standalone utility scripts
+- Notebooks: `notebooks/` - Jupyter notebooks for analysis
+- Documentation: `docs/` - All project documentation
+
+## Database Schema
+- **v1 schema**: Legacy schema (see Phase 3 in IMPLEMENTATION_PLAN.md)
+- **v2 schema**: Current immutable schema (see Phase 7.1 in IMPLEMENTATION_PLAN.md)
+- Always use v2 schema (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`) for new features
+- v2 schema includes: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `EmbeddingVector`, `GroupLink`
+
+## Before Making Changes
+1. Check `IMPLEMENTATION_PLAN.md` for current phase status
+2. Verify architecture alignment with `ARCHITECTURE.md`
+3. Check if similar functionality already exists
+4. Ensure tests exist or plan to add them
+5. Consider impact on existing phases/components
+
+## Key Design Patterns
+- **Provider Layer**: Abstract base class `BaseLLMProvider` with standardized `ProviderResponse`
+- **Service Layer**: Business logic with dependency injection (provider + repository)
+- **Repository Pattern**: All database access through repository classes
+- **Factory Pattern**: `ProviderFactory` for creating provider instances
+- **Async Throughout**: All I/O operations use async/await
+
+## Security
+- Never hardcode API keys or credentials (see `SECURITY.md`)
+- Use environment variables via `config.py`
+- Validate user input in services layer
+- Use parameterized queries (SQLAlchemy ORM handles this)
+
+## Algorithm Development
+- Core algorithms in `src/study_query_llm/algorithms/` with minimal dependencies (numpy/scipy only)
+- Notebooks/scripts can use algorithms but algorithms should not depend on DB/LLM layers
+- Use provenance service for tracking algorithm runs (see Phase 7.8 in IMPLEMENTATION_PLAN.md)

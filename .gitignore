@@ -111,3 +111,14 @@ Thumbs.db
 *.bak
 *.backup
 ~*
+
+# Temporary plan files (session-specific)
+.plans/
+
+# Generated sweep result files (large data files)
+notebooks/pca_kllmeans_sweep_results_*.pkl
+
+# Debug logs
+.cursor/debug.log
+notebooks/.cursor/debug.log
+**/.cursor/debug.log

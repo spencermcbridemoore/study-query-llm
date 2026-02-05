@@ -23,6 +23,12 @@ This document establishes consistent practices for all development work on this 
 3. Update relevant documentation (ARCHITECTURE.md, API.md) if design changed
 4. Ensure tests are written and passing
 
+### Plan File Management (Cursor-specific)
+When creating temporary plan files in "plan mode", use session-aware naming to prevent conflicts across agent sessions. See `.cursor/PLANNING_GUIDE.md` for details on:
+- Session identification using `CURSOR_TRACE_ID`
+- Creating uniquely-named plan files in `.plans/` directory
+- Using the `session_utils` module for plan file management
+
 ## Code Consistency
 
 ### Development Approach

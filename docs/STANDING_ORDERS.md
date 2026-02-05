@@ -113,11 +113,16 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 ## Git Workflow Consistency
 
 ### Commit Practices
+- **MANDATORY: Stage and commit when completing a feature or task**
+  - When all todos for a feature are completed → stage/commit immediately
+  - When a bug is fixed → stage/commit immediately
+  - When a logical unit of work is finished → stage/commit immediately
+  - **Do NOT wait for user to ask** - commit proactively at natural completion points
 - **Stage/commit at sensible checkpoints**: Complete a feature, fix a bug, finish a logical unit of work
 - Commit after making related changes that form a coherent unit (e.g., all changes for one feature, all fixes for one bug)
 - Avoid committing broken/incomplete code that would break the build or tests
 - Stage/commit/push when finishing checklists or completing tasks
-- Use descriptive commit messages
+- Use descriptive commit messages that explain what was changed and why
 - Never commit `.env` files or API keys
 
 ### Branch Strategy

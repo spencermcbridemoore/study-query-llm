@@ -19,6 +19,7 @@ Panel-based web application for running LLM inference experiments across multipl
 - Always use v2 database schema for new features (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`)
 - Follow bottom-up, incremental development approach
 - Update `docs/IMPLEMENTATION_PLAN.md` status markers when completing work
+- **MANDATORY: Stage and commit when completing features/tasks** - do not wait for user to ask
 - Never commit `.env` files or API keys (see `SECURITY.md`)
 - Use `encoding='utf-8'` for all Python file operations (Windows compatibility)
 

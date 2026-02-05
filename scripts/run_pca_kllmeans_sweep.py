@@ -247,16 +247,16 @@ async def main():
     print("=" * 60)
 
     # Initialize database
-    print(f"\n📊 Initializing database...")
+    print("\n[INFO] Initializing database...")
     db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
     db.init_db()
-    print(f"✅ Database initialized")
+    print("[OK] Database initialized")
 
     # Load prompt dictionary
     # Option 1: Load from pickle file
     # Option 2: Load from JSON file
     # Option 3: Define directly in script (see below)
-    print(f"\n📝 Loading prompts...")
+    print("\n[INFO] Loading prompts...")
     
     database_estela_dict = None
     
@@ -292,7 +292,7 @@ async def main():
             database_estela_dict = {}
             
             if not database_estela_dict:
-                print("\n❌ ERROR: database_estela_dict is empty.")
+                print("\n[ERROR] database_estela_dict is empty.")
                 print("   Please do one of the following:")
                 print("   1. Set PROMPT_DICT_FILE environment variable to a pickle file path")
                 print("   2. Set PROMPT_DICT_JSON environment variable to a JSON file path")
@@ -303,21 +303,21 @@ async def main():
     flat_prompts = flatten_prompt_dict(database_estela_dict)
     texts = list(flat_prompts.values())
     texts = _clean_texts(texts)
-    print(f"✅ Loaded {len(texts)} valid prompts")
+    print(f"[OK] Loaded {len(texts)} valid prompts")
 
     # Show samples
-    print(f"\n📋 Sample prompts:")
+    print("\n[INFO] Sample prompts:")
     for i, (k, v) in enumerate(list(flat_prompts.items())[:3]):
         print(f"  {i+1}. Key: {k}")
         print(f"     Text: {v[:100]}{'...' if len(v) > 100 else ''}")
 
     # Fetch embeddings
-    print(f"\n🔮 Fetching embeddings using {EMBEDDING_DEPLOYMENT}...")
+    print(f"\n[INFO] Fetching embeddings using {EMBEDDING_DEPLOYMENT}...")
     embeddings = await fetch_embeddings_async(texts, EMBEDDING_DEPLOYMENT, db)
-    print(f"✅ Got embeddings: shape {embeddings.shape}")
+    print(f"[OK] Got embeddings: shape {embeddings.shape}")
 
     # Create run group for provenance tracking
-    print(f"\n📦 Creating run group for provenance tracking...")
+    print("\n[INFO] Creating run group for provenance tracking...")
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         provenance = ProvenanceService(repository=repo)
@@ -334,10 +334,10 @@ async def main():
                 ],
             },
         )
-        print(f"✅ Created run group: id={run_group_id}")
+        print(f"[OK] Created run group: id={run_group_id}")
 
     # Run sweep for each LLM summarizer concurrently
-    print(f"\n🔄 Running sweeps concurrently...")
+    print("\n[INFO] Running sweeps concurrently...")
     
     async def run_single_sweep(llm_deployment: str) -> tuple[str, Any]:
         """Run a single sweep for a given LLM deployment."""
@@ -355,7 +355,7 @@ async def main():
                 lambda: run_sweep(texts, embeddings, SWEEP_CONFIG, paraphraser=paraphraser)
             )
         
-        print(f"✅ Completed {summarizer_name}. Ks: {sorted([int(k) for k in result.by_k.keys()])}")
+        print(f"[OK] Completed {summarizer_name}. Ks: {sorted([int(k) for k in result.by_k.keys()])}")
         return summarizer_name, result
     
     # Create tasks for all sweeps
@@ -375,7 +375,7 @@ async def main():
     all_results = {}
     for result_item in results_list:
         if isinstance(result_item, Exception):
-            print(f"❌ Error in sweep: {result_item}")
+            print(f"[ERROR] Error in sweep: {result_item}")
             raise result_item
         summarizer_name, result = result_item
         all_results[summarizer_name] = result
@@ -393,9 +393,9 @@ async def main():
     print(f"\nResults structure: all_results[summarizer_name]['by_k'][k_value]")
 
     # Save results
-    print(f"\n💾 Saving results...")
+    print("\n[INFO] Saving results...")
     output_file = save_results(all_results)
-    print(f"✅ Results saved to: {output_file}")
+    print(f"[OK] Results saved to: {output_file}")
     print(f"   Includes: representatives, labels, objectives, stability metrics, and distance matrices")
     print(f"\n   Example access:")
     print(f"     results = pickle.load(open('{output_file}', 'rb'))")
@@ -417,11 +417,11 @@ async def main():
                 print(f"    Silhouette: {stab['silhouette']['mean']:.3f} ± {stab['silhouette']['std']:.3f}")
                 print(f"    Stability ARI: {stab['stability_ari']['mean']:.3f} ± {stab['stability_ari']['std']:.3f}")
 
-    print(f"\n✅ Analysis complete!")
+    print("\n[OK] Analysis complete!")
     return all_results, output_file
 
 
 if __name__ == "__main__":
     # Run the main function
     results, output_file = asyncio.run(main())
-    print(f"\n📁 Results saved to: {output_file}")
+    print(f"\n[INFO] Results saved to: {output_file}")

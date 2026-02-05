@@ -261,6 +261,80 @@ def test_get_groups_for_call(v2_db_connection):
         assert set(g.id for g in groups) == {group1_id, group2_id}
 
 
+def test_get_or_create_defective_group(v2_db_connection):
+    """Test getting or creating the defective_data group."""
+    with v2_db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        
+        # First call should create the group
+        group_id1 = repo.get_or_create_defective_group()
+        assert group_id1 > 0
+        
+        # Second call should return the same group
+        group_id2 = repo.get_or_create_defective_group()
+        assert group_id2 == group_id1
+        
+        # Verify group properties
+        group = repo.get_group_by_id(group_id1)
+        assert group is not None
+        assert group.group_type == "label"
+        assert group.name == "defective_data"
+
+
+def test_is_call_defective(v2_db_connection):
+    """Test checking if a call is marked as defective."""
+    with v2_db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        
+        # Create test calls
+        call_id1 = repo.insert_raw_call("test", {"prompt": "P1"}, response_json={"text": "R1"})
+        call_id2 = repo.insert_raw_call("test", {"prompt": "P2"}, response_json={"text": "R2"})
+        
+        # Initially, calls should not be defective
+        assert not repo.is_call_defective(call_id1)
+        assert not repo.is_call_defective(call_id2)
+        
+        # Mark call_id1 as defective
+        group_id = repo.get_or_create_defective_group()
+        repo.add_call_to_group(group_id, call_id1, role="bogus_run")
+        
+        # Now call_id1 should be defective, call_id2 should not
+        assert repo.is_call_defective(call_id1)
+        assert not repo.is_call_defective(call_id2)
+
+
+def test_query_raw_calls_excluding_defective(v2_db_connection):
+    """Test querying raw calls with defective exclusion."""
+    with v2_db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        
+        # Create test calls with different modalities
+        call_id1 = repo.insert_raw_call("test", {"input": "text1"}, modality="embedding", response_json={"embedding": [0.1, 0.2]})
+        call_id2 = repo.insert_raw_call("test", {"input": "text2"}, modality="embedding", response_json={"embedding": [0.3, 0.4]})
+        call_id3 = repo.insert_raw_call("test", {"input": "text3"}, modality="text", response_json={"text": "response"})
+        
+        # Mark call_id2 as defective
+        group_id = repo.get_or_create_defective_group()
+        repo.add_call_to_group(group_id, call_id2, role="bogus_embedding")
+        
+        # Query all embeddings - should exclude call_id2
+        embedding_calls = repo.query_raw_calls_excluding_defective(modality="embedding", limit=100)
+        call_ids = [c.id for c in embedding_calls]
+        
+        assert call_id1 in call_ids
+        assert call_id2 not in call_ids  # Should be excluded
+        assert len(embedding_calls) == 1
+        
+        # Query all calls - should still exclude call_id2
+        all_calls = repo.query_raw_calls_excluding_defective(limit=100)
+        all_call_ids = [c.id for c in all_calls]
+        
+        assert call_id1 in all_call_ids
+        assert call_id2 not in all_call_ids  # Should be excluded
+        assert call_id3 in all_call_ids
+        assert len(all_calls) == 2
+
+
 def test_get_provider_stats(v2_db_connection):
     """Test getting provider statistics."""
     with v2_db_connection.session_scope() as session:

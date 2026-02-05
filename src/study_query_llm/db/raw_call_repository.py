@@ -476,6 +476,107 @@ class RawCallRepository:
             Group.id.in_(group_ids)
         ).all()
 
+    # ========== DEFECTIVE DATA HELPERS ==========
+
+    def get_or_create_defective_group(self) -> int:
+        """
+        Get or create the standard "defective_data" group.
+        
+        Convention: Group with name "defective_data" and type "label" is used
+        to mark RawCall records as defective/excluded from analysis.
+        
+        Returns:
+            The ID of the defective_data group
+        """
+        # Try to find existing group
+        existing = self.session.query(Group).filter_by(
+            group_type="label",
+            name="defective_data"
+        ).first()
+        
+        if existing:
+            return existing.id
+        
+        # Create if doesn't exist
+        return self.create_group(
+            group_type="label",
+            name="defective_data",
+            description="RawCall records marked as defective/excluded from analysis"
+        )
+
+    def is_call_defective(self, call_id: int) -> bool:
+        """
+        Check if a raw call is marked as defective.
+        
+        Args:
+            call_id: ID of the raw call to check
+        
+        Returns:
+            True if call is in the "defective_data" group, False otherwise
+        """
+        group_id = self.get_or_create_defective_group()
+        groups = self.get_groups_for_call(call_id)
+        return any(g.id == group_id for g in groups)
+
+    def query_raw_calls_excluding_defective(
+        self,
+        provider: Optional[str] = None,
+        modality: Optional[str] = None,
+        status: Optional[str] = None,
+        date_range: Optional[Tuple[datetime, datetime]] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[RawCall]:
+        """
+        Query raw calls with filters, excluding those marked as defective.
+        
+        Uses SQL LEFT JOIN to exclude defective calls efficiently in the database.
+        
+        Args:
+            provider: Filter by provider name (optional)
+            modality: Filter by modality (optional)
+            status: Filter by status (optional)
+            date_range: Tuple of (start_date, end_date) for filtering (optional)
+            limit: Maximum number of results (default: 100)
+            offset: Number of results to skip for pagination (default: 0)
+        
+        Returns:
+            List of RawCall objects, ordered by created_at descending, excluding defective calls
+        """
+        # Get defective group ID
+        defective_group_id = self.get_or_create_defective_group()
+        
+        # Build base query
+        query = self.session.query(RawCall).outerjoin(
+            GroupMember,
+            and_(
+                RawCall.id == GroupMember.call_id,
+                GroupMember.group_id == defective_group_id
+            )
+        ).filter(
+            GroupMember.id == None  # Exclude calls that are in defective group
+        )
+        
+        # Apply filters
+        if provider:
+            query = query.filter(RawCall.provider == provider)
+        
+        if modality:
+            query = query.filter(RawCall.modality == modality)
+        
+        if status:
+            query = query.filter(RawCall.status == status)
+        
+        if date_range:
+            start_date, end_date = date_range
+            query = query.filter(RawCall.created_at.between(start_date, end_date))
+        
+        # Order and paginate
+        query = query.order_by(desc(RawCall.created_at))
+        query = query.limit(limit).offset(offset)
+        
+        return query.all()
+
     # ========== GROUP LINK OPERATIONS ==========
 
     def create_group_link(

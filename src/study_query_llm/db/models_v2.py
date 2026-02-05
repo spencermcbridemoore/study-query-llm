@@ -107,7 +107,7 @@ class Group(BaseV2):
     - `summarization_batch`: Batch of LLM summarization calls
     - `batch`: Generic batch (legacy, use specific types above when possible)
     - `experiment`: Generic experiment (legacy, use 'run' for algorithm executions)
-    - `label`: Generic label (legacy)
+    - `label`: Generic label (used for defective data exclusion - convention: group name "defective_data")
     - `custom`: Custom group type
     
     Attributes:

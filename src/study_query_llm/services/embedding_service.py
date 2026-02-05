@@ -91,6 +91,7 @@ class EmbeddingService:
     def __init__(
         self,
         repository: Optional["RawCallRepository"] = None,
+        require_db_persistence: bool = True,
         max_retries: int = 6,
         initial_wait: float = 1.0,
         max_wait: float = 30.0,
@@ -100,11 +101,15 @@ class EmbeddingService:
 
         Args:
             repository: Optional RawCallRepository for DB persistence
+            require_db_persistence: If True (default), raise exception if DB save fails when repository is provided.
+                                   If False, log warning and continue (graceful degradation).
+                                   Ignored if repository is None.
             max_retries: Maximum number of retry attempts (default: 6)
             initial_wait: Initial wait time in seconds for exponential backoff (default: 1.0)
             max_wait: Maximum wait time in seconds between retries (default: 30.0)
         """
         self.repository = repository
+        self.require_db_persistence = require_db_persistence
         self.max_retries = max_retries
         self.initial_wait = initial_wait
         self.max_wait = max_wait
@@ -591,10 +596,23 @@ class EmbeddingService:
                     )
 
                 except Exception as db_error:
-                    logger.error(
-                        f"Failed to persist embedding: {str(db_error)}", exc_info=True
-                    )
-                    # Continue even if DB save fails
+                    if self.require_db_persistence:
+                        # Fail-fast: raise the error for experimental data tracking
+                        logger.error(
+                            f"Failed to persist embedding (require_db_persistence=True): {str(db_error)}",
+                            exc_info=True
+                        )
+                        raise RuntimeError(
+                            f"Database persistence failed. This is required for experimental data tracking. "
+                            f"Original error: {str(db_error)}"
+                        ) from db_error
+                    else:
+                        # Graceful degradation: log warning and continue
+                        logger.warning(
+                            f"Failed to persist embedding (require_db_persistence=False): {str(db_error)}",
+                            exc_info=True
+                        )
+                        # Continue even if DB save fails
 
             return EmbeddingResponse(
                 vector=vector,

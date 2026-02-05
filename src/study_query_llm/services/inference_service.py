@@ -59,6 +59,7 @@ class InferenceService:
         self,
         provider: BaseLLMProvider,
         repository: Optional["RawCallRepository"] = None,
+        require_db_persistence: bool = True,
         max_retries: int = 3,
         initial_wait: float = 1.0,
         max_wait: float = 10.0,
@@ -75,6 +76,9 @@ class InferenceService:
         Args:
             provider: Any LLM provider implementing BaseLLMProvider
             repository: Optional v2 RawCallRepository for logging
+            require_db_persistence: If True (default), raise exception if DB save fails when repository is provided.
+                                   If False, log warning and continue (graceful degradation).
+                                   Ignored if repository is None.
             max_retries: Maximum number of retry attempts (default: 3)
             initial_wait: Initial wait time in seconds for exponential backoff (default: 1.0)
             max_wait: Maximum wait time in seconds between retries (default: 10.0)
@@ -87,6 +91,7 @@ class InferenceService:
         """
         self.provider = provider
         self.repository = repository
+        self.require_db_persistence = require_db_persistence
         self.max_retries = max_retries
         self.initial_wait = initial_wait
         self.max_wait = max_wait
@@ -373,12 +378,23 @@ class InferenceService:
                     f"provider={provider_response.provider}, tokens={provider_response.tokens}"
                 )
             except Exception as e:
-                # Log error but don't fail the inference
-                logger.error(
-                    f"Failed to save inference to database: {str(e)}",
-                    exc_info=True
-                )
-                # Still return the result even if database save failed
+                if self.require_db_persistence:
+                    # Fail-fast: raise the error for experimental data tracking
+                    logger.error(
+                        f"Failed to save inference to database (require_db_persistence=True): {str(e)}",
+                        exc_info=True
+                    )
+                    raise RuntimeError(
+                        f"Database persistence failed. This is required for experimental data tracking. "
+                        f"Original error: {str(e)}"
+                    ) from e
+                else:
+                    # Graceful degradation: log warning and continue
+                    logger.warning(
+                        f"Failed to save inference to database (require_db_persistence=False): {str(e)}",
+                        exc_info=True
+                    )
+                    # Still return the result even if database save failed
 
         return result
 

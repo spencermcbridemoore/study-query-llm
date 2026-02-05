@@ -80,14 +80,19 @@ class SummarizationService:
     def __init__(
         self,
         repository: Optional["RawCallRepository"] = None,
+        require_db_persistence: bool = True,
     ):
         """
         Initialize the summarization service.
 
         Args:
             repository: Optional RawCallRepository for DB persistence
+            require_db_persistence: If True (default), raise exception if DB save fails when repository is provided.
+                                   If False, log warning and continue (graceful degradation).
+                                   Ignored if repository is None.
         """
         self.repository = repository
+        self.require_db_persistence = require_db_persistence
 
     async def _validate_deployment(
         self, deployment: str, provider: str = "azure"
@@ -244,10 +249,23 @@ class SummarizationService:
                 return call_id
 
         except Exception as db_error:
-            logger.error(
-                f"Failed to log summarization call: {str(db_error)}", exc_info=True
-            )
-            return None
+            if error is None and self.require_db_persistence:
+                # Fail-fast for successful saves when persistence is required
+                logger.error(
+                    f"Failed to log successful summarization (require_db_persistence=True): {str(db_error)}",
+                    exc_info=True
+                )
+                raise RuntimeError(
+                    f"Database persistence failed. This is required for experimental data tracking. "
+                    f"Original error: {str(db_error)}"
+                ) from db_error
+            else:
+                # Graceful degradation for failures or when persistence is not required
+                logger.warning(
+                    f"Failed to log summarization call (require_db_persistence=False or failure case): {str(db_error)}",
+                    exc_info=True
+                )
+                return None
 
     async def summarize_batch(
         self, request: SummarizationRequest

@@ -386,3 +386,53 @@ async def test_embedding_service_context_manager(mock_embedding_response):
 
             # After context exit, clients should be closed
             assert len(service._client_cache) == 0
+
+
+@pytest.mark.asyncio
+async def test_require_db_persistence_default_raises_on_error(mock_embedding_response, db_connection):
+    """Test that default behavior (require_db_persistence=True) raises on DB save failure."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo, require_db_persistence=True)
+        
+        # Mock repository to raise an error on insert
+        with patch.object(
+            service, "_create_embedding_with_retry", return_value=mock_embedding_response
+        ):
+            with patch.object(service, "_validate_deployment", return_value=True):
+                with patch.object(repo, "insert_raw_call", side_effect=Exception("DB connection failed")):
+                    request = EmbeddingRequest(
+                        text="Hello world",
+                        deployment="text-embedding-ada-002",
+                    )
+                    
+                    with pytest.raises(RuntimeError) as exc_info:
+                        await service.get_embedding(request)
+                    
+                    assert "Database persistence failed" in str(exc_info.value)
+                    assert "DB connection failed" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_require_db_persistence_false_continues_on_error(mock_embedding_response, db_connection):
+    """Test that require_db_persistence=False allows graceful degradation on DB save failure."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo, require_db_persistence=False)
+        
+        # Mock repository to raise an error on insert
+        with patch.object(
+            service, "_create_embedding_with_retry", return_value=mock_embedding_response
+        ):
+            with patch.object(service, "_validate_deployment", return_value=True):
+                with patch.object(repo, "insert_raw_call", side_effect=Exception("DB connection failed")):
+                    request = EmbeddingRequest(
+                        text="Hello world",
+                        deployment="text-embedding-ada-002",
+                    )
+                    
+                    # Should not raise, but return result without DB persistence
+                    result = await service.get_embedding(request)
+                    
+                    assert result.vector == [0.1, 0.2, 0.3, 0.4, 0.5]
+                    assert result.raw_call_id is None  # Not persisted due to error

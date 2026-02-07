@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.services.embedding_service import EmbeddingService, EmbeddingRequest
+from study_query_llm.services.embedding_service import EmbeddingService, EmbeddingRequest, estimate_tokens, DEPLOYMENT_MAX_TOKENS
 from study_query_llm.services.summarization_service import SummarizationService, SummarizationRequest
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
@@ -57,7 +57,7 @@ LLM_SUMMARIZERS = [
     None,  # Non-LLM summaries (just use original representatives)
     "gpt-4o-mini",
     "gpt-4o",
-    "gpt-5-chat-2025-08-07",  # Change this to your preferred third LLM
+    "gpt-5-chat",  # GPT-5 chat deployment
 ]
 
 # Sweep configuration
@@ -325,32 +325,63 @@ def create_paraphraser_for_llm(
     if llm_deployment is None:
         return None
 
-    async def _paraphrase_batch_async(texts: List[str]) -> List[str]:
-        """Async wrapper for summarization."""
+    async def _paraphrase_batch_async(texts: List[str]) -> str:
+        """Async wrapper for summarization.
+        
+        Combines multiple texts into a single summary for the cluster.
+        """
         with db.session_scope() as session:
             repo = RawCallRepository(session)
             service = SummarizationService(repository=repo)
 
+            # Combine texts into a single prompt for summarization
+            # Format: "Summarize the following texts into a single coherent summary:\n\nText 1: ...\n\nText 2: ..."
+            combined_text = "Summarize the following texts into a single coherent summary:\n\n"
+            for i, text in enumerate(texts, 1):
+                combined_text += f"Text {i}:\n{text}\n\n"
+            
+            # Summarize the combined text
             request = SummarizationRequest(
-                texts=texts,
+                texts=[combined_text],  # Single combined text
                 llm_deployment=llm_deployment,
                 temperature=0.2,
-                max_tokens=128,
+                max_tokens=256,  # Increased for combined summaries
             )
 
             result = await service.summarize_batch(request)
-            return result.summaries
+            # Return the single summary
+            if result.summaries and len(result.summaries) > 0:
+                return result.summaries[0]
+            else:
+                # Fallback: return first text if summarization fails
+                return texts[0] if texts else ""
 
-    def paraphrase_batch_sync(texts: List[str]) -> List[str]:
-        """Synchronous wrapper for run_sweep."""
+    def paraphrase_batch_sync(texts: List[str]) -> str:
+        """Synchronous wrapper that returns a single summary string.
+        
+        Creates a new event loop in the current thread to avoid nested loop issues.
+        This is necessary when called from ThreadPoolExecutor.
+        """
+        # Always create a new event loop in this thread
+        # This is necessary when called from ThreadPoolExecutor
         try:
+            # Try to get current loop
             loop = asyncio.get_event_loop()
+            # If loop exists and is running, we need a new one
             if loop.is_running():
-                # If loop is running, we need to use nest_asyncio
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(_paraphrase_batch_async(texts))
+                finally:
+                    loop.close()
+            else:
+                # Loop exists but not running - can use it
                 return loop.run_until_complete(_paraphrase_batch_async(texts))
         except RuntimeError:
-            pass
-        return asyncio.run(_paraphrase_batch_async(texts))
+            # No event loop in this thread - create one
+            return asyncio.run(_paraphrase_batch_async(texts))
 
     return paraphrase_batch_sync
 
@@ -358,8 +389,10 @@ def create_paraphraser_for_llm(
 def save_results(
     all_results: Dict[str, Any],
     output_file: str = None,
+    ground_truth_labels: Optional[np.ndarray] = None,
+    dataset_name: str = "unknown",
 ) -> str:
-    """Save results to a pickle file."""
+    """Save results to a pickle file in the new format with metadata."""
     if output_file is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = f"pca_kllmeans_sweep_results_{timestamp}.pkl"
@@ -402,8 +435,19 @@ def save_results(
                 "stability": k_data.get("stability"),
             }
 
+    # Wrap in new format with metadata (compatible with notebook)
+    final_data = {
+        "summarizers": save_results,
+        "ground_truth_labels": (
+            ground_truth_labels.tolist()
+            if ground_truth_labels is not None
+            else None
+        ),
+        "dataset_name": dataset_name,
+    }
+
     with open(output_file, "wb") as f:
-        pickle.dump(save_results, f)
+        pickle.dump(final_data, f)
 
     return output_file
 
@@ -440,6 +484,55 @@ async def main(
         benchmark_n_samples=benchmark_n_samples,
     )
     print(f"[OK] Loaded {len(texts)} texts from {dataset_name}")
+
+    # Filter texts that exceed token limit
+    max_tokens = DEPLOYMENT_MAX_TOKENS.get(EMBEDDING_DEPLOYMENT)
+    if max_tokens:
+        print(f"\n[INFO] Filtering texts that exceed token limit ({max_tokens} tokens)...")
+        valid_texts = []
+        valid_indices = []
+        filtered_texts = []
+        filtered_indices = []
+        
+        for i, text in enumerate(texts):
+            try:
+                estimated = estimate_tokens(text, EMBEDDING_DEPLOYMENT)
+                if estimated <= max_tokens:
+                    valid_texts.append(text)
+                    valid_indices.append(i)
+                else:
+                    filtered_texts.append((i, text, estimated))
+                    filtered_indices.append(i)
+            except Exception as e:
+                # If estimation fails, include the text (better to try than skip)
+                print(f"[WARN]  Failed to estimate tokens for text {i}: {e}")
+                valid_texts.append(text)
+                valid_indices.append(i)
+        
+        if filtered_texts:
+            print(f"[WARN]  Filtered out {len(filtered_texts)} text(s) that exceed token limit:")
+            for idx, text, est_tokens in filtered_texts[:5]:  # Show first 5
+                print(f"   Index {idx}: {est_tokens} tokens (limit: {max_tokens})")
+                print(f"      Preview: {text[:100]}...")
+            if len(filtered_texts) > 5:
+                print(f"   ... and {len(filtered_texts) - 5} more")
+            
+            # Update texts list to only include valid texts
+            texts = valid_texts
+            
+            # Also filter ground truth labels if they exist
+            if ground_truth_labels is not None:
+                if isinstance(ground_truth_labels, np.ndarray):
+                    ground_truth_labels = ground_truth_labels[valid_indices]
+                else:
+                    ground_truth_labels = [ground_truth_labels[i] for i in valid_indices]
+                print(f"[INFO] Also filtered ground truth labels to match valid texts")
+            
+            print(f"[OK] Filtered texts: {len(texts)} valid, {len(filtered_texts)} filtered out")
+        else:
+            print(f"[OK] All {len(texts)} texts are within token limit")
+    else:
+        print(f"[WARN]  Unknown max tokens for {EMBEDDING_DEPLOYMENT}, skipping length validation")
 
     # Show samples
     print("\n[INFO] Sample texts:")
@@ -547,11 +640,13 @@ async def main(
 
     # Save results
     print("\n[INFO] Saving results...")
-    saved_file = save_results(all_results, output_file)
+    saved_file = save_results(all_results, output_file, ground_truth_labels, dataset_name)
     print(f"[OK] Results saved to: {saved_file}")
     print(f"   Includes: representatives, labels, objectives, stability metrics, and distance matrices")
-    print(f"\n   Example access:")
-    print(f"     results = pickle.load(open('{saved_file}', 'rb'))")
+    print(f"\n   Example access (new format):")
+    print(f"     loaded_data = pickle.load(open('{saved_file}', 'rb'))")
+    print(f"     results = loaded_data['summarizers']")
+    print(f"     ground_truth = loaded_data.get('ground_truth_labels')")
     print(f"     results['None']['by_k']['5']['stability']['silhouette']['mean']")
     print(f"     results['None']['by_k']['5']['representatives']")
 

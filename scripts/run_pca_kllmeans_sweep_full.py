@@ -21,6 +21,8 @@ import sys
 import asyncio
 import argparse
 import pickle
+import time
+import threading
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
@@ -329,59 +331,61 @@ def create_paraphraser_for_llm(
         """Async wrapper for summarization.
         
         Combines multiple texts into a single summary for the cluster.
+        Ensures all async resources are properly cleaned up.
         """
-        with db.session_scope() as session:
-            repo = RawCallRepository(session)
-            service = SummarizationService(repository=repo)
+        try:
+            with db.session_scope() as session:
+                repo = RawCallRepository(session)
+                service = SummarizationService(repository=repo)
 
-            # Combine texts into a single prompt for summarization
-            # Format: "Summarize the following texts into a single coherent summary:\n\nText 1: ...\n\nText 2: ..."
-            combined_text = "Summarize the following texts into a single coherent summary:\n\n"
-            for i, text in enumerate(texts, 1):
-                combined_text += f"Text {i}:\n{text}\n\n"
+                # Combine texts into a single prompt for summarization
+                # Format: "Summarize the following texts into a single coherent summary:\n\nText 1: ...\n\nText 2: ..."
+                combined_text = "Summarize the following texts into a single coherent summary:\n\n"
+                for i, text in enumerate(texts, 1):
+                    combined_text += f"Text {i}:\n{text}\n\n"
+                
+                # Summarize the combined text
+                request = SummarizationRequest(
+                    texts=[combined_text],  # Single combined text
+                    llm_deployment=llm_deployment,
+                    temperature=0.2,
+                    max_tokens=256,  # Increased for combined summaries
+                )
+
+                result = await service.summarize_batch(request)
+                # Return the single summary
+                if result.summaries and len(result.summaries) > 0:
+                    summary = result.summaries[0]
+                else:
+                    # Fallback: return first text if summarization fails
+                    summary = texts[0] if texts else ""
             
-            # Summarize the combined text
-            request = SummarizationRequest(
-                texts=[combined_text],  # Single combined text
-                llm_deployment=llm_deployment,
-                temperature=0.2,
-                max_tokens=256,  # Increased for combined summaries
-            )
-
-            result = await service.summarize_batch(request)
-            # Return the single summary
-            if result.summaries and len(result.summaries) > 0:
-                return result.summaries[0]
-            else:
-                # Fallback: return first text if summarization fails
-                return texts[0] if texts else ""
+            # Providers are now closed explicitly in summarize_batch's finally block
+            # This ensures httpx clients are cleaned up before the event loop closes
+            return summary
 
     def paraphrase_batch_sync(texts: List[str]) -> str:
         """Synchronous wrapper that returns a single summary string.
         
-        Creates a new event loop in the current thread to avoid nested loop issues.
-        This is necessary when called from ThreadPoolExecutor.
+        Always creates a fresh event loop using asyncio.run() when called from
+        ThreadPoolExecutor to ensure proper cleanup of async resources (httpx clients).
+        This prevents "Task exception was never retrieved" errors from cleanup tasks.
         """
-        # Always create a new event loop in this thread
-        # This is necessary when called from ThreadPoolExecutor
+        # Clear any existing event loop in this thread to ensure asyncio.run() works
         try:
-            # Try to get current loop
             loop = asyncio.get_event_loop()
-            # If loop exists and is running, we need a new one
-            if loop.is_running():
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    return loop.run_until_complete(_paraphrase_batch_async(texts))
-                finally:
-                    loop.close()
-            else:
-                # Loop exists but not running - can use it
-                return loop.run_until_complete(_paraphrase_batch_async(texts))
+            if not loop.is_closed():
+                # Close and remove existing loop to allow asyncio.run() to create a new one
+                loop.close()
+            asyncio.set_event_loop(None)
         except RuntimeError:
-            # No event loop in this thread - create one
-            return asyncio.run(_paraphrase_batch_async(texts))
+            # No loop exists, which is fine
+            pass
+        
+        # Always use asyncio.run() when in a thread pool executor
+        # This creates a fresh loop and properly handles cleanup of all async resources
+        # before closing the loop, preventing httpx client cleanup errors
+        return asyncio.run(_paraphrase_batch_async(texts))
 
     return paraphrase_batch_sync
 

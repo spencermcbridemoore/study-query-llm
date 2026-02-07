@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """
+DEPRECATED/NEEDS VERIFICATION: This script may be obsolete or for debugging only.
+Status unknown - needs verification if still used. See scripts/README.md for details.
+
 Test the exact validation logic used in SummarizationService.
 """
+
+import warnings
+warnings.warn(
+    "test_validation_logic.py is deprecated and may not work with current codebase. "
+    "Status unknown - may be obsolete or for debugging only. See scripts/README.md for details.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import asyncio
 import os

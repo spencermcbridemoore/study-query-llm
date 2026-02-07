@@ -1,6 +1,10 @@
 # embedding_cluster_stability.py
 # -*- coding: utf-8 -*-
 """
+DEPRECATED/NEEDS VERIFICATION: This script may have been superseded by the algorithms
+library in src/study_query_llm/algorithms/. Status unknown - needs verification if still used.
+See scripts/README.md for details.
+
 EmbeddingClusterStabilityAnalyzer
 
 - Accepts leaf embeddings as:
@@ -22,6 +26,14 @@ Dependencies:
 """
 
 from __future__ import annotations
+
+import warnings
+warnings.warn(
+    "embedding_cluster_stability.py is deprecated and may not work with current codebase. "
+    "It may have been superseded by the algorithms library. See scripts/README.md for details.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Union, Optional, Callable

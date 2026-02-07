@@ -73,16 +73,18 @@ def pca_svd_project(X: Array2D, k: int) -> Tuple[Array2D, Dict[str, Any]]:
         - meta: Dictionary with PCA metadata:
             - pca_dim_used: Actual number of components used
             - singular_values: All singular values
-            - mean: Mean vector used for centering
+            - mean: (D,) numpy array — mean vector used for centering
+            - components: (kk, D) numpy array — top principal component rows
     """
     mu = X.mean(axis=0, keepdims=True)
     Xc = X - mu
-    U, S, _ = np.linalg.svd(Xc, full_matrices=False)
+    U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
     kk = int(min(k, U.shape[1]))
     Z = U[:, :kk] * S[:kk]
     meta = {
         "pca_dim_used": kk,
         "singular_values": S.tolist(),
-        "mean": mu.squeeze(0).tolist(),
+        "mean": mu.squeeze(0),             # (D,) numpy array for PCA centering
+        "components": Vt[:kk],             # (kk, D) numpy array for PCA projection
     }
     return Z, meta

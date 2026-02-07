@@ -7,6 +7,8 @@ import pytest
 
 from study_query_llm.algorithms.clustering import (
     k_subspaces_kllmeans,
+    k_llmmeans,
+    kmeanspp_sample,
     select_representatives,
     adjusted_rand_index,
     pairwise_ari,
@@ -14,6 +16,11 @@ from study_query_llm.algorithms.clustering import (
     coverage_fraction,
     compute_stability_metrics,
 )
+
+
+# ------------------------------------------------------------------
+# k_subspaces_kllmeans (legacy)
+# ------------------------------------------------------------------
 
 
 def test_k_subspaces_kllmeans_basic():
@@ -43,6 +50,168 @@ def test_k_subspaces_kllmeans_convergence():
     assert len(np.unique(labels)) == K
 
 
+# ------------------------------------------------------------------
+# kmeanspp_sample
+# ------------------------------------------------------------------
+
+
+def test_kmeanspp_sample_basic():
+    """Test k-means++ sampling returns correct number of indices."""
+    rng = np.random.default_rng(42)
+    X = rng.standard_normal((20, 5))
+    indices = kmeanspp_sample(X, 5, rng)
+    assert len(indices) == 5
+    assert len(set(indices)) == 5  # all unique
+    assert all(0 <= i < 20 for i in indices)
+
+
+def test_kmeanspp_sample_all():
+    """When m >= n, return all indices."""
+    rng = np.random.default_rng(42)
+    X = rng.standard_normal((5, 3))
+    indices = kmeanspp_sample(X, 10, rng)
+    assert len(indices) == 5
+    np.testing.assert_array_equal(indices, np.arange(5))
+
+
+def test_kmeanspp_sample_one():
+    """Sampling 1 point should return a single index."""
+    rng = np.random.default_rng(42)
+    X = rng.standard_normal((10, 3))
+    indices = kmeanspp_sample(X, 1, rng)
+    assert len(indices) == 1
+
+
+# ------------------------------------------------------------------
+# k_llmmeans — vanilla (no LLM)
+# ------------------------------------------------------------------
+
+
+def test_k_llmmeans_vanilla_basic():
+    """Without paraphraser/embedder, k_llmmeans is plain k-means."""
+    rng = np.random.default_rng(42)
+    n, d, K = 60, 8, 3
+    # Create well-separated clusters
+    centers = rng.standard_normal((K, d)) * 5
+    Z = np.vstack([centers[k] + rng.standard_normal((n // K, d)) * 0.3 for k in range(K)])
+    texts = [f"text_{i}" for i in range(n)]
+
+    labels, info = k_llmmeans(Z, texts, K, seed=0, max_iter=100)
+
+    assert labels.shape == (n,)
+    assert len(np.unique(labels)) == K
+    assert info["objective"] >= 0
+    assert info["n_iter"] >= 1
+    assert len(info["summaries"]) == K
+    assert all(s == "" for s in info["summaries"])  # no LLM → empty summaries
+
+
+def test_k_llmmeans_vanilla_convergence():
+    """Vanilla k_llmmeans should converge within max_iter."""
+    rng = np.random.default_rng(42)
+    n, d, K = 40, 6, 2
+    Z = rng.standard_normal((n, d))
+    texts = [f"t{i}" for i in range(n)]
+
+    labels, info = k_llmmeans(Z, texts, K, seed=0, max_iter=200)
+
+    assert info["n_iter"] <= 200
+    assert labels.shape == (n,)
+
+
+def test_k_llmmeans_validation():
+    """Test input validation."""
+    rng = np.random.default_rng(42)
+    Z = rng.standard_normal((10, 5))
+    texts = [f"t{i}" for i in range(10)]
+
+    with pytest.raises(ValueError, match="K.*cannot exceed"):
+        k_llmmeans(Z, texts, 20)
+
+    with pytest.raises(ValueError, match="K must be >= 1"):
+        k_llmmeans(Z, texts, 0)
+
+
+# ------------------------------------------------------------------
+# k_llmmeans — with LLM
+# ------------------------------------------------------------------
+
+
+def test_k_llmmeans_with_llm():
+    """LLM centroid replacement fires and produces summaries."""
+    rng = np.random.default_rng(42)
+    n, d_pca, D_orig, K = 60, 6, 12, 3
+
+    # Use overlapping random data so k-means takes multiple iterations,
+    # ensuring the LLM branch at t % llm_interval == 0 actually fires.
+    Z = rng.standard_normal((n, d_pca))
+    texts = [f"text_{i}" for i in range(n)]
+
+    # Mock PCA transform
+    pca_components = rng.standard_normal((d_pca, D_orig))
+    pca_mean = rng.standard_normal(D_orig)
+
+    calls = {"paraphraser": 0, "embedder": 0}
+
+    def mock_paraphraser(sampled_texts):
+        calls["paraphraser"] += 1
+        return [f"summary_of_{len(sampled_texts)}_texts"]
+
+    def mock_embedder(text_list):
+        calls["embedder"] += 1
+        return rng.standard_normal((len(text_list), D_orig))
+
+    labels, info = k_llmmeans(
+        Z, texts, K,
+        max_iter=100,
+        llm_interval=2,  # fire LLM every 2 iterations
+        max_samples=5,
+        seed=0,
+        paraphraser=mock_paraphraser,
+        embedder=mock_embedder,
+        pca_components=pca_components,
+        pca_mean=pca_mean,
+    )
+
+    assert labels.shape == (n,)
+    assert info["objective"] >= 0
+    # LLM should have been called at least once
+    assert calls["paraphraser"] >= 1
+    assert calls["embedder"] >= 1
+    # Summaries should contain LLM output
+    assert any(s != "" for s in info["summaries"])
+
+
+def test_k_llmmeans_llm_only_when_both_provided():
+    """LLM branch is skipped when only paraphraser (no embedder) is given."""
+    rng = np.random.default_rng(42)
+    Z = rng.standard_normal((30, 5))
+    texts = [f"t{i}" for i in range(30)]
+
+    calls = {"count": 0}
+
+    def mock_paraphraser(sampled_texts):
+        calls["count"] += 1
+        return [f"summary"]
+
+    labels, info = k_llmmeans(
+        Z, texts, 3,
+        max_iter=50,
+        llm_interval=2,
+        seed=0,
+        paraphraser=mock_paraphraser,
+        embedder=None,  # no embedder → no LLM
+    )
+
+    assert calls["count"] == 0  # paraphraser never called
+    assert all(s == "" for s in info["summaries"])
+
+
+# ------------------------------------------------------------------
+# select_representatives
+# ------------------------------------------------------------------
+
+
 def test_select_representatives():
     """Test representative selection."""
     n, d, K = 20, 5, 3
@@ -56,6 +225,11 @@ def test_select_representatives():
     assert len(reps) <= K
     assert all(isinstance(r, str) for r in reps)
     assert all(r in texts for r in reps)
+
+
+# ------------------------------------------------------------------
+# Metrics helpers
+# ------------------------------------------------------------------
 
 
 def test_adjusted_rand_index():

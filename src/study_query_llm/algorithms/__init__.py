@@ -8,6 +8,8 @@ separate from notebooks/scripts. Designed for reuse and testing.
 from .dimensionality_reduction import mean_pool_tokens, pca_svd_project
 from .clustering import (
     k_subspaces_kllmeans,
+    k_llmmeans,
+    kmeanspp_sample,
     select_representatives,
     adjusted_rand_index,
     pairwise_ari,
@@ -25,6 +27,8 @@ __all__ = [
     "pca_svd_project",
     # Clustering
     "k_subspaces_kllmeans",
+    "k_llmmeans",
+    "kmeanspp_sample",
     "select_representatives",
     "adjusted_rand_index",
     "pairwise_ari",

@@ -12,13 +12,14 @@ def test_sweep_config_defaults():
     """Test SweepConfig default values."""
     cfg = SweepConfig()
     assert cfg.pca_dim == 64
-    assert cfg.rank_r == 2
     assert cfg.k_min == 2
     assert cfg.k_max == 20
     assert cfg.max_iter == 200
     assert cfg.base_seed == 0
     assert cfg.n_restarts == 1
     assert cfg.compute_stability is False
+    assert cfg.llm_interval == 20
+    assert cfg.max_samples == 10
 
 
 def test_run_sweep_basic():
@@ -36,6 +37,7 @@ def test_run_sweep_basic():
     assert len(result.by_k) == 4  # K=2,3,4,5
     assert "2" in result.by_k
     assert "representatives" in result.by_k["2"]
+    assert "summaries" in result.by_k["2"]
     assert result.Z is None  # Not computed when stability=False
 
 
@@ -60,7 +62,7 @@ def test_run_sweep_with_stability():
 
 
 def test_run_sweep_with_paraphraser():
-    """Test sweep with paraphraser function."""
+    """Test sweep with paraphraser only (no embedder) → post-hoc paraphrase."""
     n, d = 20, 8
     rng = np.random.default_rng(42)
     texts = [f"text_{i}" for i in range(n)]
@@ -77,30 +79,48 @@ def test_run_sweep_with_paraphraser():
 
 
 def test_run_sweep_with_embedder():
-    """Test sweep with embedder function for re-embedding summarized representatives."""
-    n, d = 20, 8
-    rng = np.random.default_rng(42)
+    """Test sweep with both paraphraser and embedder → LLM-in-the-loop."""
+    n, d = 40, 8
+    rng_data = np.random.default_rng(42)
     texts = [f"text_{i}" for i in range(n)]
-    embeddings = rng.standard_normal((n, d))
-    cfg = SweepConfig(k_min=2, k_max=3, n_restarts=2, compute_stability=True)
+    embeddings = rng_data.standard_normal((n, d))
+    cfg = SweepConfig(
+        k_min=2, k_max=3,
+        n_restarts=2,
+        compute_stability=True,
+        llm_interval=2,   # fire LLM early so it triggers during iteration
+        max_samples=3,
+    )
+
+    calls = {"paraphraser": 0, "embedder": 0}
 
     def paraphraser(texts_list):
-        return [f"summarized_{t}" for t in texts_list]
+        calls["paraphraser"] += 1
+        return [f"summarized_{len(texts_list)}_texts"]
 
-    # Create an embedder that returns different embeddings for summarized texts
     def embedder(texts_list):
-        # Return embeddings that are different from original (shifted)
-        base_embeddings = rng.standard_normal((len(texts_list), d))
-        # Add a shift to make them clearly different
-        return base_embeddings + 1.0
+        calls["embedder"] += 1
+        rng_emb = np.random.default_rng(hash(texts_list[0]) % (2**31))
+        return rng_emb.standard_normal((len(texts_list), d))
 
-    result = run_sweep(texts, embeddings, cfg, paraphraser=paraphraser, embedder=embedder)
+    result = run_sweep(
+        texts, embeddings, cfg, paraphraser=paraphraser, embedder=embedder
+    )
 
-    # Verify representatives are summarized
+    # LLM should have been invoked inside k_llmmeans
+    assert calls["paraphraser"] >= 1
+    assert calls["embedder"] >= 1
+
+    # Summaries should be present
+    summaries = result.by_k["2"]["summaries"]
+    assert isinstance(summaries, list)
+    assert any(s != "" for s in summaries)
+
+    # Representatives come from select_representatives (actual texts)
     reps = result.by_k["2"]["representatives"]
-    assert all(r.startswith("summarized_") for r in reps)
+    assert all(r in texts for r in reps)
 
-    # Verify stability metrics exist (computed from re-embedded summaries)
+    # Stability metrics exist
     assert "stability" in result.by_k["2"]
     assert "silhouette" in result.by_k["2"]["stability"]
 
@@ -111,15 +131,18 @@ def test_run_sweep_embedder_without_paraphraser():
     rng = np.random.default_rng(42)
     texts = [f"text_{i}" for i in range(n)]
     embeddings = rng.standard_normal((n, d))
-    cfg = SweepConfig(k_min=2, k_max=3)
+    cfg = SweepConfig(k_min=2, k_max=3, llm_interval=2)
+
+    calls = {"count": 0}
 
     def embedder(texts_list):
+        calls["count"] += 1
         return rng.standard_normal((len(texts_list), d))
 
-    # Without paraphraser, embedder should be ignored
+    # Without paraphraser, embedder should not be called (LLM branch skipped)
     result = run_sweep(texts, embeddings, cfg, embedder=embedder)
 
-    # Representatives should be original texts (not re-embedded)
+    assert calls["count"] == 0
     reps = result.by_k["2"]["representatives"]
     assert all(r in texts for r in reps)
 
@@ -140,3 +163,21 @@ def test_run_sweep_validation():
     cfg = SweepConfig(k_max=n)
     with pytest.raises(ValueError, match="k_max.*n_samples"):
         run_sweep(texts, embeddings, cfg)
+
+
+def test_run_sweep_best_restart_selected():
+    """Multi-restart should pick the run with lowest inertia."""
+    n, d = 30, 8
+    rng = np.random.default_rng(42)
+    texts = [f"text_{i}" for i in range(n)]
+    embeddings = rng.standard_normal((n, d))
+    cfg = SweepConfig(k_min=2, k_max=3, n_restarts=5)
+
+    result = run_sweep(texts, embeddings, cfg)
+
+    for k_str in result.by_k:
+        entry = result.by_k[k_str]
+        best_obj = entry["objective"]
+        all_objs = entry["objectives"]
+        # The selected objective should be the minimum across restarts
+        assert best_obj == pytest.approx(min(all_objs))

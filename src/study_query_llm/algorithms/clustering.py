@@ -7,7 +7,7 @@ Provides K-subspaces KLLMeans clustering and stability evaluation metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 
 Array2D = np.ndarray
@@ -125,6 +125,218 @@ def k_subspaces_kllmeans(
     obj = float(np.sum(resid * resid))
 
     return labels.astype(int), {"objective_recon_error_sum": obj, "n_iter": n_iter}
+
+
+def kmeanspp_sample(
+    X_subset: np.ndarray, m: int, rng: np.random.Generator
+) -> np.ndarray:
+    """
+    K-means++ sampling to select *m* diverse representatives from *X_subset*.
+
+    Uses the k-means++ seeding procedure: the first index is chosen uniformly
+    at random; each subsequent index is drawn with probability proportional to
+    its squared distance to the nearest already-selected point.
+
+    Args:
+        X_subset: (n_cluster, d) embeddings for one cluster
+        m: Number of samples to select
+        rng: NumPy random generator
+
+    Returns:
+        1-D integer array of *m* indices into *X_subset* (or all indices when
+        ``m >= n_cluster``).
+    """
+    n = X_subset.shape[0]
+    if m >= n:
+        return np.arange(n)
+
+    selected: list[int] = [int(rng.integers(0, n))]
+
+    for _ in range(m - 1):
+        sel_pts = X_subset[selected]  # (len(selected), d)
+        # Squared distances from every point to the nearest selected point
+        diffs = X_subset[:, None, :] - sel_pts[None, :, :]  # (n, s, d)
+        sq_dists = np.sum(diffs ** 2, axis=2)  # (n, s)
+        min_sq = sq_dists.min(axis=1)  # (n,)
+        min_sq[selected] = 0.0  # already chosen → zero weight
+
+        total = min_sq.sum()
+        if total == 0.0:
+            remaining = np.setdiff1d(np.arange(n), selected)
+            if len(remaining) == 0:
+                break
+            selected.append(int(rng.choice(remaining)))
+        else:
+            probs = min_sq / total
+            selected.append(int(rng.choice(n, p=probs)))
+
+    return np.array(selected, dtype=int)
+
+
+# ------------------------------------------------------------------
+# K-means++ initialisation & assignment helpers
+# ------------------------------------------------------------------
+
+def _kmeanspp_init(
+    Z: np.ndarray, K: int, rng: np.random.Generator
+) -> np.ndarray:
+    """Return (K, d) initial centroids chosen by the k-means++ rule."""
+    n, d = Z.shape
+    centroids = np.empty((K, d), dtype=Z.dtype)
+    idx = int(rng.integers(0, n))
+    centroids[0] = Z[idx]
+
+    for k in range(1, K):
+        diffs = Z[:, None, :] - centroids[None, :k, :]  # (n, k, d)
+        sq = np.sum(diffs ** 2, axis=2)  # (n, k)
+        min_sq = sq.min(axis=1)  # (n,)
+        total = min_sq.sum()
+        if total == 0.0:
+            centroids[k] = Z[int(rng.integers(0, n))]
+        else:
+            probs = min_sq / total
+            centroids[k] = Z[int(rng.choice(n, p=probs))]
+    return centroids
+
+
+def _assign(Z: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+    """Assign each row of *Z* to its nearest centroid (Euclidean)."""
+    # ||z - c||² = ||z||² + ||c||² - 2·z·c
+    Z_sq = np.sum(Z ** 2, axis=1, keepdims=True)       # (n, 1)
+    C_sq = np.sum(centroids ** 2, axis=1, keepdims=True).T  # (1, K)
+    cross = Z @ centroids.T                              # (n, K)
+    dists = Z_sq + C_sq - 2.0 * cross                   # (n, K)
+    return np.argmin(dists, axis=1)
+
+
+# ------------------------------------------------------------------
+# k-LLMmeans  (Algorithm 1 from the paper)
+# ------------------------------------------------------------------
+
+def k_llmmeans(
+    Z: np.ndarray,
+    texts: list[str],
+    K: int,
+    *,
+    max_iter: int = 120,
+    llm_interval: int = 20,
+    max_samples: int = 10,
+    seed: int = 0,
+    paraphraser: Callable[[list[str]], list[str]] | None = None,
+    embedder: Callable[[list[str]], np.ndarray] | None = None,
+    pca_components: np.ndarray | None = None,
+    pca_mean: np.ndarray | None = None,
+) -> tuple[np.ndarray, dict]:
+    """
+    K-means with optional LLM-generated summary centroids (Algorithm 1).
+
+    Every *llm_interval* iterations the centroid update is replaced by:
+      1. Sample *max_samples* diverse representatives per cluster (k-means++).
+      2. Ask the LLM (``paraphraser``) to summarise those texts.
+      3. Embed the summary (``embedder``) and project into PCA space
+         to become the new centroid µ_j.
+
+    When ``paraphraser`` or ``embedder`` is ``None`` the function reduces to
+    plain k-means (mean centroid updates only).
+
+    Args:
+        Z: (n, d) embeddings already projected into PCA space.
+        texts: Original texts aligned 1:1 with the rows of *Z*.
+        K: Number of clusters.
+        max_iter: Maximum number of iterations.
+        llm_interval: How often (in iterations) to perform the LLM centroid
+            update instead of the ordinary mean update.
+        max_samples: Maximum number of texts sampled per cluster for the
+            LLM prompt.
+        seed: Random seed for reproducibility.
+        paraphraser: ``texts_in → summaries_out`` callable.  Receives the
+            sampled texts for **one** cluster, returns a list whose first
+            element is the cluster summary string.
+        embedder: ``texts_in → raw_embeddings_out`` callable.  Returns an
+            array of shape ``(len(texts_in), D_original)``.
+        pca_components: ``(pca_dim, D_original)`` projection matrix from the
+            original PCA transform.
+        pca_mean: ``(D_original,)`` mean vector from the original PCA
+            transform.
+
+    Returns:
+        Tuple of ``(labels, info_dict)`` where *info_dict* contains at least:
+        - ``summaries``: ``list[str]`` — last LLM summaries per cluster
+          (empty strings when LLM was never invoked for a cluster).
+        - ``objective``: ``float`` — final inertia (sum of squared distances).
+        - ``n_iter``: ``int`` — number of iterations executed.
+    """
+    rng = np.random.default_rng(seed)
+    n, d = Z.shape
+
+    if K > n:
+        raise ValueError(f"K ({K}) cannot exceed number of samples ({n})")
+    if K < 1:
+        raise ValueError(f"K must be >= 1, got {K}")
+
+    # --- Initialisation (k-means++) ---
+    centroids = _kmeanspp_init(Z, K, rng)   # (K, d)
+    labels = _assign(Z, centroids)
+
+    summaries: list[str] = [""] * K
+    use_llm = (
+        paraphraser is not None
+        and embedder is not None
+        and pca_components is not None
+        and pca_mean is not None
+    )
+
+    n_iter = 0
+    for t in range(1, max_iter + 1):
+        n_iter = t
+
+        # ---- CENTROID UPDATE STEP ----
+        if use_llm and t % llm_interval == 0 and t > 1:
+            # LLM-based centroid replacement
+            for j in range(K):
+                cluster_idx = np.where(labels == j)[0]
+                if len(cluster_idx) == 0:
+                    continue
+
+                n_sample = min(max_samples, len(cluster_idx))
+                sampled_local = kmeanspp_sample(Z[cluster_idx], n_sample, rng)
+                sampled_texts = [texts[cluster_idx[i]] for i in sampled_local]
+
+                # LLM generates a single summary for this cluster
+                summary_j = paraphraser(sampled_texts)[0]
+                summaries[j] = summary_j
+
+                # Embed summary → project into PCA space
+                raw_emb = np.asarray(
+                    embedder([summary_j]), dtype=np.float64
+                )
+                if raw_emb.ndim == 1:
+                    raw_emb = raw_emb.reshape(1, -1)
+                centroids[j] = (raw_emb[0] - pca_mean) @ pca_components.T
+        else:
+            # Standard mean centroid update
+            for j in range(K):
+                cluster_idx = np.where(labels == j)[0]
+                if len(cluster_idx) == 0:
+                    continue
+                centroids[j] = Z[cluster_idx].mean(axis=0)
+
+        # ---- ASSIGNMENT STEP ----
+        new_labels = _assign(Z, centroids)
+
+        if np.array_equal(new_labels, labels):
+            break
+        labels = new_labels
+
+    # Final inertia
+    diffs = Z - centroids[labels]
+    inertia = float(np.sum(diffs ** 2))
+
+    return labels.astype(int), {
+        "summaries": summaries,
+        "objective": inertia,
+        "n_iter": n_iter,
+    }
 
 
 def select_representatives(

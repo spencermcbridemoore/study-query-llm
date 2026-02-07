@@ -403,49 +403,48 @@ class SummarizationService:
                 provider_instance, repository=None
             )  # We'll log manually
 
-            try:
-                # Process all texts concurrently
-                async def summarize_one(text: str) -> tuple[str, int, Optional[Exception]]:
-                    """Summarize a single text and return (summary, call_id, error)."""
-                    import time
+            # Process all texts concurrently
+            async def summarize_one(text: str) -> tuple[str, int, Optional[Exception]]:
+                """Summarize a single text and return (summary, call_id, error)."""
+                import time
 
-                    start_time = time.time()
-                    call_id = None
-                    error = None
-                    summary = None
+                start_time = time.time()
+                call_id = None
+                error = None
+                summary = None
 
-                    try:
-                        # Create prompt for summarization
-                        prompt = (
-                            "Write a single question that represents the ones in this list concisely:\n"
-                            f"- {text}"
-                        )
+                try:
+                    # Create prompt for summarization
+                    prompt = (
+                        "Write a single question that represents the ones in this list concisely:\n"
+                        f"- {text}"
+                    )
 
-                        result = await service.run_inference(
-                            prompt,
-                            temperature=request.temperature,
-                            max_tokens=request.max_tokens,
-                        )
+                    result = await service.run_inference(
+                        prompt,
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                    )
 
-                        summary = result["response"].strip()
-                        latency_ms = (time.time() - start_time) * 1000
+                    summary = result["response"].strip()
+                    latency_ms = (time.time() - start_time) * 1000
 
-                        # Log success
-                        call_id = self._log_summarization_call(
-                            text=text,
-                            summary=summary,
-                            deployment=request.llm_deployment,
-                            provider=request.provider,
-                            request=request,
-                            latency_ms=latency_ms,
-                        )
+                    # Log success
+                    call_id = self._log_summarization_call(
+                        text=text,
+                        summary=summary,
+                        deployment=request.llm_deployment,
+                        provider=request.provider,
+                        request=request,
+                        latency_ms=latency_ms,
+                    )
 
-                    except Exception as e:
-                        latency_ms = (time.time() - start_time) * 1000
-                        error = e
+                except Exception as e:
+                    latency_ms = (time.time() - start_time) * 1000
+                    error = e
 
-                        # Log failure
-                        call_id = self._log_summarization_call(
+                    # Log failure
+                    call_id = self._log_summarization_call(
                         text=text,
                         summary=None,
                         deployment=request.llm_deployment,

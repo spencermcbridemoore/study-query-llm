@@ -573,45 +573,52 @@ async def main(
         )
         print(f"[OK] Created run group: id={run_group_id}")
 
-    # Run sweep for each LLM summarizer concurrently
-    print("\n[INFO] Running sweeps concurrently...")
+    # Run sweep for each LLM summarizer with limited concurrency
+    # Use semaphore to limit concurrent sweeps and prevent too many httpx clients
+    # For large datasets, run sequentially (1 at a time) to avoid httpx client cleanup issues
+    # For smaller datasets, can run 2 at a time
+    max_concurrent_sweeps = 1 if len(texts) > 100 else 2
+    semaphore = asyncio.Semaphore(max_concurrent_sweeps)
+    print(f"\n[INFO] Running sweeps with max concurrency: {max_concurrent_sweeps} (dataset size: {len(texts)})...")
     
     async def run_single_sweep(llm_deployment: str) -> tuple[str, Any]:
         """Run a single sweep for a given LLM deployment."""
-        summarizer_name = "None" if llm_deployment is None else llm_deployment
-        
-        # Create paraphraser and embedder
-        paraphraser = create_paraphraser_for_llm(llm_deployment, db)
-        
-        # Create embedder function
-        async def embedder_func(texts_list: List[str]) -> np.ndarray:
-            """Embed texts using EmbeddingService."""
-            return await fetch_embeddings_async(texts_list, EMBEDDING_DEPLOYMENT, db)
-        
-        def embedder_sync(texts_list: List[str]) -> np.ndarray:
-            """Synchronous wrapper for embedder."""
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    return loop.run_until_complete(embedder_func(texts_list))
-            except RuntimeError:
-                pass
-            return asyncio.run(embedder_func(texts_list))
-        
-        # Run sweep in thread pool executor (CPU-bound work)
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as executor:
-            result = await loop.run_in_executor(
-                executor,
-                lambda: run_sweep(
-                    texts, embeddings, SWEEP_CONFIG,
-                    paraphraser=paraphraser,
-                    embedder=embedder_sync if paraphraser else None
+        # Acquire semaphore to limit concurrent sweeps
+        async with semaphore:
+            summarizer_name = "None" if llm_deployment is None else llm_deployment
+            
+            # Create paraphraser and embedder
+            paraphraser = create_paraphraser_for_llm(llm_deployment, db)
+            
+            # Create embedder function
+            async def embedder_func(texts_list: List[str]) -> np.ndarray:
+                """Embed texts using EmbeddingService."""
+                return await fetch_embeddings_async(texts_list, EMBEDDING_DEPLOYMENT, db)
+            
+            def embedder_sync(texts_list: List[str]) -> np.ndarray:
+                """Synchronous wrapper for embedder."""
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        return loop.run_until_complete(embedder_func(texts_list))
+                except RuntimeError:
+                    pass
+                return asyncio.run(embedder_func(texts_list))
+            
+            # Run sweep in thread pool executor (CPU-bound work)
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as executor:
+                result = await loop.run_in_executor(
+                    executor,
+                    lambda: run_sweep(
+                        texts, embeddings, SWEEP_CONFIG,
+                        paraphraser=paraphraser,
+                        embedder=embedder_sync if paraphraser else None
+                    )
                 )
-            )
-        
-        print(f"[OK] Completed {summarizer_name}. Ks: {sorted([int(k) for k in result.by_k.keys()])}")
-        return summarizer_name, result
+            
+            print(f"[OK] Completed {summarizer_name}. Ks: {sorted([int(k) for k in result.by_k.keys()])}")
+            return summarizer_name, result
     
     # Create tasks for all sweeps
     tasks = [

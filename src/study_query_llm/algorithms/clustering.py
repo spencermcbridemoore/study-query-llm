@@ -199,14 +199,30 @@ def _kmeanspp_init(
     return centroids
 
 
-def _assign(Z: np.ndarray, centroids: np.ndarray) -> np.ndarray:
-    """Assign each row of *Z* to its nearest centroid (Euclidean)."""
-    # ||z - c||² = ||z||² + ||c||² - 2·z·c
-    Z_sq = np.sum(Z ** 2, axis=1, keepdims=True)       # (n, 1)
-    C_sq = np.sum(centroids ** 2, axis=1, keepdims=True).T  # (1, K)
-    cross = Z @ centroids.T                              # (n, K)
-    dists = Z_sq + C_sq - 2.0 * cross                   # (n, K)
-    return np.argmin(dists, axis=1)
+def _assign(Z: np.ndarray, centroids: np.ndarray, *, distance_metric: str = "euclidean", normalize_vectors: bool = False) -> np.ndarray:
+    """Assign each row of *Z* to its nearest centroid.
+    
+    Args:
+        Z: (n, d) data points
+        centroids: (K, d) cluster centroids
+        distance_metric: "cosine" or "euclidean"
+        normalize_vectors: Whether vectors are already normalized (for cosine)
+    
+    Returns:
+        (n,) array of cluster assignments
+    """
+    use_cosine = (distance_metric == "cosine") and normalize_vectors
+    if use_cosine:
+        # Cosine: argmax of dot product (equivalent to min cosine distance on unit vectors)
+        similarities = Z @ centroids.T  # (n, K)
+        return np.argmax(similarities, axis=1)
+    else:
+        # Euclidean: ||z - c||² = ||z||² + ||c||² - 2·z·c
+        Z_sq = np.sum(Z ** 2, axis=1, keepdims=True)       # (n, 1)
+        C_sq = np.sum(centroids ** 2, axis=1, keepdims=True).T  # (1, K)
+        cross = Z @ centroids.T                              # (n, K)
+        dists = Z_sq + C_sq - 2.0 * cross                   # (n, K)
+        return np.argmin(dists, axis=1)
 
 
 # ------------------------------------------------------------------
@@ -226,6 +242,8 @@ def k_llmmeans(
     embedder: Callable[[list[str]], np.ndarray] | None = None,
     pca_components: np.ndarray | None = None,
     pca_mean: np.ndarray | None = None,
+    distance_metric: str = "cosine",
+    normalize_vectors: bool = True,
 ) -> tuple[np.ndarray, dict]:
     """
     K-means with optional LLM-generated summary centroids (Algorithm 1).
@@ -238,6 +256,12 @@ def k_llmmeans(
 
     When ``paraphraser`` or ``embedder`` is ``None`` the function reduces to
     plain k-means (mean centroid updates only).
+
+    Distance metrics:
+    - "cosine" (default): Spherical k-means. Vectors are L2-normalized and
+      assignment uses dot product (equivalent to cosine similarity on unit vectors).
+      Centroids are normalized after each update.
+    - "euclidean": Standard k-means with Euclidean distance. No normalization.
 
     Args:
         Z: (n, d) embeddings already projected into PCA space.
@@ -258,6 +282,10 @@ def k_llmmeans(
             original PCA transform.
         pca_mean: ``(D_original,)`` mean vector from the original PCA
             transform.
+        distance_metric: Distance metric to use ("cosine" or "euclidean").
+            Default: "cosine".
+        normalize_vectors: Whether to L2-normalize vectors. Default: True.
+            For cosine metric, this should be True. For euclidean, typically False.
 
     Returns:
         Tuple of ``(labels, info_dict)`` where *info_dict* contains at least:
@@ -273,10 +301,23 @@ def k_llmmeans(
         raise ValueError(f"K ({K}) cannot exceed number of samples ({n})")
     if K < 1:
         raise ValueError(f"K must be >= 1, got {K}")
+    if distance_metric not in ("cosine", "euclidean"):
+        raise ValueError(f"distance_metric must be 'cosine' or 'euclidean', got {distance_metric}")
+
+    # Normalize Z if using cosine/spherical k-means
+    use_cosine = (distance_metric == "cosine") and normalize_vectors
+    Z_work = Z.copy()
+    if use_cosine:
+        norms = np.linalg.norm(Z_work, axis=1, keepdims=True)
+        Z_work = Z_work / np.maximum(norms, 1e-12)
 
     # --- Initialisation (k-means++) ---
-    centroids = _kmeanspp_init(Z, K, rng)   # (K, d)
-    labels = _assign(Z, centroids)
+    centroids = _kmeanspp_init(Z_work, K, rng)   # (K, d)
+    if use_cosine:
+        # Normalize initial centroids
+        c_norms = np.linalg.norm(centroids, axis=1, keepdims=True)
+        centroids = centroids / np.maximum(c_norms, 1e-12)
+    labels = _assign(Z_work, centroids, distance_metric=distance_metric, normalize_vectors=normalize_vectors)
 
     summaries: list[str] = [""] * K
     use_llm = (
@@ -299,7 +340,7 @@ def k_llmmeans(
                     continue
 
                 n_sample = min(max_samples, len(cluster_idx))
-                sampled_local = kmeanspp_sample(Z[cluster_idx], n_sample, rng)
+                sampled_local = kmeanspp_sample(Z_work[cluster_idx], n_sample, rng)
                 sampled_texts = [texts[cluster_idx[i]] for i in sampled_local]
 
                 # LLM generates a single summary for this cluster
@@ -325,25 +366,44 @@ def k_llmmeans(
                 )
                 if raw_emb.ndim == 1:
                     raw_emb = raw_emb.reshape(1, -1)
-                centroids[j] = (raw_emb[0] - pca_mean) @ pca_components.T
+                centroid_j = (raw_emb[0] - pca_mean) @ pca_components.T
+                # Normalize if using cosine/spherical k-means
+                if use_cosine:
+                    norm_j = np.linalg.norm(centroid_j)
+                    if norm_j > 1e-12:
+                        centroid_j = centroid_j / norm_j
+                centroids[j] = centroid_j
         else:
             # Standard mean centroid update
             for j in range(K):
                 cluster_idx = np.where(labels == j)[0]
                 if len(cluster_idx) == 0:
                     continue
-                centroids[j] = Z[cluster_idx].mean(axis=0)
+                centroid_j = Z_work[cluster_idx].mean(axis=0)
+                # Normalize if using cosine/spherical k-means
+                if use_cosine:
+                    norm_j = np.linalg.norm(centroid_j)
+                    if norm_j > 1e-12:
+                        centroid_j = centroid_j / norm_j
+                centroids[j] = centroid_j
 
         # ---- ASSIGNMENT STEP ----
-        new_labels = _assign(Z, centroids)
+        new_labels = _assign(Z_work, centroids, distance_metric=distance_metric, normalize_vectors=normalize_vectors)
 
         if np.array_equal(new_labels, labels):
             break
         labels = new_labels
 
     # Final inertia
-    diffs = Z - centroids[labels]
-    inertia = float(np.sum(diffs ** 2))
+    if use_cosine:
+        # For cosine: sum of (1 - similarity) = sum of cosine distances
+        # Each point's similarity to its assigned centroid
+        point_similarities = np.array([Z_work[i] @ centroids[labels[i]] for i in range(n)])
+        inertia = float(np.sum(1.0 - point_similarities))
+    else:
+        # For Euclidean: sum of squared distances
+        diffs = Z_work - centroids[labels]
+        inertia = float(np.sum(diffs ** 2))
 
     return labels.astype(int), {
         "summaries": summaries,

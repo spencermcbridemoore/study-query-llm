@@ -36,6 +36,8 @@ class SweepConfig:
     coverage_threshold: float = 0.2
     llm_interval: int = 20
     max_samples: int = 10
+    distance_metric: str = "cosine"  # "cosine" or "euclidean"
+    normalize_vectors: bool = True  # L2-normalize vectors (default True for cosine)
 
 
 @dataclass
@@ -70,6 +72,12 @@ def run_sweep(
          embedder is not — when both are provided the LLM summarisation
          happens inside the k_llmmeans iteration loop instead)
        - Compute stability metrics across restarts
+
+    Distance metrics:
+    - "cosine" (default): Uses cosine/spherical k-means. Vectors are L2-normalized
+      and assignment uses dot product (equivalent to cosine similarity on unit vectors).
+      Centroids are normalized after each update.
+    - "euclidean": Standard k-means with Euclidean distance. No normalization.
 
     Args:
         texts: List of text strings, one per sample
@@ -139,6 +147,8 @@ def run_sweep(
                 embedder=embedder,
                 pca_components=pca_components,
                 pca_mean=pca_mean,
+                distance_metric=cfg.distance_metric,
+                normalize_vectors=cfg.normalize_vectors,
             )
             labels_list.append(labels)
             objectives.append(info["objective"])

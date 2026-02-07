@@ -20,6 +20,8 @@ def test_sweep_config_defaults():
     assert cfg.compute_stability is False
     assert cfg.llm_interval == 20
     assert cfg.max_samples == 10
+    assert cfg.distance_metric == "cosine"
+    assert cfg.normalize_vectors is True
 
 
 def test_run_sweep_basic():
@@ -181,3 +183,38 @@ def test_run_sweep_best_restart_selected():
         all_objs = entry["objectives"]
         # The selected objective should be the minimum across restarts
         assert best_obj == pytest.approx(min(all_objs))
+
+
+def test_run_sweep_cosine_default():
+    """Default sweep should use cosine/spherical k-means."""
+    n, d = 30, 10
+    rng = np.random.default_rng(42)
+    texts = [f"text_{i}" for i in range(n)]
+    embeddings = rng.standard_normal((n, d))
+    cfg = SweepConfig(k_min=2, k_max=3, n_restarts=1)
+
+    result = run_sweep(texts, embeddings, cfg)
+
+    # Should complete successfully with default cosine
+    assert len(result.by_k) == 2
+    assert "2" in result.by_k
+    assert result.by_k["2"]["objective"] >= 0
+
+
+def test_run_sweep_euclidean_override():
+    """Sweep with Euclidean metric should work."""
+    n, d = 30, 10
+    rng = np.random.default_rng(42)
+    texts = [f"text_{i}" for i in range(n)]
+    embeddings = rng.standard_normal((n, d))
+    cfg = SweepConfig(
+        k_min=2, k_max=3, n_restarts=1,
+        distance_metric="euclidean", normalize_vectors=False
+    )
+
+    result = run_sweep(texts, embeddings, cfg)
+
+    # Should complete successfully with Euclidean
+    assert len(result.by_k) == 2
+    assert "2" in result.by_k
+    assert result.by_k["2"]["objective"] >= 0

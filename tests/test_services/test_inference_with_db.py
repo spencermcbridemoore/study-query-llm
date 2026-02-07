@@ -84,7 +84,7 @@ async def test_inference_service_stores_original_prompt(mock_provider, db_connec
 
 @pytest.mark.asyncio
 async def test_inference_service_handles_db_errors_gracefully(mock_provider):
-    """Test that database errors don't break inference."""
+    """Test that database errors don't break inference when persistence isn't required."""
     # Create a mock repository that raises an error
     class FailingRepository:
         def insert_raw_call(self, *args, **kwargs):
@@ -94,7 +94,11 @@ async def test_inference_service_handles_db_errors_gracefully(mock_provider):
         def add_call_to_group(self, *args, **kwargs):
             raise Exception("Database error")
     
-    service = InferenceService(mock_provider, repository=FailingRepository())
+    service = InferenceService(
+        mock_provider,
+        repository=FailingRepository(),
+        require_db_persistence=False,
+    )
     
     # Should still work even if DB fails
     result = await service.run_inference("Test prompt")

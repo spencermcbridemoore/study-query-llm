@@ -303,7 +303,20 @@ def k_llmmeans(
                 sampled_texts = [texts[cluster_idx[i]] for i in sampled_local]
 
                 # LLM generates a single summary for this cluster
-                summary_j = paraphraser(sampled_texts)[0]
+                summaries_out = paraphraser(sampled_texts)
+                if isinstance(summaries_out, str):
+                    summary_j = summaries_out
+                elif (
+                    isinstance(summaries_out, list)
+                    and len(summaries_out) == 1
+                    and isinstance(summaries_out[0], str)
+                ):
+                    summary_j = summaries_out[0]
+                else:
+                    raise ValueError(
+                        "paraphraser must return a single cluster summary "
+                        "(string or one-item list[str])."
+                    )
                 summaries[j] = summary_j
 
                 # Embed summary → project into PCA space

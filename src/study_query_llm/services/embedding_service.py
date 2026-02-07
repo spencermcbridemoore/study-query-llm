@@ -27,7 +27,7 @@ Usage:
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -48,6 +48,56 @@ if TYPE_CHECKING:
     from ..db.raw_call_repository import RawCallRepository
 
 logger = get_logger(__name__)
+
+
+# Known maximum token limits for embedding deployments
+# These are the maximum input tokens supported by each model
+DEPLOYMENT_MAX_TOKENS: Dict[str, int] = {
+    # OpenAI/Azure OpenAI embedding models
+    "text-embedding-ada-002": 8191,
+    "text-embedding-3-small": 8191,
+    "text-embedding-3-large": 8191,
+    # Add more as needed
+}
+
+
+def estimate_tokens(text: str, model: Optional[str] = None) -> int:
+    """
+    Estimate the number of tokens in a text string.
+    
+    Uses tiktoken if available (most accurate), otherwise falls back to approximation.
+    
+    Args:
+        text: Input text to estimate tokens for
+        model: Optional model name for tiktoken encoding (default: "cl100k_base" for embedding models)
+        
+    Returns:
+        Estimated number of tokens
+    """
+    # Try to use tiktoken if available (most accurate)
+    try:
+        import tiktoken
+        
+        # Use appropriate encoding for embedding models
+        if model and model.startswith("text-embedding-3"):
+            encoding_name = "cl100k_base"  # Used by text-embedding-3 models
+        elif model and "ada-002" in model:
+            encoding_name = "cl100k_base"  # Also used by ada-002
+        else:
+            encoding_name = "cl100k_base"  # Default for most OpenAI models
+        
+        try:
+            encoding = tiktoken.get_encoding(encoding_name)
+            return len(encoding.encode(text))
+        except Exception:
+            # Fallback to default encoding
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+            
+    except ImportError:
+        # Fallback: rough approximation (1 token ≈ 4 characters for English text)
+        # This is less accurate but works without dependencies
+        return len(text) // 4
 
 
 @dataclass
@@ -119,6 +169,9 @@ class EmbeddingService:
 
         # Cache for Azure clients per deployment (to avoid recreating)
         self._client_cache: Dict[str, AsyncAzureOpenAI] = {}
+        
+        # Cache for deployment limits (max tokens)
+        self._deployment_limits_cache: Dict[str, Optional[int]] = {}
 
     def _normalize_text(self, text: str) -> str:
         """
@@ -236,6 +289,88 @@ class EmbeddingService:
             logger.warning(f"Error checking cache: {str(e)}", exc_info=True)
 
         return None
+
+    def get_deployment_max_tokens(
+        self, deployment: str, provider: str = "azure"
+    ) -> Optional[int]:
+        """
+        Get the maximum input tokens supported by a deployment.
+        
+        Checks lookup table first, then attempts to query from API if available.
+        Results are cached to avoid repeated lookups.
+        
+        Args:
+            deployment: Deployment name
+            provider: Provider name (default: "azure")
+            
+        Returns:
+            Maximum tokens if known, None otherwise
+        """
+        cache_key = f"{provider}:{deployment}"
+        
+        # Check cache first
+        if cache_key in self._deployment_limits_cache:
+            return self._deployment_limits_cache[cache_key]
+        
+        # Check lookup table
+        if deployment in DEPLOYMENT_MAX_TOKENS:
+            limit = DEPLOYMENT_MAX_TOKENS[deployment]
+            self._deployment_limits_cache[cache_key] = limit
+            return limit
+        
+        # Try to infer from deployment name patterns
+        # text-embedding-3-* and text-embedding-ada-002 typically have 8191 token limit
+        if "text-embedding-3" in deployment or "text-embedding-ada-002" in deployment:
+            limit = 8191
+            self._deployment_limits_cache[cache_key] = limit
+            logger.info(f"Inferred max tokens for {deployment}: {limit}")
+            return limit
+        
+        # Unknown deployment - cache None to avoid repeated lookups
+        self._deployment_limits_cache[cache_key] = None
+        logger.warning(
+            f"Unknown max tokens for deployment: {deployment}. "
+            f"Consider adding to DEPLOYMENT_MAX_TOKENS lookup table."
+        )
+        return None
+    
+    def validate_text_length(
+        self, text: str, deployment: str, provider: str = "azure"
+    ) -> Tuple[bool, Optional[int], Optional[int]]:
+        """
+        Validate that text length is within deployment limits.
+        
+        Args:
+            text: Input text to validate
+            deployment: Deployment name
+            provider: Provider name (default: "azure")
+            
+        Returns:
+            Tuple of (is_valid, estimated_tokens, max_tokens)
+            - is_valid: True if text is within limits
+            - estimated_tokens: Estimated token count (None if estimation failed)
+            - max_tokens: Maximum tokens for deployment (None if unknown)
+        """
+        max_tokens = self.get_deployment_max_tokens(deployment, provider)
+        
+        if max_tokens is None:
+            # Unknown limit - can't validate, but don't block
+            logger.debug(f"Unknown max tokens for {deployment}, skipping validation")
+            return True, None, None
+        
+        # Estimate tokens
+        try:
+            estimated_tokens = estimate_tokens(text, deployment)
+        except Exception as e:
+            logger.warning(f"Failed to estimate tokens: {e}")
+            estimated_tokens = None
+        
+        if estimated_tokens is None:
+            # Estimation failed - can't validate, but don't block
+            return True, None, max_tokens
+        
+        is_valid = estimated_tokens <= max_tokens
+        return is_valid, estimated_tokens, max_tokens
 
     async def _validate_deployment(
         self, deployment: str, provider: str = "azure"
@@ -479,6 +614,28 @@ class EmbeddingService:
             error = ValueError(
                 "Cannot generate embedding for empty text (after normalization). "
                 "Text must contain at least one non-whitespace character."
+            )
+            # Log failure if repository is available
+            if self.repository:
+                request_hash = self._compute_request_hash(
+                    request.text,
+                    request.deployment,
+                    request.dimensions,
+                    request.encoding_format,
+                    request.provider,
+                )
+                self._log_failure(request, request_hash, error)
+            raise error
+        
+        # Validate text length against deployment limits
+        is_valid, estimated_tokens, max_tokens = self.validate_text_length(
+            normalized_text, request.deployment, request.provider
+        )
+        if not is_valid and estimated_tokens is not None and max_tokens is not None:
+            error = ValueError(
+                f"Text exceeds maximum token limit for deployment '{request.deployment}'. "
+                f"Estimated tokens: {estimated_tokens}, Maximum: {max_tokens}. "
+                f"Please reduce the text length or split it into smaller chunks."
             )
             # Log failure if repository is available
             if self.repository:

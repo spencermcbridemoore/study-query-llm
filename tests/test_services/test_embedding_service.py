@@ -14,6 +14,8 @@ from study_query_llm.services.embedding_service import (
     EmbeddingService,
     EmbeddingRequest,
     EmbeddingResponse,
+    DEPLOYMENT_MAX_TOKENS,
+    estimate_tokens,
 )
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -436,3 +438,105 @@ async def test_require_db_persistence_false_continues_on_error(mock_embedding_re
                     
                     assert result.vector == [0.1, 0.2, 0.3, 0.4, 0.5]
                     assert result.raw_call_id is None  # Not persisted due to error
+
+
+def test_get_deployment_max_tokens():
+    """Test getting maximum tokens for known deployments."""
+    service = EmbeddingService()
+    
+    # Test known deployments from lookup table
+    for deployment, expected_max in DEPLOYMENT_MAX_TOKENS.items():
+        max_tokens = service.get_deployment_max_tokens(deployment)
+        assert max_tokens == expected_max, f"Expected {expected_max} for {deployment}, got {max_tokens}"
+    
+    # Test pattern matching for text-embedding-3 models
+    max_tokens = service.get_deployment_max_tokens("text-embedding-3-custom")
+    assert max_tokens == 8191, "Should infer 8191 for text-embedding-3-* models"
+    
+    # Test unknown deployment
+    max_tokens = service.get_deployment_max_tokens("unknown-model-xyz")
+    assert max_tokens is None, "Should return None for unknown deployments"
+    
+    # Test caching
+    max_tokens_1 = service.get_deployment_max_tokens("text-embedding-3-small")
+    max_tokens_2 = service.get_deployment_max_tokens("text-embedding-3-small")
+    assert max_tokens_1 == max_tokens_2 == 8191
+    assert "azure:text-embedding-3-small" in service._deployment_limits_cache
+
+
+def test_estimate_tokens():
+    """Test token estimation."""
+    # Test with simple text
+    text = "Hello world"
+    tokens = estimate_tokens(text)
+    assert tokens > 0, "Should estimate at least 1 token"
+    
+    # Test with longer text
+    long_text = "Hello world " * 100
+    tokens_long = estimate_tokens(long_text)
+    assert tokens_long > tokens, "Longer text should have more tokens"
+    
+    # Test with model name
+    tokens_with_model = estimate_tokens(text, "text-embedding-3-small")
+    assert tokens_with_model > 0
+
+
+def test_validate_text_length():
+    """Test text length validation."""
+    service = EmbeddingService()
+    
+    # Test valid text (short)
+    is_valid, est_tokens, max_tokens = service.validate_text_length(
+        "Hello world", "text-embedding-3-small"
+    )
+    assert is_valid is True
+    assert est_tokens is not None and est_tokens > 0
+    assert max_tokens == 8191
+    
+    # Test text that's too long (create text that exceeds limit)
+    # Create text that's approximately 10,000 tokens (way over 8191 limit)
+    very_long_text = "This is a test sentence. " * 2000  # ~40,000 chars ≈ 10,000 tokens
+    is_valid, est_tokens, max_tokens = service.validate_text_length(
+        very_long_text, "text-embedding-3-small"
+    )
+    assert is_valid is False, "Very long text should fail validation"
+    assert est_tokens is not None
+    assert max_tokens == 8191
+    assert est_tokens > max_tokens
+    
+    # Test unknown deployment (should pass validation)
+    is_valid, est_tokens, max_tokens = service.validate_text_length(
+        "Hello world", "unknown-deployment"
+    )
+    assert is_valid is True, "Unknown deployment should pass validation (can't validate)"
+    assert max_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_rejects_text_exceeding_limit(mock_embedding_response, db_connection):
+    """Test that get_embedding raises error for text exceeding token limit."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+        
+        # Create text that exceeds the limit
+        very_long_text = "This is a test sentence. " * 2000  # ~10,000 tokens
+        
+        request = EmbeddingRequest(
+            text=very_long_text,
+            deployment="text-embedding-3-small"  # Max 8191 tokens
+        )
+        
+        with patch.object(service, "_validate_deployment", return_value=True):
+            with pytest.raises(ValueError, match="exceeds maximum token limit"):
+                await service.get_embedding(request)
+            
+            # Verify failure was logged
+            # Check that a failed RawCall was created
+            from study_query_llm.db.models_v2 import RawCall
+            failed_calls = repo.session.query(RawCall).filter_by(
+                modality="embedding",
+                status="failed",
+                model="text-embedding-3-small"
+            ).all()
+            assert len(failed_calls) > 0, "Failed call should be logged to database"

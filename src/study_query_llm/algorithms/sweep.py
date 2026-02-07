@@ -159,7 +159,11 @@ def run_sweep(
                     idx = texts.index(rep_text)
                     rep_indices.append(idx)
                     if i < len(representatives):
-                        modified_texts[idx] = representatives[i]
+                        summary = representatives[i]
+                        # Skip empty summaries - keep original text instead
+                        if summary and summary.strip():
+                            modified_texts[idx] = summary
+                        # If summary is empty, keep original text (don't replace)
                 except ValueError:
                     # Representative text not found in original texts (shouldn't happen)
                     continue

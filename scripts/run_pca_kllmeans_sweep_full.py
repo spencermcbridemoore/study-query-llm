@@ -363,6 +363,9 @@ def create_paraphraser_for_llm(
             # Providers are now closed explicitly in summarize_batch's finally block
             # This ensures httpx clients are cleaned up before the event loop closes
             return summary
+        except Exception as e:
+            # Re-raise any errors
+            raise
 
     def paraphrase_batch_sync(texts: List[str]) -> str:
         """Synchronous wrapper that returns a single summary string.

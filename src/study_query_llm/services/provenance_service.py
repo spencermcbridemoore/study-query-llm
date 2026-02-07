@@ -28,7 +28,6 @@ Usage:
 
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from datetime import datetime, timezone
-import inspect
 import json
 
 from ..utils.logging_config import get_logger
@@ -93,14 +92,6 @@ class ProvenanceService:
         Returns:
             Group ID of the created run group
         """
-        # #region agent log
-        try:
-            sig = inspect.signature(self.create_run_group)
-            with open(r'c:\Users\spenc\Cursor Repos\study-query-llm\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "pre-fix", "hypothesisId": "A", "location": "provenance_service.py:75", "message": "create_run_group method signature", "data": {"signature": str(sig), "params": {"algorithm": algorithm if 'algorithm' in locals() else "MISSING", "config": str(config)[:100] if config else None, "name": name, "description": description}}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + '\n')
-        except Exception:
-            pass
-        # #endregion
         if name is None:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             name = f"{algorithm}_{timestamp}"

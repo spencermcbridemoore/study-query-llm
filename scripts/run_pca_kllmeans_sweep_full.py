@@ -331,41 +331,32 @@ def create_paraphraser_for_llm(
         """Async wrapper for summarization.
         
         Combines multiple texts into a single summary for the cluster.
-        Ensures all async resources are properly cleaned up.
         """
-        try:
-            with db.session_scope() as session:
-                repo = RawCallRepository(session)
-                service = SummarizationService(repository=repo)
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            service = SummarizationService(repository=repo)
 
-                # Combine texts into a single prompt for summarization
-                # Format: "Summarize the following texts into a single coherent summary:\n\nText 1: ...\n\nText 2: ..."
-                combined_text = "Summarize the following texts into a single coherent summary:\n\n"
-                for i, text in enumerate(texts, 1):
-                    combined_text += f"Text {i}:\n{text}\n\n"
-                
-                # Summarize the combined text
-                request = SummarizationRequest(
-                    texts=[combined_text],  # Single combined text
-                    llm_deployment=llm_deployment,
-                    temperature=0.2,
-                    max_tokens=256,  # Increased for combined summaries
-                )
-
-                result = await service.summarize_batch(request)
-                # Return the single summary
-                if result.summaries and len(result.summaries) > 0:
-                    summary = result.summaries[0]
-                else:
-                    # Fallback: return first text if summarization fails
-                    summary = texts[0] if texts else ""
+            # Combine texts into a single prompt for summarization
+            # Format: "Summarize the following texts into a single coherent summary:\n\nText 1: ...\n\nText 2: ..."
+            combined_text = "Summarize the following texts into a single coherent summary:\n\n"
+            for i, text in enumerate(texts, 1):
+                combined_text += f"Text {i}:\n{text}\n\n"
             
-            # Providers are now closed explicitly in summarize_batch's finally block
-            # This ensures httpx clients are cleaned up before the event loop closes
-            return summary
-        except Exception as e:
-            # Re-raise any errors
-            raise
+            # Summarize the combined text
+            request = SummarizationRequest(
+                texts=[combined_text],  # Single combined text
+                llm_deployment=llm_deployment,
+                temperature=0.2,
+                max_tokens=256,  # Increased for combined summaries
+            )
+
+            result = await service.summarize_batch(request)
+            # Return the single summary
+            if result.summaries and len(result.summaries) > 0:
+                return result.summaries[0]
+            else:
+                # Fallback: return first text if summarization fails
+                return texts[0] if texts else ""
 
     def paraphrase_batch_sync(texts: List[str]) -> str:
         """Synchronous wrapper that returns a single summary string.
@@ -573,52 +564,45 @@ async def main(
         )
         print(f"[OK] Created run group: id={run_group_id}")
 
-    # Run sweep for each LLM summarizer with limited concurrency
-    # Use semaphore to limit concurrent sweeps and prevent too many httpx clients
-    # For large datasets, run sequentially (1 at a time) to avoid httpx client cleanup issues
-    # For smaller datasets, can run 2 at a time
-    max_concurrent_sweeps = 1 if len(texts) > 100 else 2
-    semaphore = asyncio.Semaphore(max_concurrent_sweeps)
-    print(f"\n[INFO] Running sweeps with max concurrency: {max_concurrent_sweeps} (dataset size: {len(texts)})...")
+    # Run sweep for each LLM summarizer concurrently
+    print("\n[INFO] Running sweeps concurrently...")
     
     async def run_single_sweep(llm_deployment: str) -> tuple[str, Any]:
         """Run a single sweep for a given LLM deployment."""
-        # Acquire semaphore to limit concurrent sweeps
-        async with semaphore:
-            summarizer_name = "None" if llm_deployment is None else llm_deployment
-            
-            # Create paraphraser and embedder
-            paraphraser = create_paraphraser_for_llm(llm_deployment, db)
-            
-            # Create embedder function
-            async def embedder_func(texts_list: List[str]) -> np.ndarray:
-                """Embed texts using EmbeddingService."""
-                return await fetch_embeddings_async(texts_list, EMBEDDING_DEPLOYMENT, db)
-            
-            def embedder_sync(texts_list: List[str]) -> np.ndarray:
-                """Synchronous wrapper for embedder."""
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        return loop.run_until_complete(embedder_func(texts_list))
-                except RuntimeError:
-                    pass
-                return asyncio.run(embedder_func(texts_list))
-            
-            # Run sweep in thread pool executor (CPU-bound work)
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor() as executor:
-                result = await loop.run_in_executor(
-                    executor,
-                    lambda: run_sweep(
-                        texts, embeddings, SWEEP_CONFIG,
-                        paraphraser=paraphraser,
-                        embedder=embedder_sync if paraphraser else None
-                    )
+        summarizer_name = "None" if llm_deployment is None else llm_deployment
+        
+        # Create paraphraser and embedder
+        paraphraser = create_paraphraser_for_llm(llm_deployment, db)
+        
+        # Create embedder function
+        async def embedder_func(texts_list: List[str]) -> np.ndarray:
+            """Embed texts using EmbeddingService."""
+            return await fetch_embeddings_async(texts_list, EMBEDDING_DEPLOYMENT, db)
+        
+        def embedder_sync(texts_list: List[str]) -> np.ndarray:
+            """Synchronous wrapper for embedder."""
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    return loop.run_until_complete(embedder_func(texts_list))
+            except RuntimeError:
+                pass
+            return asyncio.run(embedder_func(texts_list))
+        
+        # Run sweep in thread pool executor (CPU-bound work)
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            result = await loop.run_in_executor(
+                executor,
+                lambda: run_sweep(
+                    texts, embeddings, SWEEP_CONFIG,
+                    paraphraser=paraphraser,
+                    embedder=embedder_sync if paraphraser else None
                 )
-            
-            print(f"[OK] Completed {summarizer_name}. Ks: {sorted([int(k) for k in result.by_k.keys()])}")
-            return summarizer_name, result
+            )
+        
+        print(f"[OK] Completed {summarizer_name}. Ks: {sorted([int(k) for k in result.by_k.keys()])}")
+        return summarizer_name, result
     
     # Create tasks for all sweeps
     tasks = [

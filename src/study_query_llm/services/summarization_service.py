@@ -108,17 +108,6 @@ class SummarizationService:
         Returns:
             True if deployment is valid, False otherwise
         """
-        # #region agent log
-        import json
-        from pathlib import Path
-        log_path = Path.cwd() / ".cursor" / "debug.log"
-        try:
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "summarization_service.py:_validate_deployment", "message": "Starting deployment validation", "data": {"deployment": deployment, "provider": provider}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception as log_err:
-            pass
-        # #endregion
-        
         try:
             # Temporarily override deployment BEFORE creating config
             # This ensures the config reads the correct deployment name
@@ -126,14 +115,6 @@ class SummarizationService:
             if provider == "azure":
                 original_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
                 os.environ["AZURE_OPENAI_DEPLOYMENT"] = deployment
-                
-                # #region agent log
-                try:
-                    with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "summarization_service.py:_validate_deployment", "message": "Set AZURE_OPENAI_DEPLOYMENT before config", "data": {"original_deployment": original_deployment, "new_deployment": deployment, "env_value": os.environ.get("AZURE_OPENAI_DEPLOYMENT")}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception as log_err:
-                    pass
-                # #endregion
 
             # Create fresh Config to pick up environment changes (now with correct deployment)
             fresh_config = Config()
@@ -141,63 +122,22 @@ class SummarizationService:
             if provider in fresh_config._provider_configs:
                 del fresh_config._provider_configs[provider]
             provider_config = fresh_config.get_provider_config(provider)
-            
-            # #region agent log
-            try:
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "summarization_service.py:_validate_deployment", "message": "Got provider config", "data": {"provider": provider, "deployment_name": provider_config.deployment_name, "has_endpoint": bool(provider_config.endpoint), "has_api_key": bool(provider_config.api_key), "api_version": provider_config.api_version}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception as log_err:
-                pass
-            # #endregion
 
             try:
                 # Create provider and service
                 factory = ProviderFactory(fresh_config)
                 provider_instance = factory.create_from_config(provider)
                 
-                # #region agent log
-                try:
-                    with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "summarization_service.py:_validate_deployment", "message": "Created provider instance", "data": {"provider_name": provider_instance.get_provider_name() if hasattr(provider_instance, "get_provider_name") else "unknown"}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception as log_err:
-                    pass
-                # #endregion
-                
                 service = InferenceService(provider_instance, repository=None)
 
                 # Try a minimal completion call
-                # #region agent log
-                try:
-                    with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "summarization_service.py:_validate_deployment", "message": "About to call run_inference for validation", "data": {"deployment": deployment}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception as log_err:
-                    pass
-                # #endregion
-                
                 await service.run_inference(
                     "ping", temperature=0.0, max_tokens=1
                 )
-                
-                # #region agent log
-                try:
-                    with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "summarization_service.py:_validate_deployment", "message": "Validation inference call succeeded", "data": {"deployment": deployment}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception as log_err:
-                    pass
-                # #endregion
 
                 return True
 
             finally:
-                # Explicitly close the service to clean up httpx clients
-                # This prevents "Event loop is closed" errors during cleanup
-                if 'service' in locals():
-                    try:
-                        await service.close()
-                    except Exception:
-                        # Ignore errors during cleanup - they're harmless
-                        pass
-                
                 if provider == "azure":
                     if original_deployment:
                         os.environ["AZURE_OPENAI_DEPLOYMENT"] = original_deployment
@@ -205,14 +145,6 @@ class SummarizationService:
                         del os.environ["AZURE_OPENAI_DEPLOYMENT"]
 
         except Exception as e:
-            # #region agent log
-            try:
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "F", "location": "summarization_service.py:_validate_deployment", "message": "Validation failed with exception", "data": {"deployment": deployment, "error_type": type(e).__name__, "error_message": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception as log_err:
-                pass
-            # #endregion
-            
             logger.warning(
                 f"Deployment validation failed: {deployment}, error: {str(e)}"
             )
@@ -505,15 +437,6 @@ class SummarizationService:
             )
 
         finally:
-            # Explicitly close the service to clean up httpx clients
-            # This prevents "Event loop is closed" errors during cleanup
-            if 'service' in locals():
-                try:
-                    await service.close()
-                except Exception:
-                    # Ignore errors during cleanup - they're harmless
-                    pass
-            
             # Restore original deployment
             if request.provider == "azure":
                 if original_deployment:

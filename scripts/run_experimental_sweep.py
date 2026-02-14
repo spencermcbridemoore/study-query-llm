@@ -205,7 +205,8 @@ def load_reuters_full(random_state=42):
         raise ImportError("Hugging Face datasets library required for Reuters. Install with: pip install datasets")
     
     try:
-        dataset = load_dataset("reuters21578", "ModApte", split="train")
+        # Use trust_remote_code for datasets with scripts
+        dataset = load_dataset("reuters21578", "ModApte", split="train", trust_remote_code=True)
         
         # Extract texts and labels
         texts = []
@@ -361,7 +362,8 @@ def load_trec_full(random_state=42):
     except ImportError:
         raise ImportError("Hugging Face datasets library required. Install with: pip install datasets")
     
-    dataset = load_dataset("trec", split="train")
+    # Use trust_remote_code for datasets with scripts
+    dataset = load_dataset("trec", split="train", trust_remote_code=True)
     
     texts = []
     labels = []
@@ -382,7 +384,7 @@ def load_trec_full(random_state=42):
 
 def load_news_category_full(random_state=42):
     """
-    Load full News Category Dataset (many categories).
+    Load full News Category Dataset (Huffington Post).
     
     Args:
         random_state: Random seed for reproducibility
@@ -395,7 +397,8 @@ def load_news_category_full(random_state=42):
     except ImportError:
         raise ImportError("Hugging Face datasets library required. Install with: pip install datasets")
     
-    dataset = load_dataset("news_category", split="train")
+    # Correct dataset name: HuffPost News Category Dataset
+    dataset = load_dataset("heegyu/news-category-dataset", split="train")
     
     texts = []
     labels = []

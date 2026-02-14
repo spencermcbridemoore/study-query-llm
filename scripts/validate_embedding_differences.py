@@ -90,7 +90,7 @@ async def main():
     print("\n[1/4] Initializing database...")
     db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
     db.init_db()
-    print("  ✓ Database ready")
+    print("  [OK] Database ready")
     
     # Store embeddings for each summarizer
     embeddings_by_summarizer = {}
@@ -109,9 +109,12 @@ async def main():
                 try:
                     summary = await summarize_text(text, summarizer, db)
                     summarized.append(summary)
-                    print(f"      [{i+1}/{len(TEST_TEXTS)}] Original ({len(text)} chars) → Summary ({len(summary)} chars)")
+                    try:
+                        print(f"      [{i+1}/{len(TEST_TEXTS)}] Original ({len(text)} chars) -> Summary ({len(summary)} chars)")
+                    except UnicodeEncodeError:
+                        print(f"      [{i+1}/{len(TEST_TEXTS)}] Summarized (encoding issue in output)")
                 except Exception as e:
-                    print(f"      [{i+1}/{len(TEST_TEXTS)}] FAILED: {e}, using original")
+                    print(f"      [{i+1}/{len(TEST_TEXTS)}] FAILED: {str(e)[:50]}, using original")
                     summarized.append(text)
             texts_to_embed = summarized
         else:
@@ -125,9 +128,9 @@ async def main():
         try:
             embeddings = await fetch_embeddings(texts_to_embed, EMBEDDING_DEPLOYMENT, db)
             embeddings_by_summarizer[summarizer_name] = embeddings
-            print(f"    ✓ Got embeddings: shape {embeddings.shape}")
+            print(f"    [OK] Got embeddings: shape {embeddings.shape}")
         except Exception as e:
-            print(f"    ✗ FAILED: {e}")
+            print(f"    [FAIL] FAILED: {e}")
             import traceback
             traceback.print_exc()
             continue
@@ -137,7 +140,7 @@ async def main():
     summarizer_names = list(embeddings_by_summarizer.keys())
     
     if len(summarizer_names) < 2:
-        print("  ✗ ERROR: Need at least 2 summarizers to compare!")
+        print("  [FAIL] ERROR: Need at least 2 summarizers to compare!")
         return
     
     print(f"\n  Pairwise comparisons:")
@@ -150,11 +153,19 @@ async def main():
             emb_a = embeddings_by_summarizer[name_a]
             emb_b = embeddings_by_summarizer[name_b]
             
+            # Check if shapes match
+            if emb_a.shape != emb_b.shape:
+                print(f"\n    {name_a} vs {name_b}: [ERROR] SHAPE MISMATCH")
+                print(f"      {name_a} shape: {emb_a.shape}")
+                print(f"      {name_b} shape: {emb_b.shape}")
+                print(f"      Cannot compare - different number of embeddings!")
+                continue
+            
             identical = np.array_equal(emb_a, emb_b)
             max_diff = np.abs(emb_a - emb_b).max()
             mean_diff = np.abs(emb_a - emb_b).mean()
             
-            status = "✗ IDENTICAL" if identical else "✓ DIFFERENT"
+            status = "[FAIL] IDENTICAL" if identical else "[OK] DIFFERENT"
             print(f"\n    {name_a} vs {name_b}: {status}")
             print(f"      Max difference:  {max_diff:.6f}")
             print(f"      Mean difference: {mean_diff:.6f}")
@@ -174,10 +185,10 @@ async def main():
     # Final verdict
     print("\n" + "=" * 80)
     if all_different:
-        print("✓ SUCCESS: All summarizers produce DIFFERENT embeddings!")
+        print("[OK] SUCCESS: All summarizers produce DIFFERENT embeddings!")
         print("  The bug is fixed. You can now run the full experimental sweep.")
     else:
-        print("✗ FAILURE: Some summarizers produce IDENTICAL embeddings!")
+        print("[FAIL] FAILURE: Some summarizers produce IDENTICAL embeddings!")
         print("  The bug is NOT fixed. Do not run the full sweep yet.")
     print("=" * 80)
 

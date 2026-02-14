@@ -1,0 +1,1 @@
+{"timestamp": "2026-02-09T22:40:55.335404", "model_name": "Claude Sonnet", "query_preview": "test query", "response_preview": "[Model: Claude Sonnet]\n\nThis is a test response.", "has_model_identifier": true, "cursor_trace_id": "d8a116dedb7740fbb4ccb9f5b7205780", "cursor_agent": "1"}

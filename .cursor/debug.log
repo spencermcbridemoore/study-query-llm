@@ -1,1 +1,0 @@
-{"sessionId": "debug-session", "runId": "pre-fix", "hypothesisId": "A", "location": "pca_kllmeans_sweep.ipynb:create_run_group_call", "message": "Attempting create_run_group call", "data": {"embedding_deployment": "text-embedding-3-small", "n_texts": 324, "k_range": "2-10"}, "timestamp": 1770263123301}

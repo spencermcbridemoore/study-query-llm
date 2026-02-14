@@ -807,23 +807,8 @@ async def main():
                         sampled_texts = valid_texts
                         sampled_labels = sampled_labels[valid_indices]
                 
-                # Fetch embeddings
-                print(f"      Fetching embeddings...")
-                try:
-                    embeddings = await fetch_embeddings_async(sampled_texts, EMBEDDING_DEPLOYMENT, db)
-                    print(f"      [OK] Fetched {len(embeddings)} embeddings")
-                except TimeoutError as e:
-                    print(f"      [ERROR] Embedding fetch timed out: {e}")
-                    print(f"      [INFO] Skipping this configuration...")
-                    continue
-                except Exception as e:
-                    print(f"      [ERROR] Embedding fetch failed: {e}")
-                    print(f"      [INFO] Skipping this configuration...")
-                    import traceback
-                    traceback.print_exc()
-                    continue
-                
                 # Run sweep for each LLM summarizer sequentially (save separate pickle for each)
+                # NOTE: Embeddings are computed PER SUMMARIZER to reflect summarized text
                 # Run one at a time to avoid overwhelming the system
                 for llm_deployment in LLM_SUMMARIZERS:
                     run_count += 1
@@ -845,10 +830,61 @@ async def main():
                     
                     print(f"\n        [{run_count}/{total_runs}] Summarizer: {summarizer_name}")
                     
+                    # Prepare texts for this summarizer
+                    # If LLM: summarize all texts first, then embed
+                    # If None: use original texts
+                    if llm_deployment is not None:
+                        print(f"        Summarizing {len(sampled_texts)} texts with {summarizer_name}...")
+                        try:
+                            # Create paraphraser for batch summarization
+                            paraphraser = create_paraphraser_for_llm(llm_deployment, db)
+                            
+                            # Summarize each text individually
+                            summarized_texts = []
+                            for i, text in enumerate(sampled_texts):
+                                if i % 10 == 0:
+                                    print(f"          Summarized {i}/{len(sampled_texts)}...")
+                                try:
+                                    summary = paraphraser([text])  # Pass as single-item list
+                                    summarized_texts.append(summary)
+                                except Exception as e:
+                                    print(f"          [WARN] Summarization failed for text {i}, using original: {e}")
+                                    summarized_texts.append(text)
+                            
+                            texts_to_embed = summarized_texts
+                            print(f"        [OK] Summarized all texts")
+                        except Exception as e:
+                            print(f"        [ERROR] Batch summarization failed: {e}")
+                            print(f"        [INFO] Falling back to original texts...")
+                            import traceback
+                            traceback.print_exc()
+                            texts_to_embed = sampled_texts
+                    else:
+                        # No summarization for None
+                        texts_to_embed = sampled_texts
+                    
+                    # Fetch embeddings for the (possibly summarized) texts
+                    print(f"        Fetching embeddings for {len(texts_to_embed)} texts...")
+                    try:
+                        embeddings = await fetch_embeddings_async(texts_to_embed, EMBEDDING_DEPLOYMENT, db)
+                        print(f"        [OK] Fetched {len(embeddings)} embeddings")
+                    except TimeoutError as e:
+                        print(f"        [ERROR] Embedding fetch timed out: {e}")
+                        print(f"        [INFO] Skipping this run...")
+                        continue
+                    except Exception as e:
+                        print(f"        [ERROR] Embedding fetch failed: {e}")
+                        print(f"        [INFO] Skipping this run...")
+                        import traceback
+                        traceback.print_exc()
+                        continue
+                    
                     # Run sweep - wrap in try/except to ensure file is saved even if DB fails
                     result = None
                     try:
                         # Add timeout for sweep execution (30 minutes)
+                        # Note: We pass sampled_texts (original) but embeddings are from texts_to_embed (possibly summarized)
+                        # The paraphraser is still used inside clustering for representative selection
                         result = await asyncio.wait_for(
                             run_single_sweep(sampled_texts, embeddings, llm_deployment, db),
                             timeout=1800.0

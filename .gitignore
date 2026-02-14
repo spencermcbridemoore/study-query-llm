@@ -115,8 +115,8 @@ Thumbs.db
 # Temporary plan files (session-specific)
 .plans/
 
-# Generated sweep result files (large data files)
-notebooks/pca_kllmeans_sweep_results_*.pkl
+# Experimental results directory (pickle files with sweep/clustering results)
+experimental_results/
 
 # Debug logs
 .cursor/debug.log

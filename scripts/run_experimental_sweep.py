@@ -205,8 +205,7 @@ def load_reuters_full(random_state=42):
         raise ImportError("Hugging Face datasets library required for Reuters. Install with: pip install datasets")
     
     try:
-        # Use trust_remote_code for datasets with scripts
-        dataset = load_dataset("reuters21578", "ModApte", split="train", trust_remote_code=True)
+        dataset = load_dataset("reuters21578", "ModApte", split="train")
         
         # Extract texts and labels
         texts = []
@@ -363,7 +362,7 @@ def load_trec_full(random_state=42):
         raise ImportError("Hugging Face datasets library required. Install with: pip install datasets")
     
     # Use trust_remote_code for datasets with scripts
-    dataset = load_dataset("trec", split="train", trust_remote_code=True)
+    dataset = load_dataset("trec", split="train")
     
     texts = []
     labels = []

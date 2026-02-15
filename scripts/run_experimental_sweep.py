@@ -574,11 +574,20 @@ def create_paraphraser_for_llm(
                     temperature=0.2,
                     max_tokens=256,
                 )
-
-                result = await service.summarize_batch(request)
-                if result.summaries and len(result.summaries) > 0:
-                    return result.summaries[0]
-                else:
+                
+                try:
+                    result = await service.summarize_batch(request)
+                    if result.summaries and len(result.summaries) > 0:
+                        return result.summaries[0]
+                    else:
+                        return texts[0] if texts else ""
+                except Exception as e:
+                    # Handle content filter errors gracefully
+                    error_msg = str(e)
+                    if "content_filter" in error_msg or "ResponsibleAIPolicyViolation" in error_msg:
+                        print(f"          [WARN] Content filtered, using original text")
+                    else:
+                        print(f"          [WARN] Summarization error: {error_msg[:100]}")
                     return texts[0] if texts else ""
         
         try:

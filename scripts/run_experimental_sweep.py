@@ -683,8 +683,11 @@ async def run_single_sweep(
     Run a single sweep for a given LLM deployment.
     
     CRITICAL: Embeddings are pre-computed from ORIGINAL texts (not summarized).
-    The LLM is used ONLY for in-loop centroid updates via paraphraser.
-    No in-loop embedding is performed (embedder=None always).
+    These embeddings are used for the initial PCA projection and point positions.
+    
+    The LLM influences clustering in TWO ways (when paraphraser+embedder are both provided):
+    1. During centroid updates: summarize representative texts → re-embed → new centroid position
+    2. This happens INSIDE the k_llmmeans iteration loop
     
     This ensures we test: "which LLM makes better centroids during clustering"
     NOT: "which LLM pre-summaries happen to embed well"
@@ -694,8 +697,24 @@ async def run_single_sweep(
     # Create paraphraser for in-loop centroid updates (None if no LLM)
     paraphraser = create_paraphraser_for_llm(llm_deployment, db)
     
-    # CRITICAL: Do NOT pass embedder to run_sweep
-    # We already have embeddings from original texts, no in-loop embedding needed
+    # Create embedder for re-embedding LLM summaries during centroid updates
+    # This is ONLY used inside k_llmmeans for centroid calculation, NOT for the data points
+    async def embedder_func(texts_list: List[str]) -> np.ndarray:
+        """Embed texts using EmbeddingService."""
+        return await fetch_embeddings_async(texts_list, EMBEDDING_DEPLOYMENT, db)
+    
+    def embedder_sync(texts_list: List[str]) -> np.ndarray:
+        """Synchronous wrapper for embedder."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                return loop.run_until_complete(embedder_func(texts_list))
+        except RuntimeError:
+            pass
+        return asyncio.run(embedder_func(texts_list))
+    
+    # Pass both paraphraser and embedder to enable in-loop LLM centroid updates
+    # When both are provided, sweep.py passes them to k_llmmeans (see sweep.py line 146)
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as executor:
         result = await loop.run_in_executor(
@@ -703,7 +722,7 @@ async def run_single_sweep(
             lambda: run_sweep(
                 texts, embeddings, SWEEP_CONFIG,
                 paraphraser=paraphraser,
-                embedder=None  # ALWAYS None - no in-loop embedding
+                embedder=embedder_sync if paraphraser else None  # Only if LLM is used
             )
         )
     

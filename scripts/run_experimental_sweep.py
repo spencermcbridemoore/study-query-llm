@@ -679,25 +679,23 @@ async def run_single_sweep(
     llm_deployment: Optional[str],
     db: DatabaseConnectionV2,
 ) -> Any:
-    """Run a single sweep for a given LLM deployment."""
+    """
+    Run a single sweep for a given LLM deployment.
+    
+    CRITICAL: Embeddings are pre-computed from ORIGINAL texts (not summarized).
+    The LLM is used ONLY for in-loop centroid updates via paraphraser.
+    No in-loop embedding is performed (embedder=None always).
+    
+    This ensures we test: "which LLM makes better centroids during clustering"
+    NOT: "which LLM pre-summaries happen to embed well"
+    """
     summarizer_name = "None" if llm_deployment is None else llm_deployment
     
+    # Create paraphraser for in-loop centroid updates (None if no LLM)
     paraphraser = create_paraphraser_for_llm(llm_deployment, db)
     
-    async def embedder_func(texts_list: List[str]) -> np.ndarray:
-        """Embed texts using EmbeddingService."""
-        return await fetch_embeddings_async(texts_list, EMBEDDING_DEPLOYMENT, db)
-    
-    def embedder_sync(texts_list: List[str]) -> np.ndarray:
-        """Synchronous wrapper for embedder."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                return loop.run_until_complete(embedder_func(texts_list))
-        except RuntimeError:
-            pass
-        return asyncio.run(embedder_func(texts_list))
-    
+    # CRITICAL: Do NOT pass embedder to run_sweep
+    # We already have embeddings from original texts, no in-loop embedding needed
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as executor:
         result = await loop.run_in_executor(
@@ -705,7 +703,7 @@ async def run_single_sweep(
             lambda: run_sweep(
                 texts, embeddings, SWEEP_CONFIG,
                 paraphraser=paraphraser,
-                embedder=embedder_sync if paraphraser else None
+                embedder=None  # ALWAYS None - no in-loop embedding
             )
         )
     
@@ -818,9 +816,25 @@ async def main():
                         sampled_texts = valid_texts
                         sampled_labels = sampled_labels[valid_indices]
                 
+                # ===================================================================
+                # CRITICAL: Embed original texts ONCE (shared across all summarizers)
+                # ===================================================================
+                # This ensures we're testing "which LLM makes better centroids"
+                # NOT "which LLM pre-summaries embed better"
+                print(f"      Fetching embeddings for {len(sampled_texts)} original texts...")
+                try:
+                    shared_embeddings = await fetch_embeddings_async(sampled_texts, EMBEDDING_DEPLOYMENT, db)
+                    print(f"      [OK] Fetched {len(shared_embeddings)} embeddings (shared across all summarizers)")
+                except Exception as e:
+                    print(f"      [ERROR] Embedding fetch failed: {e}")
+                    print(f"      [INFO] Skipping all runs for this dataset/entry/label combo...")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+                
                 # Run sweep for each LLM summarizer sequentially (save separate pickle for each)
-                # NOTE: Embeddings are computed PER SUMMARIZER to reflect summarized text
-                # Run one at a time to avoid overwhelming the system
+                # NOTE: All summarizers use the SAME embeddings from original texts
+                # LLM influence is ONLY during in-loop centroid updates via paraphraser
                 for llm_deployment in LLM_SUMMARIZERS:
                     run_count += 1
                     summarizer_name = "None" if llm_deployment is None else llm_deployment
@@ -841,61 +855,17 @@ async def main():
                     
                     print(f"\n        [{run_count}/{total_runs}] Summarizer: {summarizer_name}")
                     
-                    # Prepare texts for this summarizer
-                    # If LLM: summarize all texts first, then embed
-                    # If None: use original texts
-                    if llm_deployment is not None:
-                        print(f"        Summarizing {len(sampled_texts)} texts with {summarizer_name}...")
-                        try:
-                            # Create paraphraser for batch summarization
-                            paraphraser = create_paraphraser_for_llm(llm_deployment, db)
-                            
-                            # Summarize each text individually
-                            summarized_texts = []
-                            for i, text in enumerate(sampled_texts):
-                                if i % 10 == 0:
-                                    print(f"          Summarized {i}/{len(sampled_texts)}...")
-                                try:
-                                    summary = paraphraser([text])  # Pass as single-item list
-                                    summarized_texts.append(summary)
-                                except Exception as e:
-                                    print(f"          [WARN] Summarization failed for text {i}, using original: {e}")
-                                    summarized_texts.append(text)
-                            
-                            texts_to_embed = summarized_texts
-                            print(f"        [OK] Summarized all texts")
-                        except Exception as e:
-                            print(f"        [ERROR] Batch summarization failed: {e}")
-                            print(f"        [INFO] Falling back to original texts...")
-                            import traceback
-                            traceback.print_exc()
-                            texts_to_embed = sampled_texts
-                    else:
-                        # No summarization for None
-                        texts_to_embed = sampled_texts
-                    
-                    # Fetch embeddings for the (possibly summarized) texts
-                    print(f"        Fetching embeddings for {len(texts_to_embed)} texts...")
-                    try:
-                        embeddings = await fetch_embeddings_async(texts_to_embed, EMBEDDING_DEPLOYMENT, db)
-                        print(f"        [OK] Fetched {len(embeddings)} embeddings")
-                    except TimeoutError as e:
-                        print(f"        [ERROR] Embedding fetch timed out: {e}")
-                        print(f"        [INFO] Skipping this run...")
-                        continue
-                    except Exception as e:
-                        print(f"        [ERROR] Embedding fetch failed: {e}")
-                        print(f"        [INFO] Skipping this run...")
-                        import traceback
-                        traceback.print_exc()
-                        continue
+                    # Use the SHARED embeddings from original texts
+                    # The LLM will ONLY influence centroid updates via paraphraser in run_sweep()
+                    embeddings = shared_embeddings
                     
                     # Run sweep - wrap in try/except to ensure file is saved even if DB fails
                     result = None
                     try:
                         # Add timeout for sweep execution (30 minutes)
-                        # Note: We pass sampled_texts (original) but embeddings are from texts_to_embed (possibly summarized)
-                        # The paraphraser is still used inside clustering for representative selection
+                        # Note: We pass sampled_texts (original) and shared_embeddings (from original texts)
+                        # The paraphraser is used ONLY inside clustering for in-loop centroid updates
+                        # This ensures we test "which LLM makes better centroids" not "which summaries embed better"
                         result = await asyncio.wait_for(
                             run_single_sweep(sampled_texts, embeddings, llm_deployment, db),
                             timeout=1800.0

@@ -22699,3 +22699,412 @@ Traceback (most recent call last):
   File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
     raise RuntimeError('Event loop is closed')
 RuntimeError: Event loop is closed
+Traceback (most recent call last):
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\run_experimental_sweep.py", line 880, in main
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\run_experimental_sweep.py", line 548, in fetch_embeddings_async
+    return await asyncio.wait_for(_fetch(), timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 510, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\run_experimental_sweep.py", line 540, in _fetch
+    responses = await service.get_embeddings_batch(requests)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\..\src\study_query_llm\services\embedding_service.py", line 809, in get_embeddings_batch
+    return await asyncio.gather(*tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 375, in __wakeup
+    future.result()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\..\src\study_query_llm\services\embedding_service.py", line 628, in get_embedding
+    raise error
+ValueError: Cannot generate embedding for empty text (after normalization). Text must contain at least one non-whitespace character.
+Exception during reset or similar
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\sqlalchemy\pool\base.py", line 985, in _finalize_fairy
+    fairy._reset(
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\sqlalchemy\pool\base.py", line 1433, in _reset
+    pool._dialect.do_rollback(self)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\sqlalchemy\engine\default.py", line 711, in do_rollback
+    dbapi_connection.rollback()
+psycopg2.OperationalError: SSL connection has been closed unexpectedly
+
+Traceback (most recent call last):
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\run_experimental_sweep.py", line 880, in main
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\run_experimental_sweep.py", line 548, in fetch_embeddings_async
+    return await asyncio.wait_for(_fetch(), timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 510, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\run_experimental_sweep.py", line 540, in _fetch
+    responses = await service.get_embeddings_batch(requests)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\..\src\study_query_llm\services\embedding_service.py", line 809, in get_embeddings_batch
+    return await asyncio.gather(*tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 375, in __wakeup
+    future.result()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\..\src\study_query_llm\services\embedding_service.py", line 628, in get_embedding
+    raise error
+ValueError: Cannot generate embedding for empty text (after normalization). Text must contain at least one non-whitespace character.
+Exception during reset or similar
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\sqlalchemy\pool\base.py", line 985, in _finalize_fairy
+    fairy._reset(
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\sqlalchemy\pool\base.py", line 1433, in _reset
+    pool._dialect.do_rollback(self)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\sqlalchemy\engine\default.py", line 711, in do_rollback
+    dbapi_connection.rollback()
+psycopg2.OperationalError: SSL connection has been closed unexpectedly
+
+Task exception was never retrieved
+future: <Task finished name='Task-132363' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132374' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132385' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132397' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132400' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132410' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132421' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132432' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132443' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Task exception was never retrieved
+future: <Task finished name='Task-132453' coro=<AsyncClient.aclose() done, defined at C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py:1978> exception=RuntimeError('Event loop is closed')>
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\tasks.py", line 304, in __step_run_and_handle_result
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_client.py", line 1985, in aclose
+    await self._transport.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpx\_transports\default.py", line 406, in aclose
+    await self._pool.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 353, in aclose
+    await self._close_connections(closing_connections)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection_pool.py", line 345, in _close_connections
+    await connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\connection.py", line 173, in aclose
+    await self._connection.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_async\http11.py", line 258, in aclose
+    await self._network_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\httpcore\_backends\anyio.py", line 53, in aclose
+    await self._stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\streams\tls.py", line 216, in aclose
+    await self.transport_stream.aclose()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\site-packages\anyio\_backends\_asyncio.py", line 1314, in aclose
+    self._transport.close()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 772, in call_soon
+    self._check_closed()
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\base_events.py", line 519, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\windows_events.py", line 461, in finish_socket_func
+    return ov.getresult()
+           ^^^^^^^^^^^^^^
+OSError: [WinError 995] The I/O operation has been aborted because of either a thread exit or an application request
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\windows_events.py", line 798, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\windows_events.py", line 465, in finish_socket_func
+    raise ConnectionResetError(*exc.args)
+ConnectionResetError: [WinError 995] The I/O operation has been aborted because of either a thread exit or an application request
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\spenc\Cursor Repos\study-query-llm\scripts\run_experimental_sweep.py", line 977, in <module>
+  File "C:\Users\spenc\AppData\Roaming\Python\Python312\site-packages\nest_asyncio.py", line 30, in run
+    return loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\AppData\Roaming\Python\Python312\site-packages\nest_asyncio.py", line 92, in run_until_complete
+    self._run_once()
+  File "C:\Users\spenc\AppData\Roaming\Python\Python312\site-packages\nest_asyncio.py", line 115, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\windows_events.py", line 444, in select
+    self._poll(timeout)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\windows_events.py", line 800, in _poll
+    f.set_exception(e)
+  File "C:\Users\spenc\.conda\envs\ucf\Lib\asyncio\windows_events.py", line 88, in set_exception
+    super().set_exception(exception)
+asyncio.exceptions.InvalidStateError: invalid state

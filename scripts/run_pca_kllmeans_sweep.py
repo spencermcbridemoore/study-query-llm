@@ -190,7 +190,10 @@ def save_results(
     """Save results to a pickle file."""
     if output_file is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"pca_kllmeans_sweep_results_{timestamp}.pkl"
+        # Save to experimental_results directory (consistent with other sweep scripts)
+        output_dir = Path(__file__).parent.parent / "experimental_results"
+        output_dir.mkdir(exist_ok=True)
+        output_file = str(output_dir / f"pca_kllmeans_sweep_results_{timestamp}.pkl")
 
     # Prepare results for saving
     save_results = {}

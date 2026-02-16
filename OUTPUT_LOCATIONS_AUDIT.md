@@ -56,16 +56,20 @@
 ### ✅ Notebooks - Correctly Configured
 
 #### 4. `notebooks/pca_kllmeans_sweep.ipynb`
-- **Cell with line 3451**:
+- **Cell with line 3451** (WRITE):
   ```python
   output_dir = Path("..") / "experimental_results"
   output_dir.mkdir(exist_ok=True)
   ```
+- **Cells with lines 3062, 3294** (READ):
+  ```python
+  pickle_files = sorted(Path("../experimental_results").glob("pca_kllmeans_sweep_results_*.pkl"), reverse=True)
+  ```
 - **Output**: `pca_kllmeans_sweep_results_{timestamp}.pkl`
-- **Status**: ✅ Correct
+- **Status**: ✅ Correct (both read and write)
 
 #### 5. `notebooks/colab_pca_kllmeans_sweep.ipynb`
-- **Cell with line 1076**:
+- **Cell with line 1076** (WRITE):
   ```python
   output_dir = Path("experimental_results")
   output_dir.mkdir(exist_ok=True)
@@ -74,7 +78,7 @@
 - **Status**: ✅ Correct (for Colab context)
 
 #### 6. `notebooks/pca_kllmeans_analysis.ipynb`
-- **Cell with line 58**: 
+- **Cell with line 58** (READ): 
   ```python
   pickle_files = sorted(Path("../experimental_results").glob("pca_kllmeans_sweep_results_*.pkl"), reverse=True)
   ```
@@ -82,18 +86,30 @@
 - **Status**: ✅ Correct
 
 #### 7. `notebooks/sweep_explorer.ipynb`
-- **Loading (line ~150)**: 
+- **Loading (line 433)** (READ): 
   ```python
-  data_dir = Path("../experimental_results")
+  def load_sweep_dataframe(data_dir: str = "../experimental_results") -> pd.DataFrame:
   ```
-- **Plotting - Pairwise (line 1583)**:
+- **Plotting - Pairwise (line 1583)** (WRITE):
   ```python
   output_dir = Path("..") / "experimental_results" / "plots"
   ```
-- **Plotting - Values (line 1837)**:
+- **Plotting - Values (line 1837)** (WRITE):
   ```python
   output_dir = Path("..") / "experimental_results" / "plots" / "values"
   ```
+- **Status**: ✅ Correct (both read and write)
+
+---
+
+### ✅ Scripts - Read Operations
+
+#### 8. `scripts/verify_embedding_identity.py`
+- **Line 41** (READ):
+  ```python
+  for pkl_file in results_dir.glob("experimental_sweep_*.pkl"):
+  ```
+- **Purpose**: Reads experimental sweep pickles from `experimental_results/`
 - **Status**: ✅ Correct
 
 ---
@@ -129,6 +145,8 @@ experimental_results/
 
 ## Summary Table
 
+### Write Operations (Creating Files)
+
 | File | Output Type | Location | Status |
 |------|-------------|----------|--------|
 | `run_experimental_sweep.py` | Pickles | `experimental_results/` | ✅ |
@@ -138,6 +156,19 @@ experimental_results/
 | `colab_pca_kllmeans_sweep.ipynb` | Pickles | `experimental_results/` | ✅ |
 | `sweep_explorer.ipynb` | Plots | `experimental_results/plots/` | ✅ |
 | `sweep_explorer.ipynb` | Plots | `experimental_results/plots/values/` | ✅ |
+
+### Read Operations (Loading Files)
+
+| File | Input Type | Read Location | Status |
+|------|-----------|---------------|--------|
+| `sweep_explorer.ipynb` | Pickles | `../experimental_results/` (default) | ✅ |
+| `pca_kllmeans_analysis.ipynb` | Pickles | `../experimental_results/` | ✅ |
+| `pca_kllmeans_sweep.ipynb` | Pickles | `../experimental_results/` | ✅ |
+| `verify_embedding_identity.py` | Pickles | `experimental_results/` (via glob) | ✅ |
+| `run_pca_kllmeans_sweep.py` | Estela dict | User-specified (via arg/env) | N/A |
+| `analyze_dataset_lengths.py` | Estela dict | User-specified (via arg/env) | N/A |
+
+**All read and write operations are consistent with `experimental_results/` as the designated location.**
 
 ---
 

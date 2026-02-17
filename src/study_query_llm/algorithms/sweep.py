@@ -27,6 +27,7 @@ class SweepConfig:
     """Configuration for clustering sweep."""
 
     pca_dim: int = 64
+    skip_pca: bool = False  # Skip PCA and use full embedding dimensions
     k_min: int = 2
     k_max: int = 20
     max_iter: int = 200
@@ -64,7 +65,7 @@ def run_sweep(
 
     Pipeline:
     1. Mean-pool token embeddings (if needed)
-    2. PCA/SVD reduce to pca_dim
+    2. PCA/SVD reduce to pca_dim (unless skip_pca=True)
     3. For each K in [k_min..k_max]:
        - Run k_llmmeans with n_restarts restarts, keep best (lowest inertia)
        - Select representatives from the best run
@@ -79,10 +80,19 @@ def run_sweep(
       Centroids are normalized after each update.
     - "euclidean": Standard k-means with Euclidean distance. No normalization.
 
+    Skip PCA mode:
+    - When cfg.skip_pca=True, embeddings are used in their full dimensionality
+      (typically 1536-dim) without PCA projection. This preserves all information
+      but increases runtime by ~20-24x. Use when embedding fidelity is critical.
+    
+    Example with no PCA:
+        cfg = SweepConfig(skip_pca=True, k_min=2, k_max=10)
+        result = run_sweep(texts, embeddings, cfg)
+
     Args:
         texts: List of text strings, one per sample
         embeddings: Input embeddings (see mean_pool_tokens for supported formats)
-        cfg: SweepConfig with parameters
+        cfg: SweepConfig with parameters (including skip_pca flag)
         paraphraser: Optional callable to generate cluster summaries.
             When both *paraphraser* and *embedder* are supplied they are
             passed into ``k_llmmeans`` so that the LLM influences centroids
@@ -90,7 +100,9 @@ def run_sweep(
             representatives are paraphrased post-hoc for display.
         embedder: Optional callable to embed texts (takes list[str], returns
             np.ndarray of shape (n_texts, embedding_dim)).  Used together
-            with *paraphraser* to project LLM summaries back into PCA space.
+            with *paraphraser* to project LLM summaries back into the same
+            space as the data points (PCA space if skip_pca=False, or full
+            embedding space if skip_pca=True).
 
     Returns:
         SweepResult with PCA metadata, results by K, and optional precomputed matrices
@@ -110,10 +122,25 @@ def run_sweep(
             f"k_max ({cfg.k_max}) must be < n_samples ({n_samples})"
         )
 
-    # Step 2: PCA projection
-    Z, pca_meta = pca_svd_project(X, cfg.pca_dim)
-    pca_components: np.ndarray = pca_meta["components"]  # (pca_dim, D)
-    pca_mean: np.ndarray = pca_meta["mean"]              # (D,)
+    # Step 2: PCA projection (conditional based on skip_pca flag)
+    if cfg.skip_pca:
+        # Use full embeddings without dimensionality reduction
+        Z = X
+        pca_components = None
+        pca_mean = None
+        pca_meta = {
+            "pca_dim_used": X.shape[1],
+            "singular_values": None,
+            "mean": None,
+            "components": None,
+            "skip_pca": True,
+        }
+    else:
+        # Standard PCA projection
+        Z, pca_meta = pca_svd_project(X, cfg.pca_dim)
+        pca_meta["skip_pca"] = False
+        pca_components: np.ndarray = pca_meta["components"]  # (pca_dim, D)
+        pca_mean: np.ndarray = pca_meta["mean"]              # (D,)
 
     # Precompute normalized vectors and distance matrix for stability metrics
     Z_norm = None

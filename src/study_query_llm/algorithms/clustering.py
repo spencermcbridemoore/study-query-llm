@@ -251,8 +251,8 @@ def k_llmmeans(
     Every *llm_interval* iterations the centroid update is replaced by:
       1. Sample *max_samples* diverse representatives per cluster (k-means++).
       2. Ask the LLM (``paraphraser``) to summarise those texts.
-      3. Embed the summary (``embedder``) and project into PCA space
-         to become the new centroid µ_j.
+      3. Embed the summary (``embedder``) and project into the same space
+         as Z to become the new centroid µ_j.
 
     When ``paraphraser`` or ``embedder`` is ``None`` the function reduces to
     plain k-means (mean centroid updates only).
@@ -264,7 +264,7 @@ def k_llmmeans(
     - "euclidean": Standard k-means with Euclidean distance. No normalization.
 
     Args:
-        Z: (n, d) embeddings already projected into PCA space.
+        Z: (n, d) embeddings in the clustering space (PCA-projected or full-dimensional).
         texts: Original texts aligned 1:1 with the rows of *Z*.
         K: Number of clusters.
         max_iter: Maximum number of iterations.
@@ -279,9 +279,9 @@ def k_llmmeans(
         embedder: ``texts_in → raw_embeddings_out`` callable.  Returns an
             array of shape ``(len(texts_in), D_original)``.
         pca_components: ``(pca_dim, D_original)`` projection matrix from the
-            original PCA transform.
+            original PCA transform. Set to None when using full embeddings (no PCA).
         pca_mean: ``(D_original,)`` mean vector from the original PCA
-            transform.
+            transform. Set to None when using full embeddings (no PCA).
         distance_metric: Distance metric to use ("cosine" or "euclidean").
             Default: "cosine".
         normalize_vectors: Whether to L2-normalize vectors. Default: True.
@@ -360,13 +360,20 @@ def k_llmmeans(
                     )
                 summaries[j] = summary_j
 
-                # Embed summary → project into PCA space
+                # Embed summary → project into same space as data points
                 raw_emb = np.asarray(
                     embedder([summary_j]), dtype=np.float64
                 )
                 if raw_emb.ndim == 1:
                     raw_emb = raw_emb.reshape(1, -1)
-                centroid_j = (raw_emb[0] - pca_mean) @ pca_components.T
+                
+                # Project to PCA space only if PCA was used
+                if pca_components is not None and pca_mean is not None:
+                    centroid_j = (raw_emb[0] - pca_mean) @ pca_components.T
+                else:
+                    # No PCA: use full-dimensional embedding directly
+                    centroid_j = raw_emb[0]
+                
                 # Normalize if using cosine/spherical k-means
                 if use_cosine:
                     norm_j = np.linalg.norm(centroid_j)

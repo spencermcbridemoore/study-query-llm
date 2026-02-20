@@ -37,9 +37,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 OUTPUT_DIR = Path(__file__).parent.parent / "experimental_results"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+# Optional file cache for 30k seed-42 runs (no errors if missing)
+EMBEDDING_CACHE_DIR = os.environ.get("EMBEDDING_CACHE_DIR") or str(Path(__file__).parent.parent / "data" / "embedding_cache")
+
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.embedding_service import EmbeddingService, EmbeddingRequest, estimate_tokens, DEPLOYMENT_MAX_TOKENS
+from study_query_llm.services import get_embeddings_with_file_cache
 from study_query_llm.services.summarization_service import SummarizationService, SummarizationRequest
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
@@ -842,7 +846,24 @@ async def main():
                 # NOT "which LLM pre-summaries embed better"
                 print(f"      Fetching embeddings for {len(sampled_texts)} original texts...")
                 try:
-                    shared_embeddings = await fetch_embeddings_async(sampled_texts, EMBEDDING_DEPLOYMENT, db)
+                    if (
+                        EMBEDDING_CACHE_DIR
+                        and len(sampled_texts) == 30000
+                        and entry_max == 30000
+                        and source_name in ("dbpedia", "yahoo_answers")
+                    ):
+                        shared_embeddings = await get_embeddings_with_file_cache(
+                            sampled_texts,
+                            EMBEDDING_DEPLOYMENT,
+                            db,
+                            Path(EMBEDDING_CACHE_DIR),
+                            source_name,
+                            42,
+                            30000,
+                            fetch_embeddings_async,
+                        )
+                    else:
+                        shared_embeddings = await fetch_embeddings_async(sampled_texts, EMBEDDING_DEPLOYMENT, db)
                     print(f"      [OK] Fetched {len(shared_embeddings)} embeddings (shared across all summarizers)")
                 except Exception as e:
                     print(f"      [ERROR] Embedding fetch failed: {e}")

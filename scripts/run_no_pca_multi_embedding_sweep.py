@@ -23,6 +23,7 @@ Total runs: 2 datasets × 6 embedding engines × 4 summarizers = 48 runs
 import sys
 import os
 import asyncio
+import argparse
 from pathlib import Path
 
 # Add parent directory to path
@@ -37,6 +38,7 @@ from scripts.run_experimental_sweep import (
     OUTPUT_DIR, LLM_SUMMARIZERS,
     SweepConfig
 )
+from study_query_llm.services import get_embeddings_with_file_cache
 import numpy as np
 import time
 from datetime import datetime
@@ -55,6 +57,9 @@ EMBEDDING_ENGINES = [
 
 # Single entry_max value
 ENTRY_MAX = 500
+
+# Optional file cache for 30k seed-42 runs (no errors if missing)
+EMBEDDING_CACHE_DIR = os.environ.get("EMBEDDING_CACHE_DIR") or str(Path(__file__).parent.parent / "data" / "embedding_cache")
 
 # Datasets configuration
 DATASETS = [
@@ -136,7 +141,7 @@ async def run_single_sweep_no_pca(
     return result
 
 
-async def main():
+async def main(force: bool = False):
     """Main execution function."""
     print("=" * 80)
     print("No-PCA Multi-Embedding Sweep")
@@ -193,6 +198,19 @@ async def main():
     if not loaded_datasets:
         print("\n[ERROR] No datasets loaded successfully. Exiting.")
         return
+
+    # If --force, remove existing no-PCA pickles so we re-run and save Z
+    if force:
+        removed = 0
+        for pattern in (
+            f"experimental_sweep_entry{ENTRY_MAX}_dbpedia_*.pkl",
+            f"experimental_sweep_entry{ENTRY_MAX}_yahoo_answers_*.pkl",
+        ):
+            for p in OUTPUT_DIR.glob(pattern):
+                p.unlink()
+                removed += 1
+        if removed:
+            print(f"\n[INFO] --force: removed {removed} existing pickle(s). Re-running all runs.")
     
     # Run sweep
     print("\n" + "=" * 80)
@@ -271,7 +289,23 @@ async def main():
             # ===================================================================
             print(f"    Fetching embeddings for {len(filtered_texts)} texts with {embedding_engine}...")
             try:
-                shared_embeddings = await fetch_embeddings_async(filtered_texts, embedding_engine, db)
+                if (
+                    EMBEDDING_CACHE_DIR
+                    and len(filtered_texts) == 30000
+                    and dataset_name in ("dbpedia", "yahoo_answers")
+                ):
+                    shared_embeddings = await get_embeddings_with_file_cache(
+                        filtered_texts,
+                        embedding_engine,
+                        db,
+                        Path(EMBEDDING_CACHE_DIR),
+                        dataset_name,
+                        42,
+                        30000,
+                        fetch_embeddings_async,
+                    )
+                else:
+                    shared_embeddings = await fetch_embeddings_async(filtered_texts, embedding_engine, db)
                 print(f"    [OK] Fetched {len(shared_embeddings)} embeddings (shape: {shared_embeddings.shape})")
                 print(f"    [INFO] Embedding dimension: {shared_embeddings.shape[1]} (full, no PCA)")
             except Exception as e:
@@ -394,4 +428,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="No-PCA multi-embedding sweep")
+    parser.add_argument("--force", action="store_true", help="Remove existing no-PCA pickles and re-run all (to regenerate with Z for silhouette)")
+    args = parser.parse_args()
+    asyncio.run(main(force=args.force))

@@ -504,6 +504,146 @@ class EmbeddingService:
 
         return await _make_call()
 
+    async def _create_embedding_batch_with_retry(
+        self,
+        texts: List[str],
+        deployment: str,
+        provider: str = "azure",
+        dimensions: Optional[int] = None,
+    ) -> List[Embedding]:
+        """
+        Create embeddings for multiple texts in a single API call with retry logic.
+
+        Sends all texts to the API as one request (input: [text1, text2, ...]) and
+        returns one Embedding object per text in the same order.  A single API call
+        per chunk dramatically reduces RPM and avoids thundering-herd 429s.
+
+        Args:
+            texts: List of input texts.
+            deployment: Deployment name.
+            provider: Provider name (default: 'azure').
+            dimensions: Optional dimension override.
+
+        Returns:
+            List of Embedding objects in the same order as ``texts``.
+
+        Raises:
+            Exception: If all retries are exhausted or a non-retryable error occurs.
+        """
+        client_key = f"{provider}:{deployment}"
+        if client_key not in self._client_cache:
+            fresh_config = Config()
+            provider_config = fresh_config.get_provider_config(provider)
+            client = AsyncAzureOpenAI(
+                api_key=provider_config.api_key,
+                api_version=provider_config.api_version,
+                azure_endpoint=provider_config.endpoint,
+            )
+            self._client_cache[client_key] = client
+
+        client = self._client_cache[client_key]
+
+        retry_decorator = retry(
+            stop=stop_after_attempt(self.max_retries),
+            wait=wait_exponential(
+                multiplier=self.initial_wait, min=self.initial_wait, max=self.max_wait
+            ),
+            retry=retry_if_exception_type(
+                (InternalServerError, APIConnectionError, RateLimitError)
+            )
+            | retry_if_exception(self._should_retry_exception),
+            reraise=True,
+        )
+
+        @retry_decorator
+        async def _make_batch_call():
+            params = {"model": deployment, "input": texts}
+            if dimensions:
+                params["dimensions"] = dimensions
+            response = await client.embeddings.create(**params)
+            # response.data is sorted by index; return in input order
+            sorted_data = sorted(response.data, key=lambda e: e.index)
+            return sorted_data
+
+        return await _make_batch_call()
+
+    def _persist_embedding_batch(
+        self,
+        requests: List["EmbeddingRequest"],
+        embeddings: List[Embedding],
+        request_hashes: List[str],
+        latency_ms: float,
+    ) -> List[int]:
+        """
+        Persist a batch of (request, embedding) pairs to the DB using the same
+        schema as single-request persistence: one RawCall + one EmbeddingVector
+        per text, with request_hash stored in metadata_json for future lookup.
+
+        Args:
+            requests: Original EmbeddingRequest list.
+            embeddings: Corresponding Embedding objects from the API.
+            request_hashes: Pre-computed hashes, one per request.
+            latency_ms: Latency of the whole batch API call.
+
+        Returns:
+            List of raw_call_ids in the same order as requests.
+        """
+        import numpy as np
+        from ..db.models_v2 import EmbeddingVector
+
+        if not self.repository:
+            return [0] * len(requests)
+
+        raw_call_ids = []
+        for req, emb_obj, req_hash in zip(requests, embeddings, request_hashes):
+            vector = emb_obj.embedding
+            dimension = len(vector)
+            vector_norm = float(np.linalg.norm(vector))
+
+            request_json = {"input": req.text, "model": req.deployment}
+            if req.dimensions:
+                request_json["dimensions"] = req.dimensions
+
+            response_json = {
+                "model": req.deployment,
+                "embedding_dim": dimension,
+            }
+
+            metadata_json = {"request_hash": req_hash}
+            if req.group_id:
+                metadata_json["group_id"] = req.group_id
+            metadata_json.update(req.metadata)
+
+            try:
+                raw_call_id = self.repository.insert_raw_call(
+                    provider=f"{req.provider}_openai_{req.deployment}",
+                    request_json=request_json,
+                    model=req.deployment,
+                    modality="embedding",
+                    status="success",
+                    response_json=response_json,
+                    latency_ms=latency_ms,
+                    tokens_json=None,
+                    metadata_json=metadata_json,
+                )
+
+                ev = EmbeddingVector(
+                    call_id=raw_call_id,
+                    vector=vector,
+                    dimension=dimension,
+                    norm=vector_norm,
+                    metadata_json={"model": req.deployment},
+                )
+                self.repository.session.add(ev)
+                self.repository.session.flush()
+                raw_call_ids.append(raw_call_id)
+
+            except Exception as e:
+                logger.warning("Failed to persist embedding for hash %s: %s", req_hash, e)
+                raw_call_ids.append(0)
+
+        return raw_call_ids
+
     def _should_retry_exception(self, exc: Exception) -> bool:
         """
         Determine if an exception should trigger a retry.
@@ -787,26 +927,146 @@ class EmbeddingService:
             raise
 
     async def get_embeddings_batch(
-        self, requests: List[EmbeddingRequest]
+        self,
+        requests: List[EmbeddingRequest],
+        chunk_size: Optional[int] = None,
     ) -> List[EmbeddingResponse]:
         """
         Get embeddings for multiple texts with per-item caching.
 
         Args:
-            requests: List of EmbeddingRequest objects
+            requests: List of EmbeddingRequest objects.
+            chunk_size: When provided, use true API batching: process the list in
+                sequential chunks of this size, performing a single DB cache lookup
+                and a single ``embeddings.create`` call (with multiple inputs) per
+                chunk.  Only texts not already in the DB are sent to the API.
+                This dramatically reduces RPM and enables resume-without-re-fetching.
+                When ``None`` (default), retain the original concurrent single-request
+                behaviour.
 
         Returns:
-            List of EmbeddingResponse objects (one per request)
+            List of EmbeddingResponse objects (one per request, in input order).
 
         Note:
-            Each request is processed independently with its own cache lookup.
-            Failed requests will raise exceptions.
+            With ``chunk_size=None`` each request is processed independently with
+            its own cache lookup.  With ``chunk_size`` set, cache lookup is batched
+            per chunk (scalable to large N), and the API is called once per chunk
+            with all uncached texts as a multi-input request.
         """
         import asyncio
+        import time
 
-        # Process all requests concurrently
-        tasks = [self.get_embedding(req) for req in requests]
-        return await asyncio.gather(*tasks)
+        if chunk_size is None:
+            # Original behaviour: concurrent individual requests
+            tasks = [self.get_embedding(req) for req in requests]
+            return await asyncio.gather(*tasks)
+
+        # --- Chunked batching path ---
+        all_responses: List[EmbeddingResponse] = []
+        total_chunks = (len(requests) + chunk_size - 1) // chunk_size
+
+        for chunk_idx in range(total_chunks):
+            chunk = requests[chunk_idx * chunk_size: (chunk_idx + 1) * chunk_size]
+
+            # 1. Compute request hashes for this chunk
+            hashes = [
+                self._compute_request_hash(
+                    req.text,
+                    req.deployment,
+                    req.dimensions,
+                    req.encoding_format,
+                    req.provider,
+                )
+                for req in chunk
+            ]
+
+            # 2. Batch cache lookup
+            cached_map: Dict[str, tuple] = {}
+            if self.repository:
+                try:
+                    from ..db.raw_call_repository import RawCallRepository
+                    cached_map = self.repository.get_embedding_vectors_by_request_hashes(
+                        chunk[0].deployment, hashes
+                    )
+                except Exception as e:
+                    logger.warning("Batch cache lookup failed: %s", e)
+
+            # 3. Partition chunk into cached vs uncached
+            uncached_indices = [
+                i for i, h in enumerate(hashes) if h not in cached_map
+            ]
+
+            # 4. Fetch uncached texts from API in one batch call
+            fetched_map: Dict[str, EmbeddingResponse] = {}
+            if uncached_indices:
+                uncached_reqs = [chunk[i] for i in uncached_indices]
+                uncached_hashes = [hashes[i] for i in uncached_indices]
+                uncached_texts = [req.text for req in uncached_reqs]
+
+                start_time = time.time()
+                try:
+                    emb_objects = await self._create_embedding_batch_with_retry(
+                        uncached_texts,
+                        uncached_reqs[0].deployment,
+                        uncached_reqs[0].provider,
+                        uncached_reqs[0].dimensions,
+                    )
+                    batch_latency_ms = (time.time() - start_time) * 1000
+
+                    # 5. Persist newly fetched embeddings to DB
+                    raw_call_ids = self._persist_embedding_batch(
+                        uncached_reqs, emb_objects, uncached_hashes, batch_latency_ms
+                    )
+
+                    for req, emb_obj, req_hash, raw_call_id in zip(
+                        uncached_reqs, emb_objects, uncached_hashes, raw_call_ids
+                    ):
+                        vector = emb_obj.embedding
+                        fetched_map[req_hash] = EmbeddingResponse(
+                            vector=vector,
+                            model=req.deployment,
+                            dimension=len(vector),
+                            request_hash=req_hash,
+                            cached=False,
+                            raw_call_id=raw_call_id,
+                            latency_ms=batch_latency_ms,
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        "Batch embedding call failed for chunk %d/%d: %s",
+                        chunk_idx + 1,
+                        total_chunks,
+                        e,
+                    )
+                    raise
+
+            # 6. Build response list for this chunk in original order
+            for req, req_hash in zip(chunk, hashes):
+                if req_hash in cached_map:
+                    vector, raw_call_id = cached_map[req_hash]
+                    all_responses.append(
+                        EmbeddingResponse(
+                            vector=vector,
+                            model=req.deployment,
+                            dimension=len(vector),
+                            request_hash=req_hash,
+                            cached=True,
+                            raw_call_id=raw_call_id,
+                        )
+                    )
+                else:
+                    all_responses.append(fetched_map[req_hash])
+
+            logger.debug(
+                "Chunk %d/%d: %d cached, %d fetched from API",
+                chunk_idx + 1,
+                total_chunks,
+                len(chunk) - len(uncached_indices),
+                len(uncached_indices),
+            )
+
+        return all_responses
 
     async def filter_valid_deployments(
         self, deployments: List[str], provider: str = "azure"

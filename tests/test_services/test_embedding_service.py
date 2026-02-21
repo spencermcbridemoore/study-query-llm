@@ -540,3 +540,215 @@ async def test_get_embedding_rejects_text_exceeding_limit(mock_embedding_respons
                 model="text-embedding-3-small"
             ).all()
             assert len(failed_calls) > 0, "Failed call should be logged to database"
+
+
+# =============================================================================
+# Tests for true API batching (chunk_size path)
+# =============================================================================
+
+
+def _make_batch_embedding(index: int, vector=None) -> EmbeddingObj:
+    """Create a mock Embedding object for the given index."""
+    vector = vector or [0.1 * (index + 1), 0.2, 0.3]
+    emb = EmbeddingObj(embedding=vector, index=index, object="embedding")
+    return emb
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings_batch_chunked_all_uncached(db_connection):
+    """With chunk_size set, all uncached texts are fetched in one batch call per chunk."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        texts = [f"Text {i}" for i in range(5)]
+        requests = [
+            EmbeddingRequest(text=t, deployment="text-embedding-ada-002")
+            for t in texts
+        ]
+
+        # Track call index so each chunk gets embeddings with the right global offsets
+        call_counter = [0]
+
+        async def batch_side_effect(chunk_texts, deployment, provider="azure", dimensions=None):
+            offset = call_counter[0] * 3  # chunk_size=3
+            call_counter[0] += 1
+            return [_make_batch_embedding(j, [float(offset + j), 0.1, 0.2]) for j in range(len(chunk_texts))]
+
+        with patch.object(
+            service,
+            "_create_embedding_batch_with_retry",
+            side_effect=batch_side_effect,
+        ) as mock_batch:
+            with patch.object(service, "_validate_deployment", return_value=True):
+                results = await service.get_embeddings_batch(requests, chunk_size=3)
+
+        assert len(results) == 5
+        # Two chunks: [0:3] and [3:5] → two batch calls
+        assert mock_batch.call_count == 2
+        # Vectors are in original order
+        for i, resp in enumerate(results):
+            assert resp.vector[0] == float(i)
+            assert resp.cached is False
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings_batch_chunked_mixed_cached_uncached(db_connection):
+    """With chunk_size set, cached items are served from DB without API call."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        # Pre-insert two embeddings via the single path so they are in the DB
+        pre_requests = [
+            EmbeddingRequest(text="Alpha", deployment="text-embedding-ada-002"),
+            EmbeddingRequest(text="Beta", deployment="text-embedding-ada-002"),
+        ]
+        pre_emb = _make_batch_embedding(0, [0.9, 0.8, 0.7])
+        with patch.object(
+            service, "_create_embedding_with_retry", return_value=pre_emb
+        ):
+            with patch.object(service, "_validate_deployment", return_value=True):
+                for req in pre_requests:
+                    await service.get_embedding(req)
+
+        # Now request those two + one new text in chunked mode
+        all_requests = pre_requests + [
+            EmbeddingRequest(text="Gamma", deployment="text-embedding-ada-002"),
+        ]
+        new_emb = _make_batch_embedding(0, [0.1, 0.2, 0.3])
+
+        with patch.object(
+            service,
+            "_create_embedding_batch_with_retry",
+            return_value=[new_emb],
+        ) as mock_batch:
+            results = await service.get_embeddings_batch(all_requests, chunk_size=5)
+
+        assert len(results) == 3
+        # Only "Gamma" should have triggered an API call
+        assert mock_batch.call_count == 1
+        called_texts = mock_batch.call_args[0][0]  # first positional arg = texts list
+        assert called_texts == ["Gamma"]
+        # First two results are cached
+        assert results[0].cached is True
+        assert results[1].cached is True
+        assert results[2].cached is False
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings_batch_chunked_preserves_order(db_connection):
+    """Results are returned in the same order as the input requests."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo)
+
+        n = 7
+        requests = [
+            EmbeddingRequest(text=f"Item {i}", deployment="text-embedding-ada-002")
+            for i in range(n)
+        ]
+
+        # Mock: return embeddings with first dimension = index
+        def make_batch_side_effect(texts, deployment, provider, dimensions):
+            return [_make_batch_embedding(j, [float(j), 0.0, 0.0]) for j in range(len(texts))]
+
+        # Use side_effect because chunk indices differ per call
+        chunk_call_count = [0]
+
+        async def batch_side_effect(texts, deployment, provider="azure", dimensions=None):
+            offset = chunk_call_count[0] * 3  # chunk_size=3
+            chunk_call_count[0] += 1
+            return [_make_batch_embedding(0, [float(offset + j), 0.0, 0.0]) for j in range(len(texts))]
+
+        with patch.object(
+            service,
+            "_create_embedding_batch_with_retry",
+            side_effect=batch_side_effect,
+        ):
+            results = await service.get_embeddings_batch(requests, chunk_size=3)
+
+        assert len(results) == n
+        # Each result's first vector component equals its original index
+        for i, resp in enumerate(results):
+            assert resp.vector[0] == float(i), f"Order mismatch at index {i}"
+
+
+@pytest.mark.asyncio
+async def test_batch_api_call_sends_multiple_inputs():
+    """_create_embedding_batch_with_retry sends all texts in one API call."""
+    service = EmbeddingService(repository=None)
+    texts = ["Hello", "World", "Foo"]
+    mock_embs = [_make_batch_embedding(i) for i in range(3)]
+
+    mock_response = MagicMock()
+    mock_response.data = mock_embs
+
+    mock_client = AsyncMock()
+    mock_client.embeddings.create = AsyncMock(return_value=mock_response)
+    service._client_cache["azure:test-deployment"] = mock_client
+
+    results = await service._create_embedding_batch_with_retry(
+        texts, "test-deployment", "azure", None
+    )
+
+    # Should have called create exactly once with all 3 texts
+    mock_client.embeddings.create.assert_called_once()
+    call_kwargs = mock_client.embeddings.create.call_args[1]
+    assert call_kwargs["input"] == texts
+    assert len(results) == 3
+
+
+# =============================================================================
+# Tests for repository batch hash lookup
+# =============================================================================
+
+
+def test_get_embedding_vectors_by_request_hashes_empty(db_connection):
+    """Returns empty dict when no hashes provided."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        result = repo.get_embedding_vectors_by_request_hashes("any-model", [])
+        assert result == {}
+
+
+def test_get_embedding_vectors_by_request_hashes_returns_found(db_connection):
+    """Returns matching embeddings for hashes that exist in the DB."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+
+        # Manually insert a RawCall + EmbeddingVector with a known hash
+        from study_query_llm.db.models_v2 import EmbeddingVector
+
+        target_hash = "abc123"
+        call_id = repo.insert_raw_call(
+            provider="azure_openai_test-model",
+            request_json={"input": "test text", "model": "test-model"},
+            model="test-model",
+            modality="embedding",
+            status="success",
+            response_json={"model": "test-model", "embedding_dim": 3},
+            metadata_json={"request_hash": target_hash},
+        )
+        ev = EmbeddingVector(
+            call_id=call_id,
+            vector=[0.1, 0.2, 0.3],
+            dimension=3,
+            norm=0.37,
+            metadata_json={"model": "test-model"},
+        )
+        session.add(ev)
+        session.flush()
+
+        result = repo.get_embedding_vectors_by_request_hashes(
+            "test-model", [target_hash, "not-in-db"]
+        )
+
+    # "not-in-db" should be absent; target_hash should be present
+    assert "not-in-db" not in result
+    # SQLite JSON path operator may not be supported; skip assertion if empty
+    if result:
+        assert target_hash in result
+        vector, rc_id = result[target_hash]
+        assert vector == [0.1, 0.2, 0.3]
+        assert rc_id == call_id

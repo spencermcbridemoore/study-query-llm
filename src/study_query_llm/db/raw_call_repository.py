@@ -577,6 +577,82 @@ class RawCallRepository:
         
         return query.all()
 
+    # ========== EMBEDDING BATCH LOOKUP ==========
+
+    def get_embedding_vectors_by_request_hashes(
+        self,
+        deployment: str,
+        request_hashes: List[str],
+    ) -> Dict[str, Tuple[list, int]]:
+        """
+        Batch-lookup cached embeddings by their request hashes.
+
+        Returns a dict mapping request_hash -> (vector_list, raw_call_id) for
+        every hash that already has a successful embedding RawCall persisted for
+        the given deployment.  Hashes not found are simply absent from the result.
+
+        This is used by the chunked batching path in EmbeddingService to determine
+        which texts still need API calls, enabling resume-without-re-fetching.
+
+        Args:
+            deployment: Model/deployment name (e.g. 'text-embedding-3-small').
+            request_hashes: List of request hashes to look up.
+
+        Returns:
+            Dict mapping request_hash -> (vector, raw_call_id).
+        """
+        if not request_hashes:
+            return {}
+
+        hash_set = set(request_hashes)
+
+        try:
+            # Attempt the PostgreSQL JSON path operator (->>)
+            pg_results = (
+                self.session.query(RawCall, EmbeddingVector)
+                .join(EmbeddingVector, EmbeddingVector.call_id == RawCall.id)
+                .filter(
+                    RawCall.modality == "embedding",
+                    RawCall.model == deployment,
+                    RawCall.status == "success",
+                    RawCall.metadata_json["request_hash"].astext.in_(request_hashes),
+                )
+                .all()
+            )
+            return {
+                raw_call.metadata_json["request_hash"]: (ev.vector, raw_call.id)
+                for raw_call, ev in pg_results
+                if raw_call.metadata_json and "request_hash" in raw_call.metadata_json
+            }
+
+        except Exception:
+            # Fallback for SQLite or other backends: fetch all matching embedding
+            # calls and filter by hash in Python.
+            try:
+                all_calls = (
+                    self.session.query(RawCall, EmbeddingVector)
+                    .join(EmbeddingVector, EmbeddingVector.call_id == RawCall.id)
+                    .filter(
+                        RawCall.modality == "embedding",
+                        RawCall.model == deployment,
+                        RawCall.status == "success",
+                    )
+                    .all()
+                )
+                return {
+                    raw_call.metadata_json["request_hash"]: (ev.vector, raw_call.id)
+                    for raw_call, ev in all_calls
+                    if (
+                        raw_call.metadata_json
+                        and raw_call.metadata_json.get("request_hash") in hash_set
+                    )
+                }
+            except Exception as e2:
+                logger.warning(
+                    "Batch hash lookup fallback also failed; returning empty result: %s", e2
+                )
+                return {}
+
     # ========== GROUP LINK OPERATIONS ==========
 
     def create_group_link(

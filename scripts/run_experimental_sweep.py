@@ -527,8 +527,21 @@ async def fetch_embeddings_async(
     deployment: str,
     db: DatabaseConnectionV2,
     timeout: float = 600.0,  # 10 minutes timeout
+    chunk_size: Optional[int] = None,
 ) -> np.ndarray:
-    """Fetch embeddings asynchronously with timeout."""
+    """Fetch embeddings asynchronously with optional true API batching.
+
+    Args:
+        texts_list: List of texts to embed.
+        deployment: Embedding deployment name.
+        db: Database connection (used for cache lookup and persistence).
+        timeout: Wall-clock timeout in seconds for the whole call (default 600 s).
+            Increase this (e.g. 7200) when using chunk_size with large lists.
+        chunk_size: When provided, use true API batching: process chunks of this
+            size sequentially, sending one multi-input ``embeddings.create`` call
+            per chunk.  DB cache lookup per chunk avoids re-fetching on restart.
+            When None (default), retain the original concurrent per-text behaviour.
+    """
     async def _fetch():
         with db.session_scope() as session:
             repo = RawCallRepository(session)
@@ -541,7 +554,7 @@ async def fetch_embeddings_async(
             ]
             
             # Get embeddings (will use cache if available)
-            responses = await service.get_embeddings_batch(requests)
+            responses = await service.get_embeddings_batch(requests, chunk_size=chunk_size)
             
             # Extract vectors
             embeddings = [resp.vector for resp in responses]

@@ -39,8 +39,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Ensure output is flushed immediately when running in the background (non-TTY)
-sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+# Ensure output is flushed immediately and UTF-8 safe on Windows
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)  # type: ignore[attr-defined]
 
 # Load .env so AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, etc. are available
 try:
@@ -203,7 +203,7 @@ async def _build_one(
     n = len(sampled_texts)
     batches = [sampled_texts[i:i + batch_size] for i in range(0, n, batch_size)]
     total_batches = len(batches)
-    print(f"    {n} texts → {total_batches} batches of {batch_size}")
+    print(f"    {n} texts -> {total_batches} batches of {batch_size}")
 
     t0 = time.time()
     all_vectors = []
@@ -376,7 +376,7 @@ async def main():
         try:
             for dataset_name, (texts, labels) in datasets.items():
                 done += 1
-                print(f"\n  [{done}/{total_pairs}] {dataset_name} × {engine}")
+                print(f"\n  [{done}/{total_pairs}] {dataset_name} x {engine}")
                 try:
                     ok = await _build_one(
                         dataset_name=dataset_name,
@@ -407,7 +407,7 @@ async def main():
     print(f"  Errors       : {len(failed_pairs)}")
     if failed_pairs:
         for ds, eng in failed_pairs:
-            print(f"    ✗ {ds} × {eng}")
+            print(f"    FAIL: {ds} x {eng}")
     print("\nDone.")
 
 

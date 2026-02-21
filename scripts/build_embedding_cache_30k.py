@@ -34,6 +34,9 @@ import argparse
 import time
 from pathlib import Path
 
+# Ensure output is flushed immediately when running in background (non-TTY)
+sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Load .env so DATABASE_URL and other env vars are available

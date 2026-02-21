@@ -27,12 +27,12 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
     retry_if_exception,
     RetryError,
 )
 from ..providers.base import BaseLLMProvider, ProviderResponse
 from .preprocessors import PromptPreprocessor
+from ._shared import should_retry_exception, handle_db_persistence_error
 from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -378,23 +378,9 @@ class InferenceService:
                     f"provider={provider_response.provider}, tokens={provider_response.tokens}"
                 )
             except Exception as e:
-                if self.require_db_persistence:
-                    # Fail-fast: raise the error for experimental data tracking
-                    logger.error(
-                        f"Failed to save inference to database (require_db_persistence=True): {str(e)}",
-                        exc_info=True
-                    )
-                    raise RuntimeError(
-                        f"Database persistence failed. This is required for experimental data tracking. "
-                        f"Original error: {str(e)}"
-                    ) from e
-                else:
-                    # Graceful degradation: log warning and continue
-                    logger.warning(
-                        f"Failed to save inference to database (require_db_persistence=False): {str(e)}",
-                        exc_info=True
-                    )
-                    # Still return the result even if database save failed
+                handle_db_persistence_error(
+                    logger, e, self.require_db_persistence, "save inference"
+                )
 
         return result
 
@@ -439,7 +425,7 @@ class InferenceService:
                 min=self.initial_wait,
                 max=self.max_wait
             ),
-            retry=retry_if_exception(self._should_retry_exception),
+            retry=retry_if_exception(should_retry_exception),
             reraise=True,
         )
 
@@ -465,36 +451,6 @@ class InferenceService:
                 exc_info=True
             )
             raise
-
-    @staticmethod
-    def _should_retry_exception(exception: BaseException) -> bool:
-        """
-        Determine if an exception should trigger a retry.
-
-        Args:
-            exception: The exception to evaluate
-
-        Returns:
-            True if the exception is retryable, False otherwise
-        """
-        if isinstance(exception, (TimeoutError, ConnectionError)):
-            return True
-
-        # Check error message for retryable conditions
-        error_msg = str(exception).lower()
-        retryable_patterns = [
-            'rate limit',
-            'timeout',
-            'timed out',
-            '429',  # Too Many Requests
-            '503',  # Service Unavailable
-            '502',  # Bad Gateway
-            '504',  # Gateway Timeout
-            'temporary',
-            'throttl',
-        ]
-
-        return any(pattern in error_msg for pattern in retryable_patterns)
 
     async def run_batch_inference(
         self,

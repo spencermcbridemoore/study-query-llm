@@ -29,12 +29,19 @@ Usage:
 import asyncio
 import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Callable, TYPE_CHECKING
+
+
+@contextmanager
+def _nullcontext():
+    yield
 
 from ..config import Config
 from ..providers.factory import ProviderFactory
 from ..services.inference_service import InferenceService
+from ._shared import deployment_override, handle_db_persistence_error
 from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -112,40 +119,18 @@ class SummarizationService:
             True if deployment is valid, False otherwise
         """
         try:
-            # Temporarily override deployment BEFORE creating config
-            # This ensures the config reads the correct deployment name
-            original_deployment = None
-            if provider == "azure":
-                original_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
-                os.environ["AZURE_OPENAI_DEPLOYMENT"] = deployment
+            with deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment) if provider == "azure" else _nullcontext():
+                fresh_config = Config()
+                if provider in fresh_config._provider_configs:
+                    del fresh_config._provider_configs[provider]
+                fresh_config.get_provider_config(provider)
 
-            # Create fresh Config to pick up environment changes (now with correct deployment)
-            fresh_config = Config()
-            # Clear cache to force re-reading environment variable
-            if provider in fresh_config._provider_configs:
-                del fresh_config._provider_configs[provider]
-            provider_config = fresh_config.get_provider_config(provider)
-
-            try:
-                # Create provider and service
                 factory = ProviderFactory(fresh_config)
                 provider_instance = factory.create_from_config(provider)
-                
                 service = InferenceService(provider_instance, repository=None)
 
-                # Try a minimal completion call
-                await service.run_inference(
-                    "ping", temperature=0.0, max_tokens=1
-                )
-
+                await service.run_inference("ping", temperature=0.0, max_tokens=1)
                 return True
-
-            finally:
-                if provider == "azure":
-                    if original_deployment:
-                        os.environ["AZURE_OPENAI_DEPLOYMENT"] = original_deployment
-                    elif "AZURE_OPENAI_DEPLOYMENT" in os.environ:
-                        del os.environ["AZURE_OPENAI_DEPLOYMENT"]
 
         except Exception as e:
             logger.warning(
@@ -258,23 +243,10 @@ class SummarizationService:
                 return call_id
 
         except Exception as db_error:
-            if error is None and self.require_db_persistence:
-                # Fail-fast for successful saves when persistence is required
-                logger.error(
-                    f"Failed to log successful summarization (require_db_persistence=True): {str(db_error)}",
-                    exc_info=True
-                )
-                raise RuntimeError(
-                    f"Database persistence failed. This is required for experimental data tracking. "
-                    f"Original error: {str(db_error)}"
-                ) from db_error
-            else:
-                # Graceful degradation for failures or when persistence is not required
-                logger.warning(
-                    f"Failed to log summarization call (require_db_persistence=False or failure case): {str(db_error)}",
-                    exc_info=True
-                )
-                return None
+            require = error is None and self.require_db_persistence
+            return handle_db_persistence_error(
+                logger, db_error, require, "log summarization call"
+            )
 
     async def summarize_batch(
         self, request: SummarizationRequest
@@ -317,21 +289,13 @@ class SummarizationService:
                 raise error
 
         # Temporarily override deployment BEFORE creating config
-        # This ensures the config reads the correct deployment name
-        original_deployment = None
-        if request.provider == "azure":
-            original_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
-            os.environ["AZURE_OPENAI_DEPLOYMENT"] = request.llm_deployment
+        _cm = deployment_override("AZURE_OPENAI_DEPLOYMENT", request.llm_deployment) if request.provider == "azure" else _nullcontext()
+        with _cm:
+            fresh_config = Config()
+            if request.provider in fresh_config._provider_configs:
+                del fresh_config._provider_configs[request.provider]
+            fresh_config.get_provider_config(request.provider)
 
-        # Create fresh Config to pick up environment changes (now with correct deployment)
-        fresh_config = Config()
-        # Clear cache to force re-reading environment variable
-        if request.provider in fresh_config._provider_configs:
-            del fresh_config._provider_configs[request.provider]
-        provider_config = fresh_config.get_provider_config(request.provider)
-
-        try:
-            # Create provider and service
             factory = ProviderFactory(fresh_config)
             provider_instance = factory.create_from_config(request.provider)
             service = InferenceService(
@@ -438,14 +402,6 @@ class SummarizationService:
                     "failed": len(errors),
                 },
             )
-
-        finally:
-            # Restore original deployment
-            if request.provider == "azure":
-                if original_deployment:
-                    os.environ["AZURE_OPENAI_DEPLOYMENT"] = original_deployment
-                elif "AZURE_OPENAI_DEPLOYMENT" in os.environ:
-                    del os.environ["AZURE_OPENAI_DEPLOYMENT"]
 
     def create_paraphraser_for_llm(
         self, llm_deployment: str, provider: str = "azure"

@@ -26,8 +26,15 @@ Usage:
 
 import hashlib
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple
+
+
+@contextmanager
+def _nullcontext():
+    """No-op context manager (Python 3.7+ has contextlib.nullcontext)."""
+    yield
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -42,6 +49,7 @@ from openai import InternalServerError, APIConnectionError, RateLimitError
 
 from ..config import Config
 from ..providers.factory import ProviderFactory
+from ._shared import should_retry_exception, handle_db_persistence_error, deployment_override
 from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -398,42 +406,24 @@ class EmbeddingService:
 
         # Validate deployment
         try:
-            # Create fresh Config to pick up environment changes
-            fresh_config = Config()
-            provider_config = fresh_config.get_provider_config(provider)
+            with deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment) if provider == "azure" else _nullcontext():
+                fresh_config = Config()
+                provider_config = fresh_config.get_provider_config(provider)
 
-            # Temporarily override deployment
-            original_deployment = None
-            import os
-
-            if provider == "azure":
-                original_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT")
-                os.environ["AZURE_OPENAI_DEPLOYMENT"] = deployment
-
-            try:
-                # Create client and test with minimal embedding call
                 client = AsyncAzureOpenAI(
                     api_key=provider_config.api_key,
                     api_version=provider_config.api_version,
                     azure_endpoint=provider_config.endpoint,
                 )
+                try:
+                    await client.embeddings.create(
+                        model=deployment, input=["test"]
+                    )
+                finally:
+                    await client.close()
 
-                # Try a minimal embedding call (without dimensions to let model use default)
-                # Some models don't support dimensions parameter, and some only accept specific values
-                await client.embeddings.create(
-                    model=deployment, input=["test"]
-                )
-
-                # Cache success
                 self._deployment_cache[cache_key] = True
                 return True
-
-            finally:
-                await client.close()
-                if original_deployment:
-                    os.environ["AZURE_OPENAI_DEPLOYMENT"] = original_deployment
-                elif provider == "azure" and "AZURE_OPENAI_DEPLOYMENT" in os.environ:
-                    del os.environ["AZURE_OPENAI_DEPLOYMENT"]
 
         except Exception as e:
             logger.warning(
@@ -492,7 +482,7 @@ class EmbeddingService:
             retry=retry_if_exception_type(
                 (InternalServerError, APIConnectionError, RateLimitError)
             )
-            | retry_if_exception(self._should_retry_exception),
+            | retry_if_exception(should_retry_exception),
             reraise=True,
         )
 
@@ -554,7 +544,7 @@ class EmbeddingService:
             retry=retry_if_exception_type(
                 (InternalServerError, APIConnectionError, RateLimitError)
             )
-            | retry_if_exception(self._should_retry_exception),
+            | retry_if_exception(should_retry_exception),
             reraise=True,
         )
 
@@ -646,33 +636,6 @@ class EmbeddingService:
                 raw_call_ids.append(0)
 
         return raw_call_ids
-
-    def _should_retry_exception(self, exc: Exception) -> bool:
-        """
-        Determine if an exception should trigger a retry.
-
-        Args:
-            exc: Exception to check
-
-        Returns:
-            True if should retry, False otherwise
-        """
-        error_str = str(exc).lower()
-
-        # Retry on transient errors
-        retryable_patterns = [
-            "rate limit",
-            "429",
-            "502",
-            "503",
-            "504",
-            "timeout",
-            "connection",
-            "internal server",
-            "service unavailable",
-        ]
-
-        return any(pattern in error_str for pattern in retryable_patterns)
 
     def _log_failure(
         self,
@@ -896,23 +859,9 @@ class EmbeddingService:
                     )
 
                 except Exception as db_error:
-                    if self.require_db_persistence:
-                        # Fail-fast: raise the error for experimental data tracking
-                        logger.error(
-                            f"Failed to persist embedding (require_db_persistence=True): {str(db_error)}",
-                            exc_info=True
-                        )
-                        raise RuntimeError(
-                            f"Database persistence failed. This is required for experimental data tracking. "
-                            f"Original error: {str(db_error)}"
-                        ) from db_error
-                    else:
-                        # Graceful degradation: log warning and continue
-                        logger.warning(
-                            f"Failed to persist embedding (require_db_persistence=False): {str(db_error)}",
-                            exc_info=True
-                        )
-                        # Continue even if DB save fails
+                    handle_db_persistence_error(
+                        logger, db_error, self.require_db_persistence, "persist embedding"
+                    )
 
             return EmbeddingResponse(
                 vector=vector,

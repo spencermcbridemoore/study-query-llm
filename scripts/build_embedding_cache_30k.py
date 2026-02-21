@@ -1,45 +1,48 @@
 #!/usr/bin/env python3
 """
-Build 30k embedding cache for DBPedia, Yahoo Answers, and Estela with all
-available embedding engines.
+Build 30k embedding cache for DBPedia, Yahoo Answers, and Estela across all
+available Azure embedding engines.
 
 For each (dataset, engine) pair the script:
-  1. Checks whether the .npz cache file already exists — skips if so.
-  2. Samples up to 30k texts with seed 42 (deterministic).
-  3. Fetches embeddings in chunks of chunk_size, using the DB as a resumable
-     cache (re-running after a crash picks up where it left off).
+  1. Checks if the .npz file already exists — skips if so.
+  2. Samples up to 30k texts with seed 42 (deterministic, reproducible).
+  3. Fetches embeddings by calling the Azure API directly in sequential batches
+     of batch_size texts per request.  Failed batches are retried with
+     exponential back-off; permanently failed batches are filled with zeros and
+     logged so the script never stops.
   4. Saves the .npz to data/embedding_cache/.
 
-Errors for any single (dataset, engine) pair are caught and logged; the script
-always moves on to the next pair so it can run overnight without supervision.
+All errors are caught per (dataset, engine) — the script always continues to
+the next pair so it can run overnight without supervision.
 
 Usage:
     python scripts/build_embedding_cache_30k.py
 
-    # Override engines (comma-separated) or cache dir:
+    # Specific engines or cache dir:
     python scripts/build_embedding_cache_30k.py \\
         --deployment "text-embedding-3-small,embed-v-4-0" \\
         --cache-dir data/embedding_cache
 
-    # Tune batching:
-    python scripts/build_embedding_cache_30k.py --chunk-size 500 --timeout 14400
+    # Tuning:
+    python scripts/build_embedding_cache_30k.py --batch-size 100 --max-retries 5
 
-Requires DATABASE_URL to be set (loaded automatically from .env if present).
+Requires: AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY (auto-loaded from .env).
 """
 
 import os
 import sys
+import time
 import asyncio
 import argparse
-import time
+import traceback
 from pathlib import Path
-
-# Ensure output is flushed immediately when running in background (non-TTY)
-sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Load .env so DATABASE_URL and other env vars are available
+# Ensure output is flushed immediately when running in the background (non-TTY)
+sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+
+# Load .env so AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, etc. are available
 try:
     from dotenv import load_dotenv
     _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -47,7 +50,7 @@ try:
 except ImportError:
     pass
 
-# All 6 embedding engines expected to be available on Azure
+# All 6 Azure embedding engines
 ALL_ENGINES = [
     "text-embedding-3-small",
     "text-embedding-3-large",
@@ -60,8 +63,8 @@ ALL_ENGINES = [
 CACHE_SEED = 42
 CACHE_N_SAMPLES = 30_000
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "embedding_cache"
-DEFAULT_CHUNK_SIZE = 500        # texts per embeddings.create call (conservative)
-DEFAULT_TIMEOUT = 14400.0       # 4-hour wall-clock limit per (dataset, engine)
+DEFAULT_BATCH_SIZE = 100    # texts per embeddings.create call (safe for all models)
+DEFAULT_MAX_RETRIES = 6     # exponential back-off: ~1+2+4+8+16+32 = ~63s total
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +72,9 @@ DEFAULT_TIMEOUT = 14400.0       # 4-hour wall-clock limit per (dataset, engine)
 # ---------------------------------------------------------------------------
 
 def _load_estela(repo_root: Path):
-    """Load estela texts from notebooks/estela_prompt_data.pkl or data/estela/estela_db.py."""
+    """Return (texts, labels) for the estela dataset."""
     import pickle
+    import numpy as np
 
     pkl_path = repo_root / "notebooks" / "estela_prompt_data.pkl"
     if pkl_path.exists():
@@ -86,7 +90,6 @@ def _load_estela(repo_root: Path):
         g = runpy.run_path(str(estela_py), init_globals={"datetime": dt})
         data = g["database_estela_dict"]
 
-    # Flatten prompt keys the same way other scripts do
     def _is_prompt_key(k):
         return isinstance(k, str) and "prompt" in k.lower()
 
@@ -105,7 +108,6 @@ def _load_estela(repo_root: Path):
         return flat
 
     flat = _flatten(data)
-    import numpy as np
     raw_texts = [v for v in flat.values() if isinstance(v, str)]
     texts = [t.replace("\x00", "").strip() for t in raw_texts]
     texts = [t for t in texts if 10 < len(t) <= 1000]
@@ -113,8 +115,8 @@ def _load_estela(repo_root: Path):
     return texts, labels
 
 
-def _sample_dataset(texts, labels, seed: int = CACHE_SEED, n_samples: int = CACHE_N_SAMPLES):
-    """Return (sampled_texts, sampled_labels) using deterministic seed."""
+def _sample_dataset(texts, labels, seed=CACHE_SEED, n_samples=CACHE_N_SAMPLES):
+    """Return deterministically sampled (texts, labels)."""
     import numpy as np
     n = len(texts)
     size = min(n_samples, n)
@@ -123,64 +125,134 @@ def _sample_dataset(texts, labels, seed: int = CACHE_SEED, n_samples: int = CACH
     return [texts[i] for i in indices], labels[indices]
 
 
+def _cache_path(cache_dir: Path, dataset: str, engine: str, seed: int, n: int) -> Path:
+    """Construct the .npz cache file path."""
+    safe_engine = engine.replace("/", "_").replace("\\", "_").replace(":", "_")
+    return cache_dir / f"{dataset}_{safe_engine}_seed{seed}_n{n}.npz"
+
+
 # ---------------------------------------------------------------------------
-# Per-(dataset, engine) build
+# Azure embedding fetcher (no DB, no service layer overhead)
 # ---------------------------------------------------------------------------
+
+async def _fetch_batch_with_retry(
+    client,
+    model: str,
+    texts: list,
+    max_retries: int,
+    batch_idx: int,
+    total_batches: int,
+) -> list:
+    """
+    Fetch embeddings for one batch via Azure API with exponential back-off retry.
+
+    Returns a list of embedding vectors (list[float]), one per input text.
+    On permanent failure, returns a list of None values so the caller can
+    substitute zeros and continue.
+    """
+    wait = 1.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = await client.embeddings.create(model=model, input=texts)
+            sorted_data = sorted(response.data, key=lambda e: e.index)
+            return [item.embedding for item in sorted_data]
+        except Exception as e:
+            err_str = str(e)
+            is_rate_limit = "429" in err_str or "rate limit" in err_str.lower()
+            is_retryable = is_rate_limit or any(
+                kw in err_str.lower()
+                for kw in ("timeout", "connection", "502", "503", "504", "internal server")
+            )
+            if attempt == max_retries or not is_retryable:
+                print(
+                    f"      [FAIL] batch {batch_idx+1}/{total_batches} "
+                    f"after {attempt} attempt(s): {e}"
+                )
+                return [None] * len(texts)
+            sleep_for = wait * (2 ** (attempt - 1))
+            if is_rate_limit:
+                # Back off more aggressively on 429
+                sleep_for = max(sleep_for, 60.0)
+            print(
+                f"      [RETRY {attempt}/{max_retries}] batch {batch_idx+1}/{total_batches} "
+                f"in {sleep_for:.0f}s: {e}"
+            )
+            await asyncio.sleep(sleep_for)
+    return [None] * len(texts)
+
 
 async def _build_one(
     dataset_name: str,
     texts: list,
     labels,
-    deployment: str,
+    engine: str,
     cache_dir: Path,
-    db,
-    fetch_embeddings_async_fn,
-    save_embedding_cache_fn,
-    get_cache_path_fn,
-    chunk_size: int,
-    timeout: float,
+    client,
+    batch_size: int,
+    max_retries: int,
 ) -> bool:
-    """Fetch + save cache for one (dataset, engine) pair. Returns True on success."""
-    cache_path = get_cache_path_fn(cache_dir, dataset_name, deployment, CACHE_SEED, CACHE_N_SAMPLES)
-    if cache_path.exists():
-        print(f"    [SKIP] Cache exists: {cache_path.name}")
+    """Fetch and save embeddings for one (dataset, engine) pair. Returns True on success."""
+    import numpy as np
+
+    path = _cache_path(cache_dir, dataset_name, engine, CACHE_SEED, CACHE_N_SAMPLES)
+    if path.exists():
+        print(f"    [SKIP] Already cached: {path.name}")
         return True
 
     sampled_texts, sampled_labels = _sample_dataset(texts, labels)
     n = len(sampled_texts)
-    n_chunks = (n + chunk_size - 1) // chunk_size
-    print(
-        f"    Fetching {n} texts in {n_chunks} chunks of {chunk_size}..."
-    )
+    batches = [sampled_texts[i:i + batch_size] for i in range(0, n, batch_size)]
+    total_batches = len(batches)
+    print(f"    {n} texts → {total_batches} batches of {batch_size}")
+
     t0 = time.time()
-    try:
-        embeddings = await fetch_embeddings_async_fn(
-            sampled_texts, deployment, db, timeout=timeout, chunk_size=chunk_size
-        )
-    except Exception as e:
-        print(f"    [ERROR] Fetch failed for {dataset_name}/{deployment}: {e}")
-        return False
+    all_vectors = []
+    failed_count = 0
+
+    for idx, batch in enumerate(batches):
+        if idx % 20 == 0 or idx == total_batches - 1:
+            elapsed = time.time() - t0
+            print(
+                f"    Batch {idx+1}/{total_batches}  "
+                f"({elapsed:.0f}s elapsed, {failed_count} failed)"
+            )
+        vectors = await _fetch_batch_with_retry(client, engine, batch, max_retries, idx, total_batches)
+        for v in vectors:
+            all_vectors.append(v)
 
     elapsed = time.time() - t0
-    print(f"    Done in {elapsed:.0f}s, shape: {embeddings.shape}")
 
+    # Convert to numpy; use zeros for failed (None) vectors
+    dim = next((len(v) for v in all_vectors if v is not None), 1)
+    embeddings = np.array(
+        [v if v is not None else [0.0] * dim for v in all_vectors],
+        dtype=np.float32,
+    )
+    failed_count = sum(1 for v in all_vectors if v is None)
+
+    print(
+        f"    Done in {elapsed:.0f}s — shape: {embeddings.shape}, "
+        f"failed batches contributed zeros: {failed_count}"
+    )
+
+    # Save .npz
     try:
-        save_embedding_cache_fn(
-            cache_path,
-            sampled_texts,
-            embeddings,
-            sampled_labels,
-            dataset=dataset_name,
-            deployment=deployment,
-            seed=CACHE_SEED,
-            n_samples=CACHE_N_SAMPLES,
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            path,
+            texts=np.array(sampled_texts, dtype=object),
+            embeddings=embeddings,
+            labels=sampled_labels,
+            dataset=np.array(dataset_name),
+            deployment=np.array(engine),
+            seed=np.array(CACHE_SEED),
+            n_samples=np.array(CACHE_N_SAMPLES),
         )
-        print(f"    Saved: {cache_path.name}")
+        print(f"    Saved: {path.name}")
+        return True
     except Exception as e:
-        print(f"    [ERROR] Save failed for {dataset_name}/{deployment}: {e}")
+        print(f"    [ERROR] Save failed: {e}")
         return False
-
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -190,47 +262,47 @@ async def _build_one(
 async def main():
     parser = argparse.ArgumentParser(
         description="Build 30k embedding cache for DBPedia, Yahoo Answers, and Estela "
-                    "across all embedding engines."
+                    "across all Azure embedding engines.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--deployment",
         type=str,
         default="",
-        help="Comma-separated engine names (default: all 6 engines).",
+        help="Comma-separated engine names. Default: all 6 engines.",
     )
     parser.add_argument(
         "--cache-dir",
         type=str,
         default=str(DEFAULT_CACHE_DIR),
-        help="Output directory (default: data/embedding_cache).",
+        help="Output directory.",
     )
     parser.add_argument(
-        "--chunk-size",
+        "--batch-size",
         type=int,
-        default=DEFAULT_CHUNK_SIZE,
-        help=f"Texts per embeddings.create call (default: {DEFAULT_CHUNK_SIZE}).",
+        default=DEFAULT_BATCH_SIZE,
+        help="Texts per embeddings.create call.",
     )
     parser.add_argument(
-        "--timeout",
-        type=float,
-        default=DEFAULT_TIMEOUT,
-        help=f"Per-(dataset,engine) timeout in seconds (default: {DEFAULT_TIMEOUT:.0f}). "
-             "Restart resumes via DB cache.",
+        "--max-retries",
+        type=int,
+        default=DEFAULT_MAX_RETRIES,
+        help="Max retries per batch before filling with zeros and moving on.",
     )
     args = parser.parse_args()
 
-    if not os.environ.get("DATABASE_URL"):
-        print("[ERROR] DATABASE_URL is required. Set it in .env or the environment.")
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
+    api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-06-01")
+
+    missing = [name for name, val in [
+        ("AZURE_OPENAI_ENDPOINT", endpoint), ("AZURE_OPENAI_API_KEY", api_key)
+    ] if not val]
+    if missing:
+        print(f"[ERROR] Missing required env vars: {', '.join(missing)}")
         sys.exit(1)
 
-    from scripts.run_experimental_sweep import (
-        DatabaseConnectionV2,
-        DATABASE_URL,
-        fetch_embeddings_async,
-        load_dbpedia_full,
-        load_yahoo_answers_full,
-    )
-    from study_query_llm.services import save_embedding_cache, get_cache_path
+    from openai import AsyncAzureOpenAI
 
     engines = (
         [e.strip() for e in args.deployment.split(",") if e.strip()]
@@ -239,26 +311,27 @@ async def main():
     )
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    chunk_size = args.chunk_size
-    timeout = args.timeout
+    batch_size = args.batch_size
+    max_retries = args.max_retries
 
     print("=" * 70)
-    print("Embedding cache builder")
+    print("Embedding cache builder (direct Azure API, no DB overhead)")
     print("=" * 70)
-    print(f"Cache dir  : {cache_dir}")
-    print(f"Engines    : {engines}")
-    print(f"Datasets   : dbpedia, yahoo_answers, estela")
-    print(f"Seed       : {CACHE_SEED}  n_samples: {CACHE_N_SAMPLES}")
-    print(f"Chunk size : {chunk_size}  Timeout/pair: {timeout:.0f}s")
+    print(f"Cache dir   : {cache_dir}")
+    print(f"Engines     : {engines}")
+    print(f"Datasets    : dbpedia, yahoo_answers, estela")
+    print(f"Seed        : {CACHE_SEED}  n_samples: {CACHE_N_SAMPLES}")
+    print(f"Batch size  : {batch_size}  Max retries/batch: {max_retries}")
+    print(f"API version : {api_version}")
     print()
 
-    # --- Load datasets ---
     repo_root = Path(__file__).resolve().parent.parent
     print("Loading datasets...")
 
     datasets = {}
 
     try:
+        from scripts.run_experimental_sweep import load_dbpedia_full
         texts_db, labels_db, _ = load_dbpedia_full(random_state=CACHE_SEED)
         datasets["dbpedia"] = (texts_db, labels_db)
         print(f"  dbpedia        : {len(texts_db)} texts")
@@ -266,6 +339,7 @@ async def main():
         print(f"  [WARN] Could not load dbpedia: {e}")
 
     try:
+        from scripts.run_experimental_sweep import load_yahoo_answers_full
         texts_ya, labels_ya, _ = load_yahoo_answers_full(random_state=CACHE_SEED)
         datasets["yahoo_answers"] = (texts_ya, labels_ya)
         print(f"  yahoo_answers  : {len(texts_ya)} texts")
@@ -280,15 +354,10 @@ async def main():
         print(f"  [WARN] Could not load estela: {e}")
 
     if not datasets:
-        print("[ERROR] No datasets could be loaded. Exiting.")
+        print("[ERROR] No datasets could be loaded.")
         sys.exit(1)
 
-    # --- Init DB ---
-    db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
-    db.init_db()
-
-    # --- Build all (dataset, engine) pairs ---
-    total = len(datasets) * len(engines)
+    total_pairs = len(datasets) * len(engines)
     done = 0
     succeeded = 0
     failed_pairs = []
@@ -298,43 +367,47 @@ async def main():
         print(f"Engine: {engine}")
         print("=" * 70)
 
-        for dataset_name, (texts, labels) in datasets.items():
-            done += 1
-            print(f"\n  [{done}/{total}] {dataset_name} x {engine}")
-            try:
-                ok = await _build_one(
-                    dataset_name=dataset_name,
-                    texts=texts,
-                    labels=labels,
-                    deployment=engine,
-                    cache_dir=cache_dir,
-                    db=db,
-                    fetch_embeddings_async_fn=fetch_embeddings_async,
-                    save_embedding_cache_fn=save_embedding_cache,
-                    get_cache_path_fn=get_cache_path,
-                    chunk_size=chunk_size,
-                    timeout=timeout,
-                )
-                if ok:
-                    succeeded += 1
-                else:
+        # Create a fresh async client for each engine
+        client = AsyncAzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=endpoint,
+        )
+        try:
+            for dataset_name, (texts, labels) in datasets.items():
+                done += 1
+                print(f"\n  [{done}/{total_pairs}] {dataset_name} × {engine}")
+                try:
+                    ok = await _build_one(
+                        dataset_name=dataset_name,
+                        texts=texts,
+                        labels=labels,
+                        engine=engine,
+                        cache_dir=cache_dir,
+                        client=client,
+                        batch_size=batch_size,
+                        max_retries=max_retries,
+                    )
+                    if ok:
+                        succeeded += 1
+                    else:
+                        failed_pairs.append((dataset_name, engine))
+                except Exception as e:
+                    print(f"    [ERROR] Unexpected: {e}")
+                    traceback.print_exc()
                     failed_pairs.append((dataset_name, engine))
-            except Exception as e:
-                # Belt-and-suspenders: catch anything that escaped _build_one
-                print(f"    [ERROR] Unexpected error for {dataset_name}/{engine}: {e}")
-                failed_pairs.append((dataset_name, engine))
+        finally:
+            await client.close()
 
-    # --- Summary ---
     print(f"\n{'=' * 70}")
     print("Summary")
     print("=" * 70)
-    print(f"  Total pairs  : {total}")
+    print(f"  Total pairs  : {total_pairs}")
     print(f"  Succeeded    : {succeeded}")
-    print(f"  Failed/skipped errors: {len(failed_pairs)}")
+    print(f"  Errors       : {len(failed_pairs)}")
     if failed_pairs:
-        print("  Failed pairs:")
         for ds, eng in failed_pairs:
-            print(f"    {ds} x {eng}")
+            print(f"    ✗ {ds} × {eng}")
     print("\nDone.")
 
 

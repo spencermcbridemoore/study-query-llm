@@ -169,14 +169,9 @@ class InferenceService:
             )
 
         # Build request_json for logging (before call, in case it fails)
-        request_json = {
-            'prompt': original_prompt,  # Store original prompt, not processed
-            'temperature': temperature,
-        }
-        if max_tokens is not None:
-            request_json['max_tokens'] = max_tokens
-        if template:
-            request_json['template'] = template
+        request_json = self._build_request_json(
+            original_prompt, temperature, max_tokens, template
+        )
 
         # Call the provider with retry logic
         try:
@@ -220,32 +215,7 @@ class InferenceService:
                     
                     # Add to group if batch_id provided
                     if batch_id:
-                        # Try to find existing group with this batch_id
-                        from ..db.models_v2 import Group
-                        # Query all batch groups and filter in Python (works across DBs)
-                        all_batch_groups = self.repository.session.query(Group).filter(
-                            Group.group_type == 'batch'
-                        ).all()
-                        
-                        existing_group = None
-                        for group in all_batch_groups:
-                            if (group.metadata_json and 
-                                isinstance(group.metadata_json, dict) and
-                                group.metadata_json.get('batch_id') == batch_id):
-                                existing_group = group
-                                break
-                        
-                        if existing_group:
-                            group_id = existing_group.id
-                        else:
-                            # Create new group for this batch_id
-                            group_id = self.repository.create_group(
-                                group_type='batch',
-                                name=f'batch_{batch_id}',
-                                description=f'Batch inference group',
-                                metadata_json={'batch_id': batch_id}
-                            )
-                        
+                        group_id = self._find_or_create_batch_group(batch_id)
                         self.repository.add_call_to_group(group_id, failed_call_id)
                     
                     logger.warning(
@@ -283,98 +253,25 @@ class InferenceService:
             result['processed_prompt'] = prompt
 
         # Persist to database if repository provided (v2 schema)
-        inference_id = None
         if self.repository:
             try:
-                # Build request_json with prompt
-                request_json = {
-                    'prompt': original_prompt,  # Store original prompt, not processed
-                    'temperature': temperature,
-                }
-                if max_tokens is not None:
-                    request_json['max_tokens'] = max_tokens
-                if template:
-                    request_json['template'] = template
-                
-                # Build response_json
-                response_json = {
-                    'text': provider_response.text,
-                }
-                
-                # Build tokens_json from provider response
-                tokens_json = None
-                if provider_response.tokens:
-                    tokens_json = {
-                        'total_tokens': provider_response.tokens,
-                    }
-                    if hasattr(provider_response, 'prompt_tokens'):
-                        tokens_json['prompt_tokens'] = provider_response.prompt_tokens
-                    if hasattr(provider_response, 'completion_tokens'):
-                        tokens_json['completion_tokens'] = provider_response.completion_tokens
-                
-                # Build metadata_json
-                metadata_json = provider_response.metadata or {}
-                if batch_id:
-                    metadata_json['batch_id'] = batch_id
-                
-                # Extract model name from provider or metadata
-                model_name = None
-                if hasattr(self.provider, 'deployment_name'):
-                    model_name = self.provider.deployment_name
-                elif hasattr(self.provider, 'model'):
-                    model_name = self.provider.model
-                elif provider_response.metadata:
-                    model_name = provider_response.metadata.get('model')
-                
-                # Insert into v2 RawCall table
-                inference_id = self.repository.insert_raw_call(
-                    provider=provider_response.provider,
-                    request_json=request_json,
-                    model=model_name,
-                    modality='text',
-                    status='success',
-                    response_json=response_json,
-                    latency_ms=provider_response.latency_ms,
-                    tokens_json=tokens_json,
-                    metadata_json=metadata_json,
+                persistence_result = self._persist_inference_result(
+                    original_prompt,
+                    provider_response,
+                    temperature,
+                    max_tokens,
+                    template,
+                    batch_id,
                 )
                 
-                # If batch_id provided, create/update group
-                if batch_id:
-                    # Try to find existing group with this batch_id
-                    from ..db.models_v2 import Group
-                    # Query all batch groups and filter in Python (works across DBs)
-                    all_batch_groups = self.repository.session.query(Group).filter(
-                        Group.group_type == 'batch'
-                    ).all()
-                    
-                    existing_group = None
-                    for group in all_batch_groups:
-                        if (group.metadata_json and 
-                            isinstance(group.metadata_json, dict) and
-                            group.metadata_json.get('batch_id') == batch_id):
-                            existing_group = group
-                            break
-                    
-                    if existing_group:
-                        group_id = existing_group.id
-                    else:
-                        # Create new group for this batch_id
-                        group_id = self.repository.create_group(
-                            group_type='batch',
-                            name=f'batch_{batch_id}',
-                            description=f'Batch inference group',
-                            metadata_json={'batch_id': batch_id}
-                        )
-                    
-                    self.repository.add_call_to_group(group_id, inference_id)
-                    result['group_id'] = group_id
+                result['id'] = persistence_result['id']
+                if 'group_id' in persistence_result:
+                    result['group_id'] = persistence_result['group_id']
+                if 'batch_id' in persistence_result:
+                    result['batch_id'] = persistence_result['batch_id']
                 
-                result['id'] = inference_id
-                if batch_id:
-                    result['batch_id'] = batch_id
                 logger.info(
-                    f"Inference saved to database: id={inference_id}, "
+                    f"Inference saved to database: id={persistence_result['id']}, "
                     f"provider={provider_response.provider}, tokens={provider_response.tokens}"
                 )
             except Exception as e:
@@ -548,6 +445,156 @@ class InferenceService:
         ]
 
         return await asyncio.gather(*tasks)
+
+    def _build_request_json(
+        self,
+        prompt: str,
+        temperature: float,
+        max_tokens: Optional[int] = None,
+        template: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Build the request_json dictionary for database logging.
+
+        Args:
+            prompt: The original prompt (before preprocessing)
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate (optional)
+            template: Optional template string (optional)
+
+        Returns:
+            Dictionary containing request parameters for logging
+        """
+        request_json: dict[str, Any] = {
+            'prompt': prompt,
+            'temperature': temperature,
+        }
+        if max_tokens is not None:
+            request_json['max_tokens'] = max_tokens
+        if template:
+            request_json['template'] = template
+        return request_json
+
+    def _find_or_create_batch_group(
+        self,
+        batch_id: str,
+    ) -> int:
+        """
+        Find existing batch group or create a new one for the given batch_id.
+
+        Args:
+            batch_id: UUID string identifying the batch
+
+        Returns:
+            Group ID (existing or newly created)
+        """
+        from ..db.models_v2 import Group
+        
+        # Query all batch groups and filter in Python (works across DBs)
+        all_batch_groups = self.repository.session.query(Group).filter(
+            Group.group_type == 'batch'
+        ).all()
+        
+        existing_group = None
+        for group in all_batch_groups:
+            if (group.metadata_json and 
+                isinstance(group.metadata_json, dict) and
+                group.metadata_json.get('batch_id') == batch_id):
+                existing_group = group
+                break
+        
+        if existing_group:
+            return existing_group.id
+        else:
+            # Create new group for this batch_id
+            return self.repository.create_group(
+                group_type='batch',
+                name=f'batch_{batch_id}',
+                description=f'Batch inference group',
+                metadata_json={'batch_id': batch_id}
+            )
+
+    def _persist_inference_result(
+        self,
+        original_prompt: str,
+        provider_response: ProviderResponse,
+        temperature: float,
+        max_tokens: Optional[int],
+        template: Optional[str],
+        batch_id: Optional[str],
+    ) -> dict[str, Any]:
+        """
+        Persist successful inference result to database.
+
+        Args:
+            original_prompt: Original prompt before preprocessing
+            provider_response: ProviderResponse object from successful inference
+            temperature: Sampling temperature used
+            max_tokens: Maximum tokens used (optional)
+            template: Template string used (optional)
+            batch_id: Optional batch ID for grouping
+
+        Returns:
+            Dictionary with 'id' and optionally 'group_id' and 'batch_id' keys
+        """
+        # Build request_json
+        request_json = self._build_request_json(
+            original_prompt, temperature, max_tokens, template
+        )
+        
+        # Build response_json
+        response_json = {
+            'text': provider_response.text,
+        }
+        
+        # Build tokens_json from provider response
+        tokens_json = None
+        if provider_response.tokens:
+            tokens_json = {
+                'total_tokens': provider_response.tokens,
+            }
+            if hasattr(provider_response, 'prompt_tokens'):
+                tokens_json['prompt_tokens'] = provider_response.prompt_tokens
+            if hasattr(provider_response, 'completion_tokens'):
+                tokens_json['completion_tokens'] = provider_response.completion_tokens
+        
+        # Build metadata_json
+        metadata_json = provider_response.metadata or {}
+        if batch_id:
+            metadata_json['batch_id'] = batch_id
+        
+        # Extract model name from provider or metadata
+        model_name = None
+        if hasattr(self.provider, 'deployment_name'):
+            model_name = self.provider.deployment_name
+        elif hasattr(self.provider, 'model'):
+            model_name = self.provider.model
+        elif provider_response.metadata:
+            model_name = provider_response.metadata.get('model')
+        
+        # Insert into v2 RawCall table
+        inference_id = self.repository.insert_raw_call(
+            provider=provider_response.provider,
+            request_json=request_json,
+            model=model_name,
+            modality='text',
+            status='success',
+            response_json=response_json,
+            latency_ms=provider_response.latency_ms,
+            tokens_json=tokens_json,
+            metadata_json=metadata_json,
+        )
+        
+        result: dict[str, Any] = {'id': inference_id}
+        
+        # If batch_id provided, create/update group
+        if batch_id:
+            group_id = self._find_or_create_batch_group(batch_id)
+            self.repository.add_call_to_group(group_id, inference_id)
+            result['group_id'] = group_id
+            result['batch_id'] = batch_id
+        
+        return result
 
     def get_provider_name(self) -> str:
         """

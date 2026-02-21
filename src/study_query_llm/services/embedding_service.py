@@ -698,6 +698,118 @@ class EmbeddingService:
             )
             return None
 
+    async def _resolve_deployment(
+        self, deployment: str, provider: str, request: EmbeddingRequest, request_hash: str
+    ) -> None:
+        """
+        Validate and resolve deployment, raising ValueError if invalid.
+
+        Args:
+            deployment: Deployment name to validate
+            provider: Provider name
+            request: EmbeddingRequest for error logging
+            request_hash: Request hash for error logging
+
+        Raises:
+            ValueError: If deployment is invalid
+        """
+        is_valid = await self._validate_deployment(deployment, provider)
+        if not is_valid:
+            error = ValueError(
+                f"Invalid deployment: {deployment} (does not exist or does not support embeddings)"
+            )
+            self._log_failure(request, request_hash, error)
+            raise error
+
+    def _persist_embedding(
+        self,
+        request: EmbeddingRequest,
+        vector: List[float],
+        dimension: int,
+        deployment: str,
+        latency_ms: float,
+        request_hash: str,
+    ) -> Optional[int]:
+        """
+        Persist embedding result to database.
+
+        Args:
+            request: Original embedding request
+            vector: Embedding vector
+            dimension: Vector dimension
+            deployment: Deployment name
+            latency_ms: Latency in milliseconds
+            request_hash: Request hash for metadata
+
+        Returns:
+            RawCall ID if persisted, None otherwise
+        """
+        if not self.repository:
+            return None
+
+        try:
+            # Build request_json
+            request_json = {"input": request.text, "model": deployment}
+            if request.dimensions:
+                request_json["dimensions"] = request.dimensions
+
+            # Build response_json
+            response_json = {
+                "model": deployment,
+                "embedding_dim": dimension,
+            }
+
+            # Build metadata_json
+            metadata_json = {
+                "request_hash": request_hash,
+            }
+            if request.group_id:
+                metadata_json["group_id"] = request.group_id
+            metadata_json.update(request.metadata)
+
+            # Insert RawCall
+            raw_call_id = self.repository.insert_raw_call(
+                provider=f"{request.provider}_openai_{deployment}",
+                request_json=request_json,
+                model=deployment,
+                modality="embedding",
+                status="success",
+                response_json=response_json,
+                latency_ms=latency_ms,
+                tokens_json=None,  # Embeddings don't always have token usage
+                metadata_json=metadata_json,
+            )
+
+            # Insert EmbeddingVector
+            from ..db.models_v2 import EmbeddingVector
+            import numpy as np
+
+            vector_norm = float(np.linalg.norm(vector))
+
+            embedding_vector = EmbeddingVector(
+                call_id=raw_call_id,
+                vector=vector,
+                dimension=dimension,
+                norm=vector_norm,
+                metadata_json={"model": deployment},
+            )
+
+            self.repository.session.add(embedding_vector)
+            self.repository.session.flush()
+
+            logger.info(
+                f"Stored embedding: id={raw_call_id}, deployment={deployment}, "
+                f"dimension={dimension}"
+            )
+
+            return raw_call_id
+
+        except Exception as db_error:
+            handle_db_persistence_error(
+                logger, db_error, self.require_db_persistence, "persist embedding"
+            )
+            return None
+
     async def get_embedding(
         self, request: EmbeddingRequest
     ) -> EmbeddingResponse:
@@ -774,15 +886,9 @@ class EmbeddingService:
             return cached
 
         # Validate deployment
-        is_valid = await self._validate_deployment(
-            request.deployment, request.provider
+        await self._resolve_deployment(
+            request.deployment, request.provider, request, request_hash
         )
-        if not is_valid:
-            error = ValueError(
-                f"Invalid deployment: {request.deployment} (does not exist or does not support embeddings)"
-            )
-            self._log_failure(request, request_hash, error)
-            raise error
 
         # Generate embedding with retry
         start_time = time.time()
@@ -801,67 +907,9 @@ class EmbeddingService:
             dimension = len(vector)
 
             # Persist to database
-            raw_call_id = None
-            if self.repository:
-                try:
-                    # Build request_json
-                    request_json = {"input": request.text, "model": request.deployment}
-                    if request.dimensions:
-                        request_json["dimensions"] = request.dimensions
-
-                    # Build response_json
-                    response_json = {
-                        "model": request.deployment,
-                        "embedding_dim": dimension,
-                    }
-
-                    # Build metadata_json
-                    metadata_json = {
-                        "request_hash": request_hash,
-                    }
-                    if request.group_id:
-                        metadata_json["group_id"] = request.group_id
-                    metadata_json.update(request.metadata)
-
-                    # Insert RawCall
-                    raw_call_id = self.repository.insert_raw_call(
-                        provider=f"{request.provider}_openai_{request.deployment}",
-                        request_json=request_json,
-                        model=request.deployment,
-                        modality="embedding",
-                        status="success",
-                        response_json=response_json,
-                        latency_ms=latency_ms,
-                        tokens_json=None,  # Embeddings don't always have token usage
-                        metadata_json=metadata_json,
-                    )
-
-                    # Insert EmbeddingVector
-                    from ..db.models_v2 import EmbeddingVector
-                    import numpy as np
-
-                    vector_norm = float(np.linalg.norm(vector))
-
-                    embedding_vector = EmbeddingVector(
-                        call_id=raw_call_id,
-                        vector=vector,
-                        dimension=dimension,
-                        norm=vector_norm,
-                        metadata_json={"model": request.deployment},
-                    )
-
-                    self.repository.session.add(embedding_vector)
-                    self.repository.session.flush()
-
-                    logger.info(
-                        f"Stored embedding: id={raw_call_id}, deployment={request.deployment}, "
-                        f"dimension={dimension}"
-                    )
-
-                except Exception as db_error:
-                    handle_db_persistence_error(
-                        logger, db_error, self.require_db_persistence, "persist embedding"
-                    )
+            raw_call_id = self._persist_embedding(
+                request, vector, dimension, request.deployment, latency_ms, request_hash
+            )
 
             return EmbeddingResponse(
                 vector=vector,
@@ -876,6 +924,98 @@ class EmbeddingService:
         except Exception as e:
             latency_ms = (time.time() - start_time) * 1000
             self._log_failure(request, request_hash, e, latency_ms)
+            raise
+
+    def _batch_cache_lookup(
+        self, requests: List[EmbeddingRequest], hashes: List[str]
+    ) -> Tuple[Dict[str, tuple], List[int]]:
+        """
+        Perform batch cache lookup and separate cached vs uncached requests.
+
+        Args:
+            requests: List of embedding requests
+            hashes: Pre-computed request hashes (one per request)
+
+        Returns:
+            Tuple of (cached_map, uncached_indices)
+            - cached_map: Dict mapping request_hash to (vector, raw_call_id)
+            - uncached_indices: List of indices for uncached requests
+        """
+        cached_map: Dict[str, tuple] = {}
+        if self.repository:
+            try:
+                from ..db.raw_call_repository import RawCallRepository
+                cached_map = self.repository.get_embedding_vectors_by_request_hashes(
+                    requests[0].deployment, hashes
+                )
+            except Exception as e:
+                logger.warning("Batch cache lookup failed: %s", e)
+
+        # Partition requests into cached vs uncached
+        uncached_indices = [
+            i for i, h in enumerate(hashes) if h not in cached_map
+        ]
+
+        return cached_map, uncached_indices
+
+    async def _batch_api_call(
+        self,
+        uncached_requests: List[EmbeddingRequest],
+        uncached_hashes: List[str],
+        deployment: str,
+        dimensions: Optional[int],
+    ) -> Dict[str, EmbeddingResponse]:
+        """
+        Make API call for uncached requests and persist results.
+
+        Args:
+            uncached_requests: List of uncached embedding requests
+            uncached_hashes: Pre-computed request hashes for uncached requests
+            deployment: Deployment name
+            dimensions: Optional dimension override
+
+        Returns:
+            Dict mapping request_hash to EmbeddingResponse
+
+        Raises:
+            Exception: If API call fails
+        """
+        uncached_texts = [req.text for req in uncached_requests]
+
+        start_time = time.time()
+        try:
+            emb_objects = await self._create_embedding_batch_with_retry(
+                uncached_texts,
+                uncached_requests[0].deployment,
+                uncached_requests[0].provider,
+                uncached_requests[0].dimensions,
+            )
+            batch_latency_ms = (time.time() - start_time) * 1000
+
+            # Persist newly fetched embeddings to DB
+            raw_call_ids = self._persist_embedding_batch(
+                uncached_requests, emb_objects, uncached_hashes, batch_latency_ms
+            )
+
+            fetched_map: Dict[str, EmbeddingResponse] = {}
+            for req, emb_obj, req_hash, raw_call_id in zip(
+                uncached_requests, emb_objects, uncached_hashes, raw_call_ids
+            ):
+                vector = emb_obj.embedding
+                fetched_map[req_hash] = EmbeddingResponse(
+                    vector=vector,
+                    model=req.deployment,
+                    dimension=len(vector),
+                    request_hash=req_hash,
+                    cached=False,
+                    raw_call_id=raw_call_id,
+                    latency_ms=batch_latency_ms,
+                )
+
+            return fetched_map
+
+        except Exception as e:
+            logger.error("Batch embedding call failed: %s", e)
             raise
 
     async def get_embeddings_batch(
@@ -933,57 +1073,21 @@ class EmbeddingService:
             ]
 
             # 2. Batch cache lookup
-            cached_map: Dict[str, tuple] = {}
-            if self.repository:
-                try:
-                    from ..db.raw_call_repository import RawCallRepository
-                    cached_map = self.repository.get_embedding_vectors_by_request_hashes(
-                        chunk[0].deployment, hashes
-                    )
-                except Exception as e:
-                    logger.warning("Batch cache lookup failed: %s", e)
-
-            # 3. Partition chunk into cached vs uncached
-            uncached_indices = [
-                i for i, h in enumerate(hashes) if h not in cached_map
-            ]
+            cached_map, uncached_indices = self._batch_cache_lookup(chunk, hashes)
 
             # 4. Fetch uncached texts from API in one batch call
             fetched_map: Dict[str, EmbeddingResponse] = {}
             if uncached_indices:
                 uncached_reqs = [chunk[i] for i in uncached_indices]
                 uncached_hashes = [hashes[i] for i in uncached_indices]
-                uncached_texts = [req.text for req in uncached_reqs]
 
-                start_time = time.time()
                 try:
-                    emb_objects = await self._create_embedding_batch_with_retry(
-                        uncached_texts,
+                    fetched_map = await self._batch_api_call(
+                        uncached_reqs,
+                        uncached_hashes,
                         uncached_reqs[0].deployment,
-                        uncached_reqs[0].provider,
                         uncached_reqs[0].dimensions,
                     )
-                    batch_latency_ms = (time.time() - start_time) * 1000
-
-                    # 5. Persist newly fetched embeddings to DB
-                    raw_call_ids = self._persist_embedding_batch(
-                        uncached_reqs, emb_objects, uncached_hashes, batch_latency_ms
-                    )
-
-                    for req, emb_obj, req_hash, raw_call_id in zip(
-                        uncached_reqs, emb_objects, uncached_hashes, raw_call_ids
-                    ):
-                        vector = emb_obj.embedding
-                        fetched_map[req_hash] = EmbeddingResponse(
-                            vector=vector,
-                            model=req.deployment,
-                            dimension=len(vector),
-                            request_hash=req_hash,
-                            cached=False,
-                            raw_call_id=raw_call_id,
-                            latency_ms=batch_latency_ms,
-                        )
-
                 except Exception as e:
                     logger.error(
                         "Batch embedding call failed for chunk %d/%d: %s",

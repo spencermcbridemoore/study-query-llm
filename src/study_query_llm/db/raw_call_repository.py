@@ -8,7 +8,7 @@ raw calls in the v2 schema. Uses the Repository pattern to abstract database det
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, and_
+from sqlalchemy import func, desc, and_, or_, cast, Float, String
 from .models_v2 import RawCall, Group, GroupMember, CallArtifact, EmbeddingVector, GroupLink
 from ..utils.logging_config import get_logger
 
@@ -196,6 +196,7 @@ class RawCallRepository:
         Get aggregate statistics by provider.
         
         Extracts token counts from tokens_json and calculates averages/totals.
+        Uses SQL aggregation for efficiency.
         
         Returns:
             List of dicts with provider statistics:
@@ -210,59 +211,93 @@ class RawCallRepository:
                 ...
             ]
         """
-        # Get all raw calls to extract tokens from tokens_json
-        all_calls = self.session.query(RawCall).all()
-        
-        # Group by provider and calculate stats
-        provider_data = {}
-        for call in all_calls:
-            provider = call.provider
-            if provider not in provider_data:
-                provider_data[provider] = {
-                    'count': 0,
-                    'latencies': [],
-                    'tokens': []
-                }
+        try:
+            # PostgreSQL path: Use JSON operators for efficient extraction
+            # Extract total_tokens from tokens_json, trying multiple field names
+            token_expr = func.coalesce(
+                cast(RawCall.tokens_json['total_tokens'].astext, Float),
+                cast(RawCall.tokens_json['totalTokens'].astext, Float),
+                cast(RawCall.tokens_json['usage']['total_tokens'].astext, Float),
+                cast(RawCall.tokens_json['usage']['totalTokens'].astext, Float),
+                0.0
+            )
             
-            provider_data[provider]['count'] += 1
-            if call.latency_ms:
-                provider_data[provider]['latencies'].append(call.latency_ms)
+            # Aggregate by provider using SQL GROUP BY
+            query = self.session.query(
+                RawCall.provider,
+                func.count(RawCall.id).label('count'),
+                func.avg(token_expr).label('avg_tokens'),
+                func.avg(RawCall.latency_ms).label('avg_latency_ms'),
+                func.sum(token_expr).label('total_tokens')
+            ).group_by(RawCall.provider)
             
-            # Extract total tokens from tokens_json
-            if call.tokens_json and isinstance(call.tokens_json, dict):
-                # Try common token field names
-                total_tokens = (
-                    call.tokens_json.get('total_tokens') or
-                    call.tokens_json.get('totalTokens') or
-                    call.tokens_json.get('usage', {}).get('total_tokens') or
-                    call.tokens_json.get('usage', {}).get('totalTokens') or
-                    0
+            results = []
+            for row in query.all():
+                results.append({
+                    'provider': row.provider,
+                    'count': row.count,
+                    'avg_tokens': round(float(row.avg_tokens or 0), 2),
+                    'avg_latency_ms': round(float(row.avg_latency_ms or 0), 2),
+                    'total_tokens': int(row.total_tokens or 0)
+                })
+            
+            return results
+            
+        except Exception as e:
+            # Fallback for SQLite or other backends: use Python aggregation
+            logger.warning(f"SQL aggregation failed, falling back to Python: {e}")
+            all_calls = self.session.query(RawCall).all()
+            
+            # Group by provider and calculate stats
+            provider_data = {}
+            for call in all_calls:
+                provider = call.provider
+                if provider not in provider_data:
+                    provider_data[provider] = {
+                        'count': 0,
+                        'latencies': [],
+                        'tokens': []
+                    }
+                
+                provider_data[provider]['count'] += 1
+                if call.latency_ms:
+                    provider_data[provider]['latencies'].append(call.latency_ms)
+                
+                # Extract total tokens from tokens_json
+                if call.tokens_json and isinstance(call.tokens_json, dict):
+                    # Try common token field names
+                    total_tokens = (
+                        call.tokens_json.get('total_tokens') or
+                        call.tokens_json.get('totalTokens') or
+                        call.tokens_json.get('usage', {}).get('total_tokens') or
+                        call.tokens_json.get('usage', {}).get('totalTokens') or
+                        0
+                    )
+                    if total_tokens:
+                        provider_data[provider]['tokens'].append(total_tokens)
+            
+            # Build result list
+            results = []
+            for provider, data in provider_data.items():
+                avg_latency = (
+                    sum(data['latencies']) / len(data['latencies'])
+                    if data['latencies'] else 0
                 )
-                if total_tokens:
-                    provider_data[provider]['tokens'].append(total_tokens)
-        
-        # Build result list
-        results = []
-        for provider, data in provider_data.items():
-            avg_latency = (
-                sum(data['latencies']) / len(data['latencies'])
-                if data['latencies'] else 0
-            )
-            avg_tokens = (
-                sum(data['tokens']) / len(data['tokens'])
-                if data['tokens'] else 0
-            )
-            total_tokens = sum(data['tokens']) if data['tokens'] else 0
+                avg_tokens = (
+                    sum(data['tokens']) / len(data['tokens'])
+                    if data['tokens'] else 0
+                )
+                total_tokens = sum(data['tokens']) if data['tokens'] else 0
+                
+                results.append({
+                    'provider': provider,
+                    'count': data['count'],
+                    'avg_tokens': round(float(avg_tokens), 2),
+                    'avg_latency_ms': round(float(avg_latency), 2),
+                    'total_tokens': int(total_tokens)
+                })
             
-            results.append({
-                'provider': provider,
-                'count': data['count'],
-                'avg_tokens': round(float(avg_tokens), 2),
-                'avg_latency_ms': round(float(avg_latency), 2),
-                'total_tokens': int(total_tokens)
-            })
-        
-        return results
+            return results
 
     def get_total_count(self) -> int:
         """
@@ -293,6 +328,7 @@ class RawCallRepository:
         
         Performs case-insensitive substring search on prompt text extracted
         from request_json. Looks for 'prompt', 'messages', or 'input' fields.
+        Uses SQL filtering for efficiency.
         
         Args:
             search_term: Text to search for in prompts
@@ -301,47 +337,82 @@ class RawCallRepository:
         Returns:
             List of matching RawCall objects, ordered by created_at descending
         """
-        # Get all text modality calls and filter in Python
-        # (JSON search in SQLAlchemy is database-specific)
-        all_calls = self.session.query(RawCall)\
-            .filter(RawCall.modality == 'text')\
-            .order_by(desc(RawCall.created_at))\
-            .limit(limit * SEARCH_OVERFETCH_MULTIPLIER)\
-            .all()  # Get more to filter from
-        
-        matches = []
-        search_lower = search_term.lower()
-        
-        for call in all_calls:
-            if len(matches) >= limit:
-                break
-                
-            # Extract prompt text from request_json
-            request = call.request_json or {}
-            prompt_text = None
+        try:
+            # PostgreSQL path: Use JSON operators with ILIKE for case-insensitive search
+            # Search in multiple possible JSON fields: prompt, input, and messages array
+            search_pattern = f'%{search_term}%'
             
-            # Try common prompt field names
-            if isinstance(request, dict):
-                prompt_text = (
-                    request.get('prompt') or
-                    request.get('input') or
-                    ''
-                )
-                
-                # If messages array, extract text from first user message
-                if not prompt_text and 'messages' in request:
-                    messages = request.get('messages', [])
-                    if messages and isinstance(messages, list):
-                        for msg in messages:
-                            if isinstance(msg, dict) and msg.get('role') == 'user':
-                                prompt_text = msg.get('content', '')
-                                break
+            # Build conditions for different JSON field locations
+            # PostgreSQL JSON operators: -> for JSON object, ->> for text extraction
+            conditions = []
             
-            # Search in prompt text
-            if prompt_text and search_lower in str(prompt_text).lower():
-                matches.append(call)
-        
-        return matches[:limit]
+            # Search in 'prompt' field (request_json->>'prompt')
+            conditions.append(
+                RawCall.request_json['prompt'].astext.ilike(search_pattern)
+            )
+            
+            # Search in 'input' field (request_json->>'input')
+            conditions.append(
+                RawCall.request_json['input'].astext.ilike(search_pattern)
+            )
+            
+            # For messages array, search the entire array as text
+            # This will match content within any message object
+            # (request_json->'messages'::text or request_json->>'messages')
+            conditions.append(
+                func.cast(RawCall.request_json['messages'], String).ilike(search_pattern)
+            )
+            
+            query = self.session.query(RawCall)\
+                .filter(RawCall.modality == 'text')\
+                .filter(or_(*conditions))\
+                .order_by(desc(RawCall.created_at))\
+                .limit(limit)
+            
+            return query.all()
+            
+        except Exception as e:
+            # Fallback for SQLite or other backends: use Python filtering
+            logger.warning(f"SQL search failed, falling back to Python: {e}")
+            all_calls = self.session.query(RawCall)\
+                .filter(RawCall.modality == 'text')\
+                .order_by(desc(RawCall.created_at))\
+                .limit(limit * SEARCH_OVERFETCH_MULTIPLIER)\
+                .all()  # Get more to filter from
+            
+            matches = []
+            search_lower = search_term.lower()
+            
+            for call in all_calls:
+                if len(matches) >= limit:
+                    break
+                    
+                # Extract prompt text from request_json
+                request = call.request_json or {}
+                prompt_text = None
+                
+                # Try common prompt field names
+                if isinstance(request, dict):
+                    prompt_text = (
+                        request.get('prompt') or
+                        request.get('input') or
+                        ''
+                    )
+                    
+                    # If messages array, extract text from first user message
+                    if not prompt_text and 'messages' in request:
+                        messages = request.get('messages', [])
+                        if messages and isinstance(messages, list):
+                            for msg in messages:
+                                if isinstance(msg, dict) and msg.get('role') == 'user':
+                                    prompt_text = msg.get('content', '')
+                                    break
+                
+                # Search in prompt text
+                if prompt_text and search_lower in str(prompt_text).lower():
+                    matches.append(call)
+            
+            return matches[:limit]
 
     # ========== GROUP OPERATIONS ==========
 
@@ -479,48 +550,6 @@ class RawCallRepository:
             Group.id.in_(group_ids)
         ).all()
 
-    # ========== DEFECTIVE DATA HELPERS ==========
-
-    def get_or_create_defective_group(self) -> int:
-        """
-        Get or create the standard "defective_data" group.
-        
-        Convention: Group with name "defective_data" and type "label" is used
-        to mark RawCall records as defective/excluded from analysis.
-        
-        Returns:
-            The ID of the defective_data group
-        """
-        # Try to find existing group
-        existing = self.session.query(Group).filter_by(
-            group_type="label",
-            name="defective_data"
-        ).first()
-        
-        if existing:
-            return existing.id
-        
-        # Create if doesn't exist
-        return self.create_group(
-            group_type="label",
-            name="defective_data",
-            description="RawCall records marked as defective/excluded from analysis"
-        )
-
-    def is_call_defective(self, call_id: int) -> bool:
-        """
-        Check if a raw call is marked as defective.
-        
-        Args:
-            call_id: ID of the raw call to check
-        
-        Returns:
-            True if call is in the "defective_data" group, False otherwise
-        """
-        group_id = self.get_or_create_defective_group()
-        groups = self.get_groups_for_call(call_id)
-        return any(g.id == group_id for g in groups)
-
     def query_raw_calls_excluding_defective(
         self,
         provider: Optional[str] = None,
@@ -528,7 +557,8 @@ class RawCallRepository:
         status: Optional[str] = None,
         date_range: Optional[Tuple[datetime, datetime]] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        defective_group_id: Optional[int] = None
     ) -> List[RawCall]:
         """
         Query raw calls with filters, excluding those marked as defective.
@@ -542,12 +572,34 @@ class RawCallRepository:
             date_range: Tuple of (start_date, end_date) for filtering (optional)
             limit: Maximum number of results (default: 100)
             offset: Number of results to skip for pagination (default: 0)
+            defective_group_id: ID of defective group to exclude (optional, will be looked up if not provided)
         
         Returns:
             List of RawCall objects, ordered by created_at descending, excluding defective calls
         """
-        # Get defective group ID
-        defective_group_id = self.get_or_create_defective_group()
+        # Get defective group ID if not provided
+        # Note: For better separation of concerns, consider using DataQualityService
+        # to get the defective_group_id before calling this method
+        if defective_group_id is None:
+            # Fallback: query directly (for backward compatibility)
+            # This maintains backward compatibility but new code should use DataQualityService
+            existing = self.session.query(Group).filter_by(
+                group_type="label",
+                name="defective_data"
+            ).first()
+            
+            if existing:
+                defective_group_id = existing.id
+            else:
+                # If group doesn't exist, no calls are defective, so return all
+                return self.query_raw_calls(
+                    provider=provider,
+                    modality=modality,
+                    status=status,
+                    date_range=date_range,
+                    limit=limit,
+                    offset=offset
+                )
         
         # Build base query
         query = self.session.query(RawCall).outerjoin(

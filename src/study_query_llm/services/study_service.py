@@ -13,6 +13,12 @@ from ..db.raw_call_repository import RawCallRepository
 
 logger = logging.getLogger(__name__)
 
+# Cost per token for cost estimation (adjust based on actual pricing)
+COST_PER_TOKEN = 0.00002
+
+# Truncation length for prompt/response display
+PROMPT_DISPLAY_TRUNCATION = 100
+
 
 class StudyService:
     """
@@ -69,8 +75,8 @@ class StudyService:
         if not df.empty:
             # Add derived metrics
             # Example pricing: $0.00002 per token (adjust based on actual pricing)
-            df['avg_cost_estimate'] = df['avg_tokens'] * 0.00002
-            df['total_cost_estimate'] = df['total_tokens'] * 0.00002
+            df['avg_cost_estimate'] = df['avg_tokens'] * COST_PER_TOKEN
+            df['total_cost_estimate'] = df['total_tokens'] * COST_PER_TOKEN
             logger.debug(f"Calculated cost estimates for {len(df)} providers")
 
         return df
@@ -125,8 +131,8 @@ class StudyService:
             
             data.append({
                 'id': call.id,
-                'prompt': prompt[:100] + '...' if len(str(prompt)) > 100 else str(prompt),
-                'response': response[:100] + '...' if len(str(response)) > 100 else str(response),
+                'prompt': prompt[:PROMPT_DISPLAY_TRUNCATION] + '...' if len(str(prompt)) > PROMPT_DISPLAY_TRUNCATION else str(prompt),
+                'response': response[:PROMPT_DISPLAY_TRUNCATION] + '...' if len(str(response)) > PROMPT_DISPLAY_TRUNCATION else str(response),
                 'provider': call.provider,
                 'tokens': tokens,
                 'latency_ms': call.latency_ms,

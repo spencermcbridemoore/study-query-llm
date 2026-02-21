@@ -27,6 +27,15 @@ from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Maximum number of deployments to probe when finding working deployment
+MAX_DEPLOYMENT_PROBE_COUNT = 10
+
+# Test prompt used for deployment probing
+DEPLOYMENT_PROBE_PROMPT = "Hi"
+
+# Maximum tokens for deployment probing
+DEPLOYMENT_PROBE_MAX_TOKENS = 1
+
 
 class AzureOpenAIProvider(BaseLLMProvider):
     """
@@ -248,13 +257,13 @@ class AzureOpenAIProvider(BaseLLMProvider):
         )
         
         try:
-            for model_id in chat_models[:10]:  # Limit to first 10 to avoid too many API calls
+            for model_id in chat_models[:MAX_DEPLOYMENT_PROBE_COUNT]:  # Limit to avoid too many API calls
                 try:
                     # Try a minimal completion to test if this works as a deployment
                     await test_client.chat.completions.create(
                         model=model_id,
-                        messages=[{"role": "user", "content": "Hi"}],
-                        max_tokens=1
+                        messages=[{"role": "user", "content": DEPLOYMENT_PROBE_PROMPT}],
+                        max_tokens=DEPLOYMENT_PROBE_MAX_TOKENS
                     )
                     return model_id  # Found a working one!
                 except Exception:

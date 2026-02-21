@@ -60,6 +60,9 @@ DEPLOYMENT_MAX_TOKENS: Dict[str, int] = {
     # Add more as needed
 }
 
+# Default maximum tokens when deployment isn't in DEPLOYMENT_MAX_TOKENS
+DEFAULT_MAX_TOKENS = 8191
+
 
 def estimate_tokens(text: str, model: Optional[str] = None) -> int:
     """
@@ -321,7 +324,7 @@ class EmbeddingService:
         # Try to infer from deployment name patterns
         # text-embedding-3-* and text-embedding-ada-002 typically have 8191 token limit
         if "text-embedding-3" in deployment or "text-embedding-ada-002" in deployment:
-            limit = 8191
+            limit = DEFAULT_MAX_TOKENS
             self._deployment_limits_cache[cache_key] = limit
             logger.info(f"Inferred max tokens for {deployment}: {limit}")
             return limit

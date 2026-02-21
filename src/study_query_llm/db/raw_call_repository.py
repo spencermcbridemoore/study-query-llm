@@ -14,6 +14,9 @@ from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Multiplier for overfetching when searching by prompt (to filter in Python)
+SEARCH_OVERFETCH_MULTIPLIER = 10
+
 
 class RawCallRepository:
     """
@@ -303,7 +306,7 @@ class RawCallRepository:
         all_calls = self.session.query(RawCall)\
             .filter(RawCall.modality == 'text')\
             .order_by(desc(RawCall.created_at))\
-            .limit(limit * 10)\
+            .limit(limit * SEARCH_OVERFETCH_MULTIPLIER)\
             .all()  # Get more to filter from
         
         matches = []

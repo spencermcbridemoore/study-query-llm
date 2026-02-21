@@ -42,6 +42,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Truncation length for text storage in metadata
+TEXT_STORAGE_TRUNCATION = 500
+
 
 @dataclass
 class SummarizationRequest:
@@ -189,7 +192,7 @@ class SummarizationService:
                 }
 
                 metadata_json = {
-                    "original_text": text[:500],  # Truncate for storage
+                    "original_text": text[:TEXT_STORAGE_TRUNCATION],  # Truncate for storage
                 }
                 if request.group_id:
                     metadata_json["group_id"] = request.group_id
@@ -223,7 +226,7 @@ class SummarizationService:
             else:
                 # Log success
                 metadata_json = {
-                    "original_text": text[:500],  # Truncate for storage
+                    "original_text": text[:TEXT_STORAGE_TRUNCATION],  # Truncate for storage
                 }
                 if request.group_id:
                     metadata_json["group_id"] = request.group_id

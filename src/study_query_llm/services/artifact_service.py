@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Default artifact directory
+DEFAULT_ARTIFACT_DIR = "artifacts"
+
 
 class ArtifactService:
     """
@@ -51,7 +54,7 @@ class ArtifactService:
     def __init__(
         self,
         repository: Optional["RawCallRepository"] = None,
-        artifact_dir: str = "artifacts",
+        artifact_dir: str = DEFAULT_ARTIFACT_DIR,
     ):
         """
         Initialize the artifact service.

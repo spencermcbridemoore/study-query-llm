@@ -18,6 +18,9 @@ from ..config import config as default_config
 
 logger = logging.getLogger(__name__)
 
+# Default cache TTL in seconds
+DEFAULT_CACHE_TTL_SECONDS = 3600
+
 
 class ModelRegistry:
     """
@@ -28,7 +31,7 @@ class ModelRegistry:
         self,
         factory: Optional[ProviderFactory] = None,
         cache_path: Optional[Path] = None,
-        ttl_seconds: int = 3600,
+        ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
     ) -> None:
         self.factory = factory or ProviderFactory(default_config)
         self.ttl_seconds = ttl_seconds

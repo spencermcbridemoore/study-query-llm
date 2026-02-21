@@ -240,7 +240,7 @@ def run_sweep(
     return SweepResult(
         pca=pca_meta,
         by_k=by_k,
-        Z=Z if cfg.compute_stability else None,
+        Z=Z,  # Always attach so notebooks can compute silhouette from Z when dist not saved
         Z_norm=Z_norm,
         dist=dist,
     )

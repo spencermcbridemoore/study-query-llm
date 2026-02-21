@@ -133,7 +133,6 @@ class ProviderFactory:
         provider_name = provider_name.lower()
         
         if provider_name == "azure":
-            from .azure_provider import AzureOpenAIProvider
             provider_config = self.config.get_provider_config("azure")
             return await AzureOpenAIProvider.list_deployments(provider_config)
         elif provider_name in ["openai", "hyperbolic"]:

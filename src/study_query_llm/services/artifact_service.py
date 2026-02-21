@@ -25,7 +25,6 @@ Usage:
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
 import numpy as np
@@ -441,7 +440,7 @@ class ArtifactService:
 
         return artifact_id
 
-    def load_artifact(self, uri: str, artifact_type: str) -> Any:
+    def load_artifact(self, uri: str, artifact_type: str) -> Union[Dict[str, Any], np.ndarray, list]:
         """
         Load an artifact from URI.
 

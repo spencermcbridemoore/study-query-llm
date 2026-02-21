@@ -5,6 +5,7 @@ Defines the database schema for storing LLM inference runs.
 """
 
 from datetime import datetime, timezone
+from typing import Dict, Any
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Float, Text
 from sqlalchemy.orm import declarative_base
 
@@ -49,7 +50,7 @@ class InferenceRun(Base):
             f"created_at={self.created_at})>"
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """
         Convert model instance to dictionary.
         

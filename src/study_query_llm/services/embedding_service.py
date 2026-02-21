@@ -40,7 +40,7 @@ from openai import AsyncAzureOpenAI
 from openai.types.embedding import Embedding
 from openai import InternalServerError, APIConnectionError, RateLimitError
 
-from ..config import Config, ProviderConfig
+from ..config import Config
 from ..providers.factory import ProviderFactory
 from ..utils.logging_config import get_logger
 

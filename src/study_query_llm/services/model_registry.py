@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from ..providers.factory import ProviderFactory
 from ..config import config as default_config
+
+logger = logging.getLogger(__name__)
 
 
 class ModelRegistry:
@@ -56,7 +59,10 @@ class ModelRegistry:
         except ValueError:
             return True
         age_seconds = (datetime.now(timezone.utc) - parsed).total_seconds()
-        return age_seconds >= self.ttl_seconds
+        is_stale = age_seconds >= self.ttl_seconds
+        if is_stale:
+            logger.debug(f"Cache is stale (age: {age_seconds:.0f}s, TTL: {self.ttl_seconds}s)")
+        return is_stale
 
     async def refresh_provider(self, provider_name: str) -> dict:
         cache = self._load_cache()
@@ -70,12 +76,14 @@ class ModelRegistry:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "error": None,
             }
+            logger.info(f"Refreshed cache for provider '{provider_key}': {len(deployments)} models")
         except Exception as exc:  # noqa: BLE001 - surface error in cache
             provider_data = {
                 **provider_data,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "error": str(exc),
             }
+            logger.warning(f"Failed to refresh cache for provider '{provider_key}': {exc}")
 
         cache["providers"][provider_key] = provider_data
         self._write_cache(cache)

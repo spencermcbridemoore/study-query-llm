@@ -8,7 +8,7 @@ Designed for PostgreSQL with optional pgvector support.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 from sqlalchemy import (
     Column, Integer, String, DateTime, JSON, Float, Text, ForeignKey,
     Index, CheckConstraint
@@ -73,7 +73,7 @@ class RawCall(BaseV2):
             f"created_at={self.created_at})>"
         )
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary."""
         return {
             'id': self.id,
@@ -140,7 +140,7 @@ class Group(BaseV2):
             f"name={self.name}, created_at={self.created_at})>"
         )
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary."""
         return {
             'id': self.id,
@@ -191,7 +191,7 @@ class GroupMember(BaseV2):
             f"call_id={self.call_id}, added_at={self.added_at})>"
         )
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary."""
         return {
             'id': self.id,
@@ -242,7 +242,7 @@ class CallArtifact(BaseV2):
             f"artifact_type={self.artifact_type}, uri={self.uri})>"
         )
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary."""
         return {
             'id': self.id,
@@ -304,7 +304,7 @@ class GroupLink(BaseV2):
             f"position={self.position})>"
         )
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary."""
         return {
             'id': self.id,
@@ -358,7 +358,7 @@ class EmbeddingVector(BaseV2):
             f"dimension={self.dimension})>"
         )
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model instance to dictionary."""
         return {
             'id': self.id,

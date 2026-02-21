@@ -5,10 +5,13 @@ This service provides business logic for analyzing stored inference data,
 transforming raw database queries into analysis-ready DataFrames.
 """
 
+import logging
 import pandas as pd
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from ..db.raw_call_repository import RawCallRepository
+
+logger = logging.getLogger(__name__)
 
 
 class StudyService:
@@ -58,6 +61,7 @@ class StudyService:
         stats = self.repository.get_provider_stats()
         
         if not stats:
+            logger.info("No provider stats found, returning empty DataFrame")
             return pd.DataFrame()
         
         df = pd.DataFrame(stats)
@@ -67,6 +71,7 @@ class StudyService:
             # Example pricing: $0.00002 per token (adjust based on actual pricing)
             df['avg_cost_estimate'] = df['avg_tokens'] * 0.00002
             df['total_cost_estimate'] = df['total_tokens'] * 0.00002
+            logger.debug(f"Calculated cost estimates for {len(df)} providers")
 
         return df
 
@@ -95,6 +100,7 @@ class StudyService:
         )
 
         if not calls:
+            logger.info(f"No recent inferences found (provider={provider}, limit={limit})")
             return pd.DataFrame()
 
         data = []

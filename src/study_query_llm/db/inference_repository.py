@@ -6,7 +6,7 @@ LLM inference runs. Uses the Repository pattern to abstract database details.
 """
 
 from datetime import datetime
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from .models import InferenceRun
@@ -52,7 +52,7 @@ class InferenceRepository:
         provider: str,
         tokens: Optional[int] = None,
         latency_ms: Optional[float] = None,
-        metadata: Optional[dict] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         batch_id: Optional[str] = None
     ) -> int:
         """
@@ -165,7 +165,7 @@ class InferenceRepository:
 
         return query.all()
 
-    def get_provider_stats(self) -> List[dict]:
+    def get_provider_stats(self) -> List[Dict[str, Any]]:
         """
         Get aggregate statistics by provider.
         

@@ -20,7 +20,7 @@ class ClusteringResult:
     labels: np.ndarray
     objective: float
     n_iter: int = 0
-    metadata: Dict[str, Any] = None
+    metadata: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         """Initialize metadata if None."""

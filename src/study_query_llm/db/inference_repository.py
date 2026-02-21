@@ -1,10 +1,12 @@
 """
-Inference Repository - Database operations for inference runs.
+Inference Repository - Database operations for inference runs (V1 -- deprecated).
 
-This repository handles all database interactions for storing and querying
-LLM inference runs. Uses the Repository pattern to abstract database details.
+.. deprecated::
+    Use :class:`~study_query_llm.db.raw_call_repository.RawCallRepository` and
+    the v2 schema for all new work.
 """
 
+import warnings
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
@@ -37,10 +39,17 @@ class InferenceRepository:
     def __init__(self, session: Session):
         """
         Initialize repository with a database session.
+
+        .. deprecated:: Use ``RawCallRepository`` instead.
         
         Args:
             session: SQLAlchemy Session instance
         """
+        warnings.warn(
+            "InferenceRepository (V1) is deprecated; use RawCallRepository",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.session = session
 
     # ========== WRITE OPERATIONS ==========

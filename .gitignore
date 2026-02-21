@@ -118,6 +118,16 @@ Thumbs.db
 # Experimental results directory (pickle files with sweep/clustering results)
 experimental_results/
 
+# Log files
+*.log
+
+# Data directory (keep sample data)
+data/
+!data/sample_data.csv
+
+# Backup directories
+backup*/
+
 # Debug logs
 .cursor/debug.log
 notebooks/.cursor/debug.log

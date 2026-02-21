@@ -8,61 +8,22 @@ statistics including percentiles.
 
 import os
 import sys
+import pickle
+import json
 import numpy as np
 from typing import List, Tuple, Dict, Any
 
-# Add src to path for imports
+# Add src and repo root to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Import the data loading functions from the experimental script
-from run_experimental_sweep import (
+from scripts.run_experimental_sweep import (
     BENCHMARK_SOURCES,
     load_benchmark_dataset,
 )
+from scripts.common.data_utils import flatten_prompt_dict, clean_texts
 
-# Import estela dictionary loading
-import pickle
-import json
-import os
-
-
-def _is_prompt_key(key: str) -> bool:
-    """Check if a key represents a prompt."""
-    key_lower = key.lower()
-    return "prompt" in key_lower
-
-
-def flatten_prompt_dict(data, path=()):
-    """Flatten nested prompt dictionary into a flat map of key tuples -> prompt strings."""
-    flat = {}
-
-    if isinstance(data, dict):
-        for key, value in data.items():
-            new_path = path + (key,)
-            if isinstance(key, str) and _is_prompt_key(key) and isinstance(value, str):
-                flat[new_path] = value
-            else:
-                flat.update(flatten_prompt_dict(value, new_path))
-    elif isinstance(data, list):
-        for i, value in enumerate(data):
-            new_path = path + (f"[{i}]",)
-            flat.update(flatten_prompt_dict(value, new_path))
-
-    return flat
-
-
-def _clean_texts(texts_list: List[str]) -> List[str]:
-    """Clean and filter texts."""
-    cleaned = []
-    for text in texts_list:
-        if text is None:
-            continue
-        if not isinstance(text, str):
-            text = str(text)
-        text = text.replace("\x00", "").strip()
-        if text:  # Only keep non-empty strings
-            cleaned.append(text)
-    return cleaned
+_clean_texts = clean_texts  # backward-compat alias
 
 
 def load_estela_dict() -> Tuple[str, List[str]]:

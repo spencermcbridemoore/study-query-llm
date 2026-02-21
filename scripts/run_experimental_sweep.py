@@ -30,15 +30,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import numpy as np
 
-# Add src to path for imports
+# Add src and repo root to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-# Output directory for pickle files
-OUTPUT_DIR = Path(__file__).parent.parent / "experimental_results"
-OUTPUT_DIR.mkdir(exist_ok=True)
-
-# Optional file cache for 30k seed-42 runs (no errors if missing)
-EMBEDDING_CACHE_DIR = os.environ.get("EMBEDDING_CACHE_DIR") or str(Path(__file__).parent.parent / "data" / "embedding_cache")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -47,6 +41,16 @@ from study_query_llm.services import get_embeddings_with_file_cache
 from study_query_llm.services.summarization_service import SummarizationService, SummarizationRequest
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
+
+from scripts.common.embedding_utils import fetch_embeddings_async
+from scripts.common.sweep_utils import (
+    create_paraphraser_for_llm,
+    save_single_sweep_result as save_results,
+    OUTPUT_DIR,
+)
+
+# Optional file cache for 30k seed-42 runs (no errors if missing)
+EMBEDDING_CACHE_DIR = os.environ.get("EMBEDDING_CACHE_DIR") or str(Path(__file__).parent.parent / "data" / "embedding_cache")
 
 # Try to apply nest_asyncio for Jupyter compatibility
 try:
@@ -521,169 +525,6 @@ def sample_with_label_constraint(
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-async def fetch_embeddings_async(
-    texts_list: List[str],
-    deployment: str,
-    db: DatabaseConnectionV2,
-    timeout: float = 600.0,  # 10 minutes timeout
-    chunk_size: Optional[int] = None,
-) -> np.ndarray:
-    """Fetch embeddings asynchronously with optional true API batching.
-
-    Args:
-        texts_list: List of texts to embed.
-        deployment: Embedding deployment name.
-        db: Database connection (used for cache lookup and persistence).
-        timeout: Wall-clock timeout in seconds for the whole call (default 600 s).
-            Increase this (e.g. 7200) when using chunk_size with large lists.
-        chunk_size: When provided, use true API batching: process chunks of this
-            size sequentially, sending one multi-input ``embeddings.create`` call
-            per chunk.  DB cache lookup per chunk avoids re-fetching on restart.
-            When None (default), retain the original concurrent per-text behaviour.
-    """
-    async def _fetch():
-        with db.session_scope() as session:
-            repo = RawCallRepository(session)
-            service = EmbeddingService(repository=repo)
-            
-            # Create embedding requests (one per text)
-            requests = [
-                EmbeddingRequest(text=text, deployment=deployment)
-                for text in texts_list
-            ]
-            
-            # Get embeddings (will use cache if available)
-            responses = await service.get_embeddings_batch(requests, chunk_size=chunk_size)
-            
-            # Extract vectors
-            embeddings = [resp.vector for resp in responses]
-            
-            return np.asarray(embeddings, dtype=np.float64)
-    
-    try:
-        return await asyncio.wait_for(_fetch(), timeout=timeout)
-    except asyncio.TimeoutError:
-        raise TimeoutError(f"Embedding fetch timed out after {timeout} seconds for {len(texts_list)} texts")
-
-
-def create_paraphraser_for_llm(
-    llm_deployment: str, db: DatabaseConnectionV2
-) -> callable:
-    """Create a synchronous paraphraser function for a specific LLM deployment."""
-    if llm_deployment is None:
-        return None
-
-    async def _paraphrase_batch_async(texts: List[str]) -> str:
-        """Async wrapper for summarization with timeout."""
-        async def _summarize():
-            with db.session_scope() as session:
-                repo = RawCallRepository(session)
-                service = SummarizationService(repository=repo)
-
-                combined_text = "Summarize the following texts into a single coherent summary:\n\n"
-                for i, text in enumerate(texts, 1):
-                    combined_text += f"Text {i}:\n{text}\n\n"
-                
-                request = SummarizationRequest(
-                    texts=[combined_text],
-                    llm_deployment=llm_deployment,
-                    temperature=0.2,
-                    max_tokens=256,
-                )
-                
-                try:
-                    result = await service.summarize_batch(request)
-                    if result.summaries and len(result.summaries) > 0:
-                        return result.summaries[0]
-                    else:
-                        return texts[0] if texts else ""
-                except Exception as e:
-                    # Handle content filter errors gracefully
-                    error_msg = str(e)
-                    if "content_filter" in error_msg or "ResponsibleAIPolicyViolation" in error_msg:
-                        print(f"          [WARN] Content filtered, using original text")
-                    else:
-                        print(f"          [WARN] Summarization error: {error_msg[:100]}")
-                    return texts[0] if texts else ""
-        
-        try:
-            return await asyncio.wait_for(_summarize(), timeout=300.0)  # 5 minutes timeout
-        except asyncio.TimeoutError:
-            print(f"      [WARN] Summarization timed out, using first text as fallback")
-            return texts[0] if texts else ""
-
-    def paraphrase_batch_sync(texts: List[str]) -> str:
-        """Synchronous wrapper that returns a single summary string."""
-        try:
-            loop = asyncio.get_event_loop()
-            if not loop.is_closed():
-                loop.close()
-            asyncio.set_event_loop(None)
-        except RuntimeError:
-            pass
-        
-        return asyncio.run(_paraphrase_batch_async(texts))
-
-    return paraphrase_batch_sync
-
-
-def save_results(
-    result: Any,
-    output_file: str,
-    ground_truth_labels: Optional[np.ndarray] = None,
-    dataset_name: str = "unknown",
-    metadata: Optional[Dict[str, Any]] = None,
-) -> str:
-    """Save results to a pickle file."""
-    save_data = {
-        "pca": result.pca,
-        "by_k": {},
-    }
-    
-    if result.Z is not None:
-        save_data["Z"] = result.Z.tolist()
-    if result.Z_norm is not None:
-        save_data["Z_norm"] = result.Z_norm.tolist()
-    if result.dist is not None:
-        save_data["dist"] = result.dist.tolist()
-
-    for k, k_data in result.by_k.items():
-        save_data["by_k"][k] = {
-            "representatives": k_data.get("representatives", []),
-            "labels": (
-                k_data.get("labels", []).tolist()
-                if hasattr(k_data.get("labels"), "tolist")
-                else k_data.get("labels", [])
-            ),
-            "labels_all": (
-                [
-                    l.tolist() if hasattr(l, "tolist") else l
-                    for l in k_data.get("labels_all", [])
-                ]
-                if k_data.get("labels_all") is not None
-                else None
-            ),
-            "objective": k_data.get("objective", {}),
-            "objectives": k_data.get("objectives", []),
-            "stability": k_data.get("stability"),
-        }
-
-    final_data = {
-        "result": save_data,
-        "ground_truth_labels": (
-            ground_truth_labels.tolist()
-            if ground_truth_labels is not None
-            else None
-        ),
-        "dataset_name": dataset_name,
-        "metadata": metadata or {},
-    }
-
-    with open(output_file, "wb") as f:
-        pickle.dump(final_data, f)
-
-    return output_file
 
 
 # ============================================================================

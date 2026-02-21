@@ -21,10 +21,10 @@ from datetime import datetime
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
-from tqdm.asyncio import tqdm as async_tqdm
 
-# Add src to path for imports
+# Add src and repo root to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -32,6 +32,13 @@ from study_query_llm.services.embedding_service import EmbeddingService, Embeddi
 from study_query_llm.services.summarization_service import SummarizationService, SummarizationRequest
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
+
+from scripts.common.data_utils import flatten_prompt_dict, clean_texts, is_prompt_key
+from scripts.common.embedding_utils import fetch_embeddings_async
+from scripts.common.sweep_utils import (
+    create_paraphraser_for_llm,
+    save_batch_sweep_results as save_results,
+)
 
 # Try to apply nest_asyncio for Jupyter compatibility
 try:
@@ -82,161 +89,7 @@ if not DATABASE_URL:
 # Helper Functions
 # ============================================================================
 
-def _is_prompt_key(key: str) -> bool:
-    """Check if a key represents a prompt."""
-    key_lower = key.lower()
-    return "prompt" in key_lower
-
-
-def flatten_prompt_dict(data, path=()):
-    """Flatten nested prompt dictionary into a flat map of key tuples -> prompt strings."""
-    flat = {}
-
-    if isinstance(data, dict):
-        for key, value in data.items():
-            new_path = path + (key,)
-            if isinstance(key, str) and _is_prompt_key(key) and isinstance(value, str):
-                flat[new_path] = value
-            else:
-                flat.update(flatten_prompt_dict(value, new_path))
-    elif isinstance(data, list):
-        for i, value in enumerate(data):
-            new_path = path + (f"[{i}]",)
-            flat.update(flatten_prompt_dict(value, new_path))
-
-    return flat
-
-
-def _clean_texts(texts_list: List[str]) -> List[str]:
-    """Clean and filter texts."""
-    cleaned = []
-    for text in texts_list:
-        if text is None:
-            continue
-        if not isinstance(text, str):
-            text = str(text)
-        text = text.replace("\x00", "").strip()
-        if text:  # Only keep non-empty strings
-            cleaned.append(text)
-    return cleaned
-
-
-async def fetch_embeddings_async(
-    texts_list: List[str],
-    deployment: str,
-    db: DatabaseConnectionV2,
-) -> np.ndarray:
-    """Fetch or create embeddings using EmbeddingService."""
-    with db.session_scope() as session:
-        repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
-
-        # Create embedding requests
-        requests = [
-            EmbeddingRequest(text=text, deployment=deployment)
-            for text in texts_list
-        ]
-
-        # Get embeddings (will use cache if available)
-        responses = await service.get_embeddings_batch(requests)
-
-        # Extract vectors
-        embeddings = [resp.vector for resp in responses]
-
-        return np.asarray(embeddings, dtype=np.float64)
-
-
-def create_paraphraser_for_llm(
-    llm_deployment: str, db: DatabaseConnectionV2
-) -> callable:
-    """Create a synchronous paraphraser function for a specific LLM deployment."""
-    if llm_deployment is None:
-        return None
-
-    async def _paraphrase_batch_async(texts: List[str]) -> List[str]:
-        """Async wrapper for summarization."""
-        with db.session_scope() as session:
-            repo = RawCallRepository(session)
-            service = SummarizationService(repository=repo)
-
-            request = SummarizationRequest(
-                texts=texts,
-                llm_deployment=llm_deployment,
-                temperature=0.2,
-                max_tokens=128,
-            )
-
-            result = await service.summarize_batch(request)
-            return result.summaries
-
-    def paraphrase_batch_sync(texts: List[str]) -> List[str]:
-        """Synchronous wrapper for run_sweep."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, we need to use nest_asyncio
-                return loop.run_until_complete(_paraphrase_batch_async(texts))
-        except RuntimeError:
-            pass
-        return asyncio.run(_paraphrase_batch_async(texts))
-
-    return paraphrase_batch_sync
-
-
-def save_results(
-    all_results: Dict[str, Any],
-    output_file: str = None,
-) -> str:
-    """Save results to a pickle file."""
-    if output_file is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Save to experimental_results directory (consistent with other sweep scripts)
-        output_dir = Path(__file__).parent.parent / "experimental_results"
-        output_dir.mkdir(exist_ok=True)
-        output_file = str(output_dir / f"pca_kllmeans_sweep_results_{timestamp}.pkl")
-
-    # Prepare results for saving
-    save_results = {}
-    for summarizer_name, result in all_results.items():
-        save_results[summarizer_name] = {
-            "pca": result.pca,
-            "by_k": {},
-        }
-
-        # Save distance matrices for later metric computation
-        if result.Z is not None:
-            save_results[summarizer_name]["Z"] = result.Z.tolist()
-        if result.Z_norm is not None:
-            save_results[summarizer_name]["Z_norm"] = result.Z_norm.tolist()
-        if result.dist is not None:
-            save_results[summarizer_name]["dist"] = result.dist.tolist()
-
-        # Save all data for each K value
-        for k, k_data in result.by_k.items():
-            save_results[summarizer_name]["by_k"][k] = {
-                "representatives": k_data.get("representatives", []),
-                "labels": (
-                    k_data.get("labels", []).tolist()
-                    if hasattr(k_data.get("labels"), "tolist")
-                    else k_data.get("labels", [])
-                ),
-                "labels_all": (
-                    [
-                        l.tolist() if hasattr(l, "tolist") else l
-                        for l in k_data.get("labels_all", [])
-                    ]
-                    if k_data.get("labels_all") is not None
-                    else None
-                ),
-                "objective": k_data.get("objective", {}),
-                "objectives": k_data.get("objectives", []),
-                "stability": k_data.get("stability"),
-            }
-
-    with open(output_file, "wb") as f:
-        pickle.dump(save_results, f)
-
-    return output_file
+_clean_texts = clean_texts  # backward-compat alias
 
 
 # ============================================================================

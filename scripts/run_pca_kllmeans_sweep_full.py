@@ -22,15 +22,14 @@ import asyncio
 import argparse
 import pickle
 import time
-import threading
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
-from tqdm.asyncio import tqdm as async_tqdm
 
-# Add src to path for imports
+# Add src and repo root to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -38,6 +37,13 @@ from study_query_llm.services.embedding_service import EmbeddingService, Embeddi
 from study_query_llm.services.summarization_service import SummarizationService, SummarizationRequest
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
+
+from scripts.common.data_utils import flatten_prompt_dict, clean_texts, is_prompt_key
+from scripts.common.embedding_utils import fetch_embeddings_async
+from scripts.common.sweep_utils import (
+    create_paraphraser_for_llm,
+    save_batch_sweep_results as save_results,
+)
 
 # Try to apply nest_asyncio for Jupyter compatibility
 try:
@@ -89,43 +95,7 @@ if not DATABASE_URL:
 # Data Loading Functions
 # ============================================================================
 
-def _is_prompt_key(key: str) -> bool:
-    """Check if a key represents a prompt."""
-    key_lower = key.lower()
-    return "prompt" in key_lower
-
-
-def flatten_prompt_dict(data, path=()):
-    """Flatten nested prompt dictionary into a flat map of key tuples -> prompt strings."""
-    flat = {}
-
-    if isinstance(data, dict):
-        for key, value in data.items():
-            new_path = path + (key,)
-            if isinstance(key, str) and _is_prompt_key(key) and isinstance(value, str):
-                flat[new_path] = value
-            else:
-                flat.update(flatten_prompt_dict(value, new_path))
-    elif isinstance(data, list):
-        for i, value in enumerate(data):
-            new_path = path + (f"[{i}]",)
-            flat.update(flatten_prompt_dict(value, new_path))
-
-    return flat
-
-
-def _clean_texts(texts_list: List[str]) -> List[str]:
-    """Clean and filter texts."""
-    cleaned = []
-    for text in texts_list:
-        if text is None:
-            continue
-        if not isinstance(text, str):
-            text = str(text)
-        text = text.replace("\x00", "").strip()
-        if text:  # Only keep non-empty strings
-            cleaned.append(text)
-    return cleaned
+_clean_texts = clean_texts  # backward-compat alias
 
 
 def load_20newsgroups_subset(n_samples=400, categories=None, random_state=42):
@@ -294,160 +264,6 @@ def load_data(
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-async def fetch_embeddings_async(
-    texts_list: List[str],
-    deployment: str,
-    db: DatabaseConnectionV2,
-) -> np.ndarray:
-    """Fetch or create embeddings using EmbeddingService."""
-    with db.session_scope() as session:
-        repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
-
-        # Create embedding requests
-        requests = [
-            EmbeddingRequest(text=text, deployment=deployment)
-            for text in texts_list
-        ]
-
-        # Get embeddings (will use cache if available)
-        responses = await service.get_embeddings_batch(requests)
-
-        # Extract vectors
-        embeddings = [resp.vector for resp in responses]
-
-        return np.asarray(embeddings, dtype=np.float64)
-
-
-def create_paraphraser_for_llm(
-    llm_deployment: str, db: DatabaseConnectionV2
-) -> callable:
-    """Create a synchronous paraphraser function for a specific LLM deployment."""
-    if llm_deployment is None:
-        return None
-
-    async def _paraphrase_batch_async(texts: List[str]) -> str:
-        """Async wrapper for summarization.
-        
-        Combines multiple texts into a single summary for the cluster.
-        """
-        with db.session_scope() as session:
-            repo = RawCallRepository(session)
-            service = SummarizationService(repository=repo)
-
-            # Combine texts into a single prompt for summarization
-            # Format: "Summarize the following texts into a single coherent summary:\n\nText 1: ...\n\nText 2: ..."
-            combined_text = "Summarize the following texts into a single coherent summary:\n\n"
-            for i, text in enumerate(texts, 1):
-                combined_text += f"Text {i}:\n{text}\n\n"
-            
-            # Summarize the combined text
-            request = SummarizationRequest(
-                texts=[combined_text],  # Single combined text
-                llm_deployment=llm_deployment,
-                temperature=0.2,
-                max_tokens=256,  # Increased for combined summaries
-            )
-
-            result = await service.summarize_batch(request)
-            # Return the single summary
-            if result.summaries and len(result.summaries) > 0:
-                return result.summaries[0]
-            else:
-                # Fallback: return first text if summarization fails
-                return texts[0] if texts else ""
-
-    def paraphrase_batch_sync(texts: List[str]) -> str:
-        """Synchronous wrapper that returns a single summary string.
-        
-        Always creates a fresh event loop using asyncio.run() when called from
-        ThreadPoolExecutor to ensure proper cleanup of async resources (httpx clients).
-        This prevents "Task exception was never retrieved" errors from cleanup tasks.
-        """
-        # Clear any existing event loop in this thread to ensure asyncio.run() works
-        try:
-            loop = asyncio.get_event_loop()
-            if not loop.is_closed():
-                # Close and remove existing loop to allow asyncio.run() to create a new one
-                loop.close()
-            asyncio.set_event_loop(None)
-        except RuntimeError:
-            # No loop exists, which is fine
-            pass
-        
-        # Always use asyncio.run() when in a thread pool executor
-        # This creates a fresh loop and properly handles cleanup of all async resources
-        # before closing the loop, preventing httpx client cleanup errors
-        return asyncio.run(_paraphrase_batch_async(texts))
-
-    return paraphrase_batch_sync
-
-
-def save_results(
-    all_results: Dict[str, Any],
-    output_file: str = None,
-    ground_truth_labels: Optional[np.ndarray] = None,
-    dataset_name: str = "unknown",
-) -> str:
-    """Save results to a pickle file in the new format with metadata."""
-    if output_file is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"pca_kllmeans_sweep_results_{timestamp}.pkl"
-
-    # Prepare results for saving
-    save_results = {}
-    for summarizer_name, result in all_results.items():
-        save_results[summarizer_name] = {
-            "pca": result.pca,
-            "by_k": {},
-        }
-
-        # Save distance matrices for later metric computation
-        if result.Z is not None:
-            save_results[summarizer_name]["Z"] = result.Z.tolist()
-        if result.Z_norm is not None:
-            save_results[summarizer_name]["Z_norm"] = result.Z_norm.tolist()
-        if result.dist is not None:
-            save_results[summarizer_name]["dist"] = result.dist.tolist()
-
-        # Save all data for each K value
-        for k, k_data in result.by_k.items():
-            save_results[summarizer_name]["by_k"][k] = {
-                "representatives": k_data.get("representatives", []),
-                "labels": (
-                    k_data.get("labels", []).tolist()
-                    if hasattr(k_data.get("labels"), "tolist")
-                    else k_data.get("labels", [])
-                ),
-                "labels_all": (
-                    [
-                        l.tolist() if hasattr(l, "tolist") else l
-                        for l in k_data.get("labels_all", [])
-                    ]
-                    if k_data.get("labels_all") is not None
-                    else None
-                ),
-                "objective": k_data.get("objective", {}),
-                "objectives": k_data.get("objectives", []),
-                "stability": k_data.get("stability"),
-            }
-
-    # Wrap in new format with metadata (compatible with notebook)
-    final_data = {
-        "summarizers": save_results,
-        "ground_truth_labels": (
-            ground_truth_labels.tolist()
-            if ground_truth_labels is not None
-            else None
-        ),
-        "dataset_name": dataset_name,
-    }
-
-    with open(output_file, "wb") as f:
-        pickle.dump(final_data, f)
-
-    return output_file
 
 
 # ============================================================================

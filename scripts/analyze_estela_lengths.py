@@ -12,35 +12,11 @@ import pickle
 import numpy as np
 from typing import List, Tuple, Dict
 
-# Add src to path for imports
+# Add src and repo root to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-
-def _is_prompt_key(key: str) -> bool:
-    """Check if a key represents a prompt."""
-    key_lower = key.lower()
-    return "prompt" in key_lower
-
-
-def flatten_prompt_dict(data, path=()):
-    """
-    Flatten nested prompt dictionary into a flat map of key tuples -> prompt strings.
-    
-    This function is copied from notebooks/pca_kllmeans_sweep.ipynb
-    """
-    flat = {}
-    if isinstance(data, dict):
-        for key, value in data.items():
-            new_path = path + (key,)
-            if isinstance(key, str) and _is_prompt_key(key) and isinstance(value, str):
-                flat[new_path] = value
-            else:
-                flat.update(flatten_prompt_dict(value, new_path))
-    elif isinstance(data, list):
-        for i, value in enumerate(data):
-            new_path = path + (f"[{i}]",)
-            flat.update(flatten_prompt_dict(value, new_path))
-    return flat
+from scripts.common.data_utils import flatten_prompt_dict
 
 
 def load_estela_dict() -> List[str]:

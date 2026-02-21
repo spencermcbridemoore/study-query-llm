@@ -26,18 +26,31 @@ import asyncio
 import argparse
 from pathlib import Path
 
-# Add parent directory to path
+# Add parent directory and src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-# Import base sweep functionality
-from scripts.run_experimental_sweep import (
-    DatabaseConnectionV2, DATABASE_URL,
-    fetch_embeddings_async, create_paraphraser_for_llm, save_results,
-    load_dbpedia_full, load_yahoo_answers_full,
-    estimate_tokens, DEPLOYMENT_MAX_TOKENS,
-    OUTPUT_DIR, LLM_SUMMARIZERS,
-    SweepConfig
+# Core library imports
+from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYMENT_MAX_TOKENS
+from study_query_llm.algorithms import SweepConfig
+
+# Shared script utilities
+from scripts.common.embedding_utils import fetch_embeddings_async
+from scripts.common.sweep_utils import (
+    create_paraphraser_for_llm,
+    save_single_sweep_result as save_results,
+    OUTPUT_DIR,
 )
+from scripts.run_experimental_sweep import (
+    load_dbpedia_full,
+    load_yahoo_answers_full,
+    LLM_SUMMARIZERS,
+)
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
 from study_query_llm.services import get_embeddings_with_file_cache
 import numpy as np
 import time

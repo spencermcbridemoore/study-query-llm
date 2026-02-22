@@ -50,6 +50,17 @@ async def list_deployments():
                 print(f"      Created: {model.created}")
             if hasattr(model, 'owned_by'):
                 print(f"      Owned by: {model.owned_by}")
+            caps = getattr(model, "capabilities", None)
+            if caps is not None:
+                chat = getattr(caps, "chat_completion", "N/A")
+                embeddings = getattr(caps, "embeddings", "N/A")
+                completion = getattr(caps, "completion", "N/A")
+                print(f"      Chat completion: {chat}")
+                print(f"      Embeddings:      {embeddings}")
+                print(f"      Completion:      {completion}")
+            lifecycle = getattr(model, "lifecycle_status", None)
+            if lifecycle:
+                print(f"      Lifecycle:       {lifecycle}")
             print()
 
         if not deployment_found:

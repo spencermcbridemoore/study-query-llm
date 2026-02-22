@@ -21,7 +21,7 @@ from typing import Any, Optional
 from openai import AsyncAzureOpenAI
 from openai.types.chat import ChatCompletion
 
-from .base import BaseLLMProvider, ProviderResponse
+from .base import BaseLLMProvider, DeploymentInfo, ProviderResponse
 from ..config import ProviderConfig
 from ..utils.logging_config import get_logger
 
@@ -181,43 +181,59 @@ class AzureOpenAIProvider(BaseLLMProvider):
         return f"azure_openai_{self.deployment_name}"
 
     @staticmethod
-    async def list_deployments(azure_config: ProviderConfig) -> list[str]:
+    async def list_deployments(azure_config: ProviderConfig) -> list[DeploymentInfo]:
         """
-        List available Azure OpenAI model IDs.
-        
+        List available Azure OpenAI model deployments with capability info.
+
         NOTE: This returns MODEL IDs, not deployment names!
         Deployment names are custom names you create in Azure Portal.
         Model IDs from this list may or may not work as deployment names.
-        
+
         To find actual deployment names:
         1. Check Azure Portal > Your Resource > Deployments
         2. Or use find_working_deployment.py to test common names
         3. Or use Azure Management API (requires additional credentials)
-        
+
         This is a static method that can be called without creating a provider instance,
         useful for querying available models before selecting one.
-        
+
         Args:
             azure_config: ProviderConfig with Azure credentials (endpoint, api_key, api_version)
-        
+
         Returns:
-            List of model IDs (may work as deployment names, but not guaranteed)
-        
+            List of DeploymentInfo objects with id, capabilities, and lifecycle info.
+            The ``capabilities`` dict may include keys: 'chat_completion', 'completion',
+            'embeddings', 'fine_tune', 'inference'. Missing keys mean the API did not
+            report that capability (treat as unknown, not necessarily False).
+
         Raises:
             Exception: If unable to connect or list models
         """
-        from typing import List
-        
         client = AsyncAzureOpenAI(
             api_key=azure_config.api_key,
             api_version=azure_config.api_version,
             azure_endpoint=azure_config.endpoint,
         )
-        
+
         try:
             models = await client.models.list()
-            model_ids = [model.id for model in models.data]
-            return model_ids
+            results: list[DeploymentInfo] = []
+            for model in models.data:
+                caps: dict[str, bool] = {}
+                raw_caps = getattr(model, "capabilities", None)
+                if raw_caps is not None:
+                    for cap_name in ("chat_completion", "completion", "embeddings", "fine_tune", "inference"):
+                        val = getattr(raw_caps, cap_name, None)
+                        if val is not None:
+                            caps[cap_name] = bool(val)
+                results.append(DeploymentInfo(
+                    id=model.id,
+                    provider="azure",
+                    capabilities=caps,
+                    lifecycle_status=getattr(model, "lifecycle_status", None),
+                    created_at=getattr(model, "created_at", None),
+                ))
+            return results
         except Exception as e:
             raise Exception(f"Failed to list Azure models: {str(e)}") from e
         finally:
@@ -239,7 +255,8 @@ class AzureOpenAIProvider(BaseLLMProvider):
             First working deployment name, or None if none found
         """
         if model_ids is None:
-            model_ids = await AzureOpenAIProvider.list_deployments(azure_config)
+            deployment_infos = await AzureOpenAIProvider.list_deployments(azure_config)
+            model_ids = [d.id for d in deployment_infos]
         
         # Filter to likely chat completion models
         chat_models = [m for m in model_ids if any(

@@ -6,7 +6,7 @@ needing to import provider classes directly.
 """
 
 from typing import Optional
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, DeploymentInfo
 from .azure_provider import AzureOpenAIProvider
 from ..config import ProviderConfig, Config
 
@@ -111,37 +111,52 @@ class ProviderFactory:
         """
         return self.config.get_available_providers()
     
-    async def list_provider_deployments(self, provider_name: str) -> list[str]:
+    async def list_provider_deployments(
+        self,
+        provider_name: str,
+        modality: Optional[str] = None,
+    ) -> list[DeploymentInfo]:
         """
-        List available deployments/models for a provider.
-        
+        List available deployments/models for a provider with optional modality filtering.
+
         This is provider-specific functionality. Currently only Azure OpenAI
         supports listing deployments. Other providers may return empty list
         or raise NotImplementedError.
-        
+
         Args:
             provider_name: Name of provider ('azure', 'openai', 'hyperbolic')
-        
+            modality: Optional capability filter. Accepted values:
+                - ``"chat"`` -- only deployments that support chat completions
+                - ``"embedding"`` -- only deployments that support embeddings
+                - ``None`` (default) -- return all deployments unfiltered
+
         Returns:
-            List of deployment/model names available for the provider
-        
+            List of DeploymentInfo objects for the provider, optionally filtered
+            by modality. Deployments with no capability data are included when
+            no modality filter is specified.
+
         Raises:
             ValueError: If provider is unknown
             NotImplementedError: If provider doesn't support listing deployments
             Exception: If unable to query deployments
         """
         provider_name = provider_name.lower()
-        
+
         if provider_name == "azure":
             provider_config = self.config.get_provider_config("azure")
-            return await AzureOpenAIProvider.list_deployments(provider_config)
+            deployments = await AzureOpenAIProvider.list_deployments(provider_config)
         elif provider_name in ["openai", "hyperbolic"]:
-            # These providers don't have a concept of "deployments" like Azure
-            # They use model names directly
             raise NotImplementedError(
                 f"Provider '{provider_name}' does not support listing deployments. "
                 f"Use model names directly in configuration."
             )
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
+
+        if modality == "chat":
+            deployments = [d for d in deployments if d.supports_chat]
+        elif modality == "embedding":
+            deployments = [d for d in deployments if d.supports_embeddings]
+
+        return deployments
 

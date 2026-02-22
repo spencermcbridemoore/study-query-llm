@@ -8,12 +8,13 @@ All providers implement the BaseLLMProvider interface and return
 standardized ProviderResponse objects.
 """
 
-from .base import BaseLLMProvider, ProviderResponse
+from .base import BaseLLMProvider, DeploymentInfo, ProviderResponse
 from .azure_provider import AzureOpenAIProvider
 from .factory import ProviderFactory
 
 __all__ = [
     "BaseLLMProvider",
+    "DeploymentInfo",
     "ProviderResponse",
     "AzureOpenAIProvider",
     "ProviderFactory",

@@ -5,8 +5,10 @@ Tests the ProviderFactory for creating provider instances.
 """
 
 import pytest
+from unittest.mock import AsyncMock, patch
 from study_query_llm.providers.factory import ProviderFactory
 from study_query_llm.providers.azure_provider import AzureOpenAIProvider
+from study_query_llm.providers.base import DeploymentInfo
 from study_query_llm.config import ProviderConfig, Config
 
 
@@ -111,4 +113,58 @@ def test_factory_with_custom_config():
     # Should work the same as default
     providers = factory.get_available_providers()
     assert "azure" in providers
+
+
+@pytest.mark.asyncio
+async def test_list_provider_deployments_no_filter():
+    """list_provider_deployments with no modality returns all deployments."""
+    mock_deployments = [
+        DeploymentInfo(id="gpt-4o", provider="azure", capabilities={"chat_completion": True, "embeddings": False}),
+        DeploymentInfo(id="embed-v4", provider="azure", capabilities={"chat_completion": False, "embeddings": True}),
+    ]
+    factory = ProviderFactory()
+    with patch.object(AzureOpenAIProvider, "list_deployments", new_callable=AsyncMock, return_value=mock_deployments):
+        result = await factory.list_provider_deployments("azure")
+    assert len(result) == 2
+    assert {d.id for d in result} == {"gpt-4o", "embed-v4"}
+
+
+@pytest.mark.asyncio
+async def test_list_provider_deployments_chat_filter():
+    """list_provider_deployments with modality='chat' returns only chat models."""
+    mock_deployments = [
+        DeploymentInfo(id="gpt-4o", provider="azure", capabilities={"chat_completion": True, "embeddings": False}),
+        DeploymentInfo(id="embed-v4", provider="azure", capabilities={"chat_completion": False, "embeddings": True}),
+    ]
+    factory = ProviderFactory()
+    with patch.object(AzureOpenAIProvider, "list_deployments", new_callable=AsyncMock, return_value=mock_deployments):
+        result = await factory.list_provider_deployments("azure", modality="chat")
+    assert len(result) == 1
+    assert result[0].id == "gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_list_provider_deployments_embedding_filter():
+    """list_provider_deployments with modality='embedding' returns only embedding models."""
+    mock_deployments = [
+        DeploymentInfo(id="gpt-4o", provider="azure", capabilities={"chat_completion": True, "embeddings": False}),
+        DeploymentInfo(id="embed-v4", provider="azure", capabilities={"chat_completion": False, "embeddings": True}),
+    ]
+    factory = ProviderFactory()
+    with patch.object(AzureOpenAIProvider, "list_deployments", new_callable=AsyncMock, return_value=mock_deployments):
+        result = await factory.list_provider_deployments("azure", modality="embedding")
+    assert len(result) == 1
+    assert result[0].id == "embed-v4"
+
+
+@pytest.mark.asyncio
+async def test_list_provider_deployments_returns_deployment_info():
+    """list_provider_deployments returns DeploymentInfo objects, not plain strings."""
+    mock_deployments = [
+        DeploymentInfo(id="gpt-4o", provider="azure", capabilities={"chat_completion": True}),
+    ]
+    factory = ProviderFactory()
+    with patch.object(AzureOpenAIProvider, "list_deployments", new_callable=AsyncMock, return_value=mock_deployments):
+        result = await factory.list_provider_deployments("azure")
+    assert all(isinstance(d, DeploymentInfo) for d in result)
 

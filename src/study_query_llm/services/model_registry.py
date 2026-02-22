@@ -73,13 +73,20 @@ class ModelRegistry:
         provider_data = cache["providers"].get(provider_key, {})
 
         try:
-            deployments = await self.factory.list_provider_deployments(provider_key)
+            deployment_infos = await self.factory.list_provider_deployments(provider_key)
             provider_data = {
-                "models": sorted(deployments),
+                "models": sorted([d.id for d in deployment_infos]),
+                "model_details": {
+                    d.id: {
+                        "capabilities": d.capabilities,
+                        "lifecycle_status": d.lifecycle_status,
+                    }
+                    for d in deployment_infos
+                },
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "error": None,
             }
-            logger.info(f"Refreshed cache for provider '{provider_key}': {len(deployments)} models")
+            logger.info(f"Refreshed cache for provider '{provider_key}': {len(deployment_infos)} models")
         except Exception as exc:  # noqa: BLE001 - surface error in cache
             provider_data = {
                 **provider_data,
@@ -105,6 +112,44 @@ class ModelRegistry:
             provider_data = await self.refresh_provider(provider_key)
 
         return list(provider_data.get("models", []))
+
+    async def list_models_by_modality(
+        self,
+        provider_name: str = "azure",
+        modality: Optional[str] = None,
+        refresh_if_stale: bool = True,
+    ) -> list[str]:
+        """Return model IDs filtered by modality using cached capability data.
+
+        Args:
+            provider_name: Provider to query.
+            modality: ``"chat"`` for chat-completion models, ``"embedding"`` for
+                embedding models, or ``None`` to return all models.
+            refresh_if_stale: If True, refresh the cache when stale.
+
+        Returns:
+            Sorted list of matching model ID strings.
+        """
+        cache = self._load_cache()
+        provider_key = provider_name.lower()
+        provider_data = cache["providers"].get(provider_key)
+
+        if provider_data is None or (refresh_if_stale and self._is_stale(provider_data)):
+            provider_data = await self.refresh_provider(provider_key)
+
+        all_models: list[str] = list(provider_data.get("models", []))
+        if modality is None:
+            return all_models
+
+        cap_key = {"chat": "chat_completion", "embedding": "embeddings"}.get(modality)
+        if cap_key is None:
+            return all_models
+
+        model_details: dict = provider_data.get("model_details", {})
+        return [
+            m for m in all_models
+            if model_details.get(m, {}).get("capabilities", {}).get(cap_key, False)
+        ]
 
     async def refresh_all(self, provider_names: Optional[list[str]] = None) -> dict:
         if provider_names is None:

@@ -5,7 +5,7 @@ Tests the abstract base class and ProviderResponse dataclass.
 """
 
 import pytest
-from study_query_llm.providers.base import BaseLLMProvider, ProviderResponse
+from study_query_llm.providers.base import BaseLLMProvider, DeploymentInfo, ProviderResponse
 
 
 class MockProvider(BaseLLMProvider):
@@ -116,6 +116,56 @@ async def test_provider_response_optional_fields():
     assert full.latency_ms == 50.0
     assert full.metadata == {"key": "value"}
     assert full.raw_response == {"raw": "data"}
+
+
+def test_deployment_info_defaults():
+    """DeploymentInfo with no capabilities should have all supports_* as False."""
+    info = DeploymentInfo(id="gpt-4o", provider="azure")
+    assert info.id == "gpt-4o"
+    assert info.provider == "azure"
+    assert info.capabilities == {}
+    assert info.lifecycle_status is None
+    assert info.created_at is None
+    assert info.supports_chat is False
+    assert info.supports_embeddings is False
+    assert info.supports_completion is False
+
+
+def test_deployment_info_chat_model():
+    """Chat completion model should have supports_chat True."""
+    info = DeploymentInfo(
+        id="gpt-4o",
+        provider="azure",
+        capabilities={"chat_completion": True, "completion": True, "embeddings": False},
+    )
+    assert info.supports_chat is True
+    assert info.supports_completion is True
+    assert info.supports_embeddings is False
+
+
+def test_deployment_info_embedding_model():
+    """Embedding model should have supports_embeddings True and supports_chat False."""
+    info = DeploymentInfo(
+        id="text-embedding-ada-002",
+        provider="azure",
+        capabilities={"chat_completion": False, "embeddings": True, "completion": False},
+    )
+    assert info.supports_chat is False
+    assert info.supports_embeddings is True
+    assert info.supports_completion is False
+
+
+def test_deployment_info_lifecycle_and_created_at():
+    """Optional metadata fields should round-trip correctly."""
+    info = DeploymentInfo(
+        id="gpt-4o",
+        provider="azure",
+        capabilities={"chat_completion": True},
+        lifecycle_status="generally-available",
+        created_at=1646126127,
+    )
+    assert info.lifecycle_status == "generally-available"
+    assert info.created_at == 1646126127
 
 
 @pytest.mark.asyncio

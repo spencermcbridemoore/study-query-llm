@@ -56,7 +56,8 @@ def create_inference_ui() -> pn.viewable.Viewable:
             load_deployments_button.disabled = True
 
             factory = ProviderFactory()
-            deployments = await factory.list_provider_deployments(provider_select.value)
+            deployment_infos = await factory.list_provider_deployments(provider_select.value, modality="chat")
+            deployments = [d.id for d in deployment_infos]
 
             if deployments:
                 deployment_select.options = deployments

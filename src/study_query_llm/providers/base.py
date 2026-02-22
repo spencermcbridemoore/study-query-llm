@@ -7,7 +7,7 @@ ensuring consistent behavior across different provider implementations.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 
 @dataclass
@@ -41,6 +41,42 @@ class ProviderResponse:
             f"ProviderResponse(provider={self.provider}, "
             f"{tokens_str}, {latency_str})"
         )
+
+
+@dataclass
+class DeploymentInfo:
+    """Structured info about a model deployment and its capabilities.
+
+    Attributes:
+        id: Deployment/model identifier (as returned by the provider API)
+        provider: Provider name ('azure', 'openai', 'hyperbolic')
+        capabilities: Dict of capability flags keyed by capability name.
+            Known keys from Azure: 'chat_completion', 'completion',
+            'embeddings', 'fine_tune', 'inference'.
+        lifecycle_status: Lifecycle stage from Azure (e.g. 'generally-available', 'preview')
+        created_at: Unix timestamp of model creation (if available)
+    """
+
+    id: str
+    provider: str
+    capabilities: dict[str, bool] = field(default_factory=dict)
+    lifecycle_status: Optional[str] = None
+    created_at: Optional[int] = None
+
+    @property
+    def supports_chat(self) -> bool:
+        """True if this deployment supports chat completions."""
+        return self.capabilities.get("chat_completion", False)
+
+    @property
+    def supports_embeddings(self) -> bool:
+        """True if this deployment supports embeddings."""
+        return self.capabilities.get("embeddings", False)
+
+    @property
+    def supports_completion(self) -> bool:
+        """True if this deployment supports text completions."""
+        return self.capabilities.get("completion", False)
 
 
 class BaseLLMProvider(ABC):

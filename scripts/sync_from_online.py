@@ -3,7 +3,8 @@
 Incremental sync from online Neon PostgreSQL to local backup PostgreSQL.
 
 Pulls all records from the online DB that are newer than what's already in
-the local DB. Only downloads, never uploads. Safe to run repeatedly.
+the local DB. Only downloads, never uploads. Safe to run repeatedly
+(uses ON CONFLICT DO NOTHING so duplicates are skipped automatically).
 
 Prerequisites:
     docker compose --profile postgres up -d db
@@ -19,199 +20,213 @@ Usage:
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
-from sqlalchemy import func, text
+from sqlalchemy import create_engine, func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import sessionmaker, make_transient
+from sqlalchemy.pool import NullPool
 
 load_dotenv()
 
 
-def get_max_local_id(local_session) -> int:
+def get_max_local_id(local_engine) -> int:
     """Return the highest raw_call id already in the local DB, or 0 if empty."""
     from study_query_llm.db.models_v2 import RawCall
-    result = local_session.query(func.max(RawCall.id)).scalar()
-    return result or 0
+    Session = sessionmaker(bind=local_engine, autocommit=False, autoflush=False)
+    session = Session()
+    try:
+        result = session.query(func.max(RawCall.id)).scalar()
+        return result or 0
+    finally:
+        session.close()
 
 
-def sync_groups(online_session, local_session, group_ids: list[int], dry_run: bool) -> dict[int, int]:
+def warmup_neon(online_engine) -> None:
     """
-    Copy groups from online to local by online id.
+    Send a trivial query to wake up Neon's serverless compute.
 
-    Returns a mapping of online_group_id -> local_group_id so GroupMember
-    rows can be remapped correctly (local auto-increment may differ).
+    Neon free-tier compute sleeps after ~5 min of inactivity and can take
+    30-120 s to cold-start. This warmup prevents the first batch query from
+    appearing to hang silently.
     """
-    from study_query_llm.db.models_v2 import Group
-
-    if not group_ids:
-        return {}
-
-    online_groups = online_session.query(Group).filter(Group.id.in_(group_ids)).all()
-    id_map: dict[int, int] = {}
-
-    for g in online_groups:
-        # Check if already exists locally by (group_type, name)
-        existing = local_session.query(Group).filter_by(
-            group_type=g.group_type,
-            name=g.name,
-        ).first()
-
-        if existing:
-            id_map[g.id] = existing.id
-            continue
-
-        if dry_run:
-            id_map[g.id] = g.id  # placeholder for dry-run reporting
-            continue
-
-        local_group = Group(
-            group_type=g.group_type,
-            name=g.name,
-            description=g.description,
-            created_at=g.created_at,
-            metadata_json=g.metadata_json,
-        )
-        local_session.add(local_group)
-        local_session.flush()
-        local_session.refresh(local_group)
-        id_map[g.id] = local_group.id
-
-    return id_map
+    print("Warming up Neon connection (may take up to 120s on cold start)...", flush=True)
+    t0 = time.time()
+    with online_engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    print(f"Neon connected in {time.time()-t0:.1f}s", flush=True)
 
 
-def sync_batch(
-    online_session,
-    local_session,
-    min_id: int,
-    batch_size: int,
-    dry_run: bool,
-) -> tuple[int, int]:
+def fetch_batch(online_engine, min_id: int, batch_size: int) -> dict:
     """
-    Pull one batch of RawCalls (id > min_id) from online and insert into local.
+    Open a fresh short-lived Neon connection, fetch one batch, close it.
 
-    Returns (records_synced, next_min_id).
+    Returns dict with: calls, members, group_ids, vectors, artifacts.
+    Empty dict means no more records.
     """
     from study_query_llm.db.models_v2 import (
         RawCall, GroupMember, EmbeddingVector, CallArtifact
     )
 
-    # Fetch the next batch of calls from online
-    online_calls = (
-        online_session.query(RawCall)
-        .filter(RawCall.id > min_id)
-        .order_by(RawCall.id)
-        .limit(batch_size)
-        .all()
+    Session = sessionmaker(bind=online_engine, autocommit=False, autoflush=False)
+    session = Session()
+    try:
+        online_calls = (
+            session.query(RawCall)
+            .filter(RawCall.id > min_id)
+            .order_by(RawCall.id)
+            .limit(batch_size)
+            .all()
+        )
+        if not online_calls:
+            return {}
+
+        call_ids = [c.id for c in online_calls]
+
+        members = (
+            session.query(GroupMember)
+            .filter(GroupMember.call_id.in_(call_ids))
+            .all()
+        )
+        group_ids = list({m.group_id for m in members})
+
+        vectors = (
+            session.query(EmbeddingVector)
+            .filter(EmbeddingVector.call_id.in_(call_ids))
+            .all()
+        )
+        artifacts = (
+            session.query(CallArtifact)
+            .filter(CallArtifact.call_id.in_(call_ids))
+            .all()
+        )
+
+        # Detach all objects from session so data is accessible after close
+        for obj in online_calls + members + vectors + artifacts:
+            session.expunge(obj)
+            make_transient(obj)
+
+        return {
+            "calls": online_calls,
+            "members": members,
+            "group_ids": group_ids,
+            "vectors": vectors,
+            "artifacts": artifacts,
+        }
+    finally:
+        session.close()
+
+
+def fetch_groups(online_engine, group_ids: list[int]) -> list:
+    """Fetch Group rows from Neon in a fresh connection."""
+    if not group_ids:
+        return []
+    from study_query_llm.db.models_v2 import Group
+    Session = sessionmaker(bind=online_engine, autocommit=False, autoflush=False)
+    session = Session()
+    try:
+        groups = session.query(Group).filter(Group.id.in_(group_ids)).all()
+        for g in groups:
+            session.expunge(g)
+            make_transient(g)
+        return groups
+    finally:
+        session.close()
+
+
+def write_batch(local_engine, batch: dict, online_groups: list) -> None:
+    """
+    Insert a fetched batch into the local DB using ON CONFLICT DO NOTHING.
+
+    This makes the sync idempotent — safe to re-run if interrupted.
+    """
+    from study_query_llm.db.models_v2 import (
+        RawCall, Group, GroupMember, EmbeddingVector, CallArtifact
     )
 
-    if not online_calls:
-        return 0, min_id
-
-    call_ids = [c.id for c in online_calls]
-    next_min = call_ids[-1]
-
-    if not dry_run:
-        # Insert RawCalls — skip any that somehow already exist
-        for c in online_calls:
-            exists = local_session.query(RawCall).filter_by(id=c.id).first()
-            if exists:
-                continue
-            local_call = RawCall(
-                id=c.id,
-                provider=c.provider,
-                model=c.model,
-                modality=c.modality,
-                status=c.status,
-                request_json=c.request_json,
-                response_json=c.response_json,
-                error_json=c.error_json,
-                latency_ms=c.latency_ms,
-                tokens_json=c.tokens_json,
-                metadata_json=c.metadata_json,
-                created_at=c.created_at,
-            )
-            local_session.add(local_call)
-        local_session.flush()
-
-    # Pull associated GroupMembers and sync their Groups first
-    members = (
-        online_session.query(GroupMember)
-        .filter(GroupMember.call_id.in_(call_ids))
-        .all()
-    )
-    group_ids = list({m.group_id for m in members})
-    group_id_map = sync_groups(online_session, local_session, group_ids, dry_run)
-
-    if not dry_run:
-        for m in members:
-            local_group_id = group_id_map.get(m.group_id, m.group_id)
-            exists = local_session.query(GroupMember).filter_by(
-                group_id=local_group_id, call_id=m.call_id
+    Session = sessionmaker(bind=local_engine, autocommit=False, autoflush=False)
+    session = Session()
+    try:
+        # Upsert Groups (match on group_type + name)
+        group_id_map: dict[int, int] = {}
+        for g in online_groups:
+            existing = session.query(Group).filter_by(
+                group_type=g.group_type, name=g.name
             ).first()
-            if exists:
-                continue
-            local_member = GroupMember(
-                group_id=local_group_id,
-                call_id=m.call_id,
-                added_at=m.added_at,
-                position=m.position,
-                role=m.role,
-            )
-            local_session.add(local_member)
+            if existing:
+                group_id_map[g.id] = existing.id
+            else:
+                local_group = Group(
+                    group_type=g.group_type, name=g.name,
+                    description=g.description, created_at=g.created_at,
+                    metadata_json=g.metadata_json,
+                )
+                session.add(local_group)
+                session.flush()
+                session.refresh(local_group)
+                group_id_map[g.id] = local_group.id
 
-    # Pull EmbeddingVectors
-    vectors = (
-        online_session.query(EmbeddingVector)
-        .filter(EmbeddingVector.call_id.in_(call_ids))
-        .all()
-    )
-    if not dry_run:
-        for v in vectors:
-            exists = local_session.query(EmbeddingVector).filter_by(
-                call_id=v.call_id
-            ).first()
-            if exists:
-                continue
-            local_vec = EmbeddingVector(
-                call_id=v.call_id,
-                vector=v.vector,
-                dimension=v.dimension,
-                norm=v.norm,
-                metadata_json=v.metadata_json,
-            )
-            local_session.add(local_vec)
+        # Insert RawCalls — ON CONFLICT DO NOTHING via raw SQL for efficiency
+        if batch["calls"]:
+            stmt = pg_insert(RawCall).values([
+                dict(
+                    id=c.id, provider=c.provider, model=c.model,
+                    modality=c.modality, status=c.status,
+                    request_json=c.request_json, response_json=c.response_json,
+                    error_json=c.error_json, latency_ms=c.latency_ms,
+                    tokens_json=c.tokens_json, metadata_json=c.metadata_json,
+                    created_at=c.created_at,
+                )
+                for c in batch["calls"]
+            ]).on_conflict_do_nothing(index_elements=["id"])
+            session.execute(stmt)
 
-    # Pull CallArtifacts
-    artifacts = (
-        online_session.query(CallArtifact)
-        .filter(CallArtifact.call_id.in_(call_ids))
-        .all()
-    )
-    if not dry_run:
-        for a in artifacts:
-            exists = local_session.query(CallArtifact).filter_by(
+        # Insert GroupMembers — ON CONFLICT DO NOTHING
+        if batch["members"]:
+            stmt = pg_insert(GroupMember).values([
+                dict(
+                    group_id=group_id_map.get(m.group_id, m.group_id),
+                    call_id=m.call_id,
+                    added_at=m.added_at,
+                    position=m.position,
+                    role=m.role,
+                )
+                for m in batch["members"]
+            ]).on_conflict_do_nothing(index_elements=["group_id", "call_id"])
+            session.execute(stmt)
+
+        # Insert EmbeddingVectors
+        for v in batch["vectors"]:
+            existing = session.query(EmbeddingVector).filter_by(call_id=v.call_id).first()
+            if not existing:
+                session.add(EmbeddingVector(
+                    call_id=v.call_id, vector=v.vector,
+                    dimension=v.dimension, norm=v.norm,
+                    metadata_json=v.metadata_json,
+                ))
+
+        # Insert CallArtifacts
+        for a in batch["artifacts"]:
+            existing = session.query(CallArtifact).filter_by(
                 call_id=a.call_id, uri=a.uri
             ).first()
-            if exists:
-                continue
-            local_art = CallArtifact(
-                call_id=a.call_id,
-                artifact_type=a.artifact_type,
-                uri=a.uri,
-                content_type=a.content_type,
-                byte_size=a.byte_size,
-                metadata_json=a.metadata_json,
-            )
-            local_session.add(local_art)
+            if not existing:
+                session.add(CallArtifact(
+                    call_id=a.call_id, artifact_type=a.artifact_type,
+                    uri=a.uri, content_type=a.content_type,
+                    byte_size=a.byte_size, metadata_json=a.metadata_json,
+                ))
 
-    if not dry_run:
-        local_session.flush()
-
-    return len(online_calls), next_min
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def main():
@@ -232,57 +247,56 @@ def main():
         print("ERROR: LOCAL_DATABASE_URL not set. Add it to .env or pass --local-url.")
         sys.exit(1)
 
-    from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-
     print(f"Online DB: ...@{online_url.split('@')[-1] if '@' in online_url else online_url}")
-    print(f"Local  DB: ...@{local_url.split('@')[-1] if '@' in local_url else local_url}")
+    print(f"Local  DB: ...@{local_url.split('@')[-1] if '@' in local_url else local_url}", flush=True)
     if args.dry_run:
-        print("[DRY RUN] No changes will be written.\n")
+        print("[DRY RUN] No changes will be written.\n", flush=True)
 
-    online_db = DatabaseConnectionV2(online_url, enable_pgvector=False)
-    local_db = DatabaseConnectionV2(local_url, enable_pgvector=False)
+    # NullPool: fresh connection per operation, avoids long-lived transaction issues
+    # with Neon's PgBouncer transaction-mode pooler
+    online_engine = create_engine(
+        online_url,
+        poolclass=NullPool,
+        connect_args={"connect_timeout": 120},
+    )
+    local_engine = create_engine(local_url, poolclass=NullPool)
+
+    # Wake up Neon's serverless compute before the batch loop
+    warmup_neon(online_engine)
+
+    current_min = get_max_local_id(local_engine)
+    print(f"Local max id : {current_min}", flush=True)
+    print("Starting sync...", flush=True)
 
     total_synced = 0
+    t_start = time.time()
 
-    with online_db.session_scope() as online_session:
-        with local_db.session_scope() as local_session:
-            max_local = get_max_local_id(local_session)
+    while True:
+        batch = fetch_batch(online_engine, current_min, args.batch_size)
+        if not batch:
+            break
 
-            # Count how many records online have id > max_local
-            from study_query_llm.db.models_v2 import RawCall
-            online_count = (
-                online_session.query(func.count(RawCall.id))
-                .filter(RawCall.id > max_local)
-                .scalar()
-            )
+        count = len(batch["calls"])
+        next_min = batch["calls"][-1].id
 
-            print(f"Local max id : {max_local}")
-            print(f"Records to sync: {online_count}")
+        if not args.dry_run:
+            online_groups = fetch_groups(online_engine, batch["group_ids"])
+            write_batch(local_engine, batch, online_groups)
 
-            if online_count == 0:
-                print("Already up to date.")
-                return
-
-            current_min = max_local
-            while True:
-                count, current_min = sync_batch(
-                    online_session,
-                    local_session,
-                    min_id=current_min,
-                    batch_size=args.batch_size,
-                    dry_run=args.dry_run,
-                )
-                if count == 0:
-                    break
-                total_synced += count
-                verb = "Would sync" if args.dry_run else "Synced"
-                print(f"  {verb} {total_synced} / {online_count} records (last id: {current_min})")
-
-            if not args.dry_run:
-                local_session.commit()
+        total_synced += count
+        current_min = next_min
+        elapsed = time.time() - t_start
+        rate = total_synced / elapsed if elapsed > 0 else 0
+        verb = "Would sync" if args.dry_run else "Synced"
+        print(
+            f"  {verb} {total_synced:,} records (last id: {current_min}, "
+            f"{rate:.0f} rec/s)",
+            flush=True,
+        )
 
     action = "Would sync" if args.dry_run else "Synced"
-    print(f"\n{action} {total_synced} records from online to local DB.")
+    elapsed = time.time() - t_start
+    print(f"\n{action} {total_synced:,} records in {elapsed:.0f}s.")
 
 
 if __name__ == "__main__":

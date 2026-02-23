@@ -41,10 +41,17 @@ logger = get_logger(__name__)
 # Standard group types
 GROUP_TYPE_DATASET = "dataset"
 GROUP_TYPE_EMBEDDING_BATCH = "embedding_batch"
-GROUP_TYPE_RUN = "run"
-GROUP_TYPE_STEP = "step"
 GROUP_TYPE_METRICS = "metrics"
 GROUP_TYPE_SUMMARIZATION_BATCH = "summarization_batch"
+
+# Clustering-specific group types
+GROUP_TYPE_CLUSTERING_RUN = "clustering_run"
+GROUP_TYPE_CLUSTERING_STEP = "clustering_step"
+GROUP_TYPE_CLUSTERING_SWEEP = "clustering_sweep"
+
+# Backward-compat aliases (these will be removed once all callers are updated)
+GROUP_TYPE_RUN = GROUP_TYPE_CLUSTERING_RUN
+GROUP_TYPE_STEP = GROUP_TYPE_CLUSTERING_STEP
 
 
 class ProvenanceService:
@@ -58,8 +65,9 @@ class ProvenanceService:
     Standard Group Types:
     - `dataset`: Input data collection (links to embedding RawCalls)
     - `embedding_batch`: Batch of embeddings created together
-    - `run`: Complete algorithm execution (e.g., PCA+KLLMeans sweep)
-    - `step`: Individual step within a run (e.g., "pca_projection", "clustering_k=5")
+    - `clustering_run`: Complete clustering algorithm execution
+    - `clustering_step`: Individual k-value step within a clustering run
+    - `clustering_sweep`: Parameter-grid execution of a clustering algorithm
     - `metrics`: Computed metrics/analysis results
     - `summarization_batch`: Batch of LLM summarization calls
     """
@@ -104,7 +112,7 @@ class ProvenanceService:
             metadata_json["config"] = config
 
         group_id = self.repository.create_group(
-            group_type=GROUP_TYPE_RUN,
+            group_type=GROUP_TYPE_CLUSTERING_RUN,
             name=name,
             description=description or f"Algorithm run: {algorithm}",
             metadata_json=metadata_json,
@@ -143,7 +151,7 @@ class ProvenanceService:
             metadata_json.update(metadata)
 
         group_id = self.repository.create_group(
-            group_type=GROUP_TYPE_STEP,
+            group_type=GROUP_TYPE_CLUSTERING_STEP,
             name=f"step_{step_name}",
             description=f"Step: {step_name}",
             metadata_json=metadata_json,
@@ -264,7 +272,7 @@ class ProvenanceService:
         raw_calls = self.repository.get_calls_in_group(run_id)
 
         # Get all step groups (groups with parent_run_id in metadata)
-        all_groups = session.query(Group).filter(Group.group_type == GROUP_TYPE_STEP).all()
+        all_groups = session.query(Group).filter(Group.group_type == GROUP_TYPE_CLUSTERING_STEP).all()
         step_groups = [
             g
             for g in all_groups
@@ -417,3 +425,68 @@ class ProvenanceService:
 
         logger.info(f"Created summarization batch group: id={group_id}, name={name}")
         return group_id
+
+    def create_clustering_sweep_group(
+        self,
+        sweep_name: str,
+        algorithm: str,
+        fixed_config: Dict[str, Any],
+        parameter_axes: Dict[str, Any],
+        description: Optional[str] = None,
+    ) -> int:
+        """
+        Create a clustering sweep group representing a full parameter-grid execution.
+
+        Args:
+            sweep_name: Human-readable name (e.g., "bigrun_300_feb2026")
+            algorithm: Algorithm identifier (e.g., "cosine_kllmeans_no_pca")
+            fixed_config: Dict of configuration values shared across all runs in the sweep
+            parameter_axes: Dict mapping axis name → list of values swept (e.g., {"datasets": [...]})
+            description: Optional description
+
+        Returns:
+            Group ID of the created clustering_sweep group
+        """
+        metadata_json = {
+            "sweep_name": sweep_name,
+            "algorithm": algorithm,
+            "fixed_config": fixed_config,
+            "parameter_axes": parameter_axes,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        group_id = self.repository.create_group(
+            group_type=GROUP_TYPE_CLUSTERING_SWEEP,
+            name=sweep_name,
+            description=description or f"Clustering sweep: {sweep_name} ({algorithm})",
+            metadata_json=metadata_json,
+        )
+
+        logger.info(f"Created clustering sweep group: id={group_id}, name={sweep_name}")
+        return group_id
+
+    def link_run_to_clustering_sweep(
+        self,
+        sweep_id: int,
+        run_id: int,
+        position: Optional[int] = None,
+    ) -> int:
+        """
+        Link a clustering_run group as a child of a clustering_sweep group.
+
+        Args:
+            sweep_id: ID of the parent clustering_sweep group
+            run_id: ID of the child clustering_run group
+            position: Optional ordering position
+
+        Returns:
+            GroupLink ID
+        """
+        link_id = self.repository.create_group_link(
+            parent_group_id=sweep_id,
+            child_group_id=run_id,
+            link_type="contains",
+            position=position,
+        )
+        logger.debug(f"Linked clustering_run {run_id} → clustering_sweep {sweep_id} (link {link_id})")
+        return link_id

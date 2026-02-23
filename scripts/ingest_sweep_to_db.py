@@ -208,7 +208,7 @@ def ingest_one_pkl(
 
     # Idempotency: check if already ingested
     existing = repository.session.query(Group).filter(
-        Group.group_type == "run",
+        Group.group_type == "clustering_run",
         sa_text("metadata_json->>'source_file' = :sf"),
     ).params(sf=source_file).first()
     if existing:
@@ -265,7 +265,7 @@ def ingest_one_pkl(
         repository.create_group_link(
             parent_group_id=run_id,
             child_group_id=step_id,
-            link_type="step",
+            link_type="clustering_step",
             position=k,
         )
 

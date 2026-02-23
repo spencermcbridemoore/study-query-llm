@@ -356,7 +356,7 @@ def ingest_result_to_db(
 
             # Idempotency: skip if already ingested under this run_key
             existing = session.query(Group).filter(
-                Group.group_type == "run",
+                Group.group_type == "clustering_run",
                 sa_text("metadata_json->>'run_key' = :rk"),
             ).params(rk=run_key).first()
             if existing:
@@ -415,7 +415,7 @@ def ingest_result_to_db(
                 repo.create_group_link(
                     parent_group_id=run_id,
                     child_group_id=step_id,
-                    link_type="step",
+                    link_type="clustering_step",
                     position=k,
                 )
 

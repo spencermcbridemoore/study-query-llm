@@ -29,13 +29,13 @@ def _source_tag(session, call_id: int) -> None:
 def _find_or_create_run(session, repository: RawCallRepository, run_name: str) -> int:
     """Return the id of an existing run group or create a new one."""
     existing = session.query(Group).filter(
-        Group.group_type == "run",
+        Group.group_type == "inference_run",
         Group.name == run_name,
     ).first()
     if existing:
         return existing.id
     return repository.create_group(
-        group_type="run",
+        group_type="inference_run",
         name=run_name,
         description="Run group created from Panel UI",
         metadata_json={"source": "panel_app"},

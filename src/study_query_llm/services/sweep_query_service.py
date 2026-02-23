@@ -9,7 +9,7 @@ instead of pkl files.  Rows are one-per-restart-per-k, matching the
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, List
 
 import pandas as pd
 from sqlalchemy import text as sa_text
@@ -34,24 +34,80 @@ class SweepQueryService:
     def __init__(self, repository: RawCallRepository):
         self.repository = repository
 
+    def list_clustering_sweeps(self) -> List[dict]:
+        """
+        Return all clustering_sweep groups as a list of summary dicts.
+
+        Each dict has: id, name, created_at, algorithm, n_runs, parameter_axes.
+        Suitable for populating a UI dropdown.
+        """
+        session = self.repository.session
+        sweeps = (
+            session.query(Group)
+            .filter(Group.group_type == "clustering_sweep")
+            .order_by(Group.created_at.desc())
+            .all()
+        )
+        result = []
+        for s in sweeps:
+            meta = s.metadata_json or {}
+            n_runs = (
+                session.query(GroupLink)
+                .filter(
+                    GroupLink.parent_group_id == s.id,
+                    GroupLink.link_type == "contains",
+                )
+                .count()
+            )
+            result.append({
+                "id": s.id,
+                "name": s.name,
+                "created_at": s.created_at,
+                "algorithm": meta.get("algorithm", "?"),
+                "n_runs": n_runs,
+                "parameter_axes": meta.get("parameter_axes", {}),
+            })
+        return result
+
     def get_sweep_metrics_df(
         self,
         dataset: Optional[str] = None,
         engine: Optional[str] = None,
         summarizer: Optional[str] = None,
+        clustering_sweep_id: Optional[int] = None,
     ) -> pd.DataFrame:
         """
         Query run groups and their step children, expand metric arrays
         into individual rows, and return a tidy DataFrame.
 
         Optional filters narrow the result set before expansion.
+        When ``clustering_sweep_id`` is provided only the clustering_run groups
+        that are children of that sweep (via a "contains" GroupLink) are returned.
         """
         session = self.repository.session
 
-        query = session.query(Group).filter(
-            Group.group_type == "run",
-            sa_text("metadata_json->>'algorithm' LIKE :alg"),
-        ).params(alg="cosine_kllmeans%")
+        if clustering_sweep_id is not None:
+            # Filter to runs that are children of the given sweep
+            child_links = (
+                session.query(GroupLink)
+                .filter(
+                    GroupLink.parent_group_id == clustering_sweep_id,
+                    GroupLink.link_type == "contains",
+                )
+                .all()
+            )
+            run_ids = [lnk.child_group_id for lnk in child_links]
+            if not run_ids:
+                return _empty_df()
+            query = session.query(Group).filter(
+                Group.group_type == "clustering_run",
+                Group.id.in_(run_ids),
+            )
+        else:
+            query = session.query(Group).filter(
+                Group.group_type == "clustering_run",
+                sa_text("metadata_json->>'algorithm' LIKE :alg"),
+            ).params(alg="cosine_kllmeans%")
         if dataset:
             query = query.filter(
                 sa_text("metadata_json->>'dataset' = :ds"),
@@ -82,7 +138,7 @@ class SweepQueryService:
                 session.query(GroupLink)
                 .filter(
                     GroupLink.parent_group_id == run.id,
-                    GroupLink.link_type == "step",
+                    GroupLink.link_type == "clustering_step",
                 )
                 .order_by(GroupLink.position)
                 .all()
@@ -146,7 +202,7 @@ class SweepQueryService:
         return (
             session.query(Group)
             .filter(
-                Group.group_type == "run",
+                Group.group_type == "clustering_run",
                 sa_text("metadata_json->>'algorithm' LIKE :alg"),
             )
             .params(alg="cosine_kllmeans%")

@@ -107,7 +107,7 @@ async def test_summarize_batch_with_group_id(mock_inference_service, db_connecti
 
         # Create a group
         group_id = repo.create_group(
-            group_type="run",
+            group_type="clustering_run",
             name="test_run",
             description="Test run",
         )

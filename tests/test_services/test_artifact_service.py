@@ -39,7 +39,7 @@ def test_store_sweep_results(db_connection, temp_artifact_dir):
 
         # Create a run group
         run_id = repo.create_group(
-            group_type="run",
+            group_type="clustering_run",
             name="test_run",
             description="Test run",
         )
@@ -91,7 +91,7 @@ def test_store_cluster_labels(db_connection, temp_artifact_dir):
         repo = RawCallRepository(session)
         service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
 
-        run_id = repo.create_group(group_type="run", name="test_run")
+        run_id = repo.create_group(group_type="clustering_run", name="test_run")
 
         # Service will create placeholder RawCall automatically
         labels = np.array([0, 1, 0, 1, 2, 0, 1])
@@ -124,7 +124,7 @@ def test_store_pca_components(db_connection, temp_artifact_dir):
         repo = RawCallRepository(session)
         service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
 
-        run_id = repo.create_group(group_type="run", name="test_run")
+        run_id = repo.create_group(group_type="clustering_run", name="test_run")
 
         # Service will create placeholder RawCall automatically
         components = np.random.rand(100, 64)  # 100 points, 64 dims
@@ -151,7 +151,7 @@ def test_store_metrics(db_connection, temp_artifact_dir):
         repo = RawCallRepository(session)
         service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
 
-        run_id = repo.create_group(group_type="run", name="test_run")
+        run_id = repo.create_group(group_type="clustering_run", name="test_run")
 
         # Service will create placeholder RawCall automatically
         metrics = {
@@ -183,7 +183,7 @@ def test_store_representatives(db_connection, temp_artifact_dir):
         repo = RawCallRepository(session)
         service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
 
-        run_id = repo.create_group(group_type="run", name="test_run")
+        run_id = repo.create_group(group_type="clustering_run", name="test_run")
 
         # Service will create placeholder RawCall automatically
         representatives = ["Question 1", "Question 2", "Question 3"]

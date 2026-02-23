@@ -7,12 +7,16 @@ Tests run/experiment provenance tracking via Groups and GroupMember.
 import pytest
 from study_query_llm.services.provenance_service import (
     ProvenanceService,
-    GROUP_TYPE_RUN,
-    GROUP_TYPE_STEP,
+    GROUP_TYPE_CLUSTERING_RUN,
+    GROUP_TYPE_CLUSTERING_STEP,
     GROUP_TYPE_DATASET,
     GROUP_TYPE_EMBEDDING_BATCH,
     GROUP_TYPE_SUMMARIZATION_BATCH,
 )
+
+# Aliases used by tests below
+GROUP_TYPE_RUN = GROUP_TYPE_CLUSTERING_RUN
+GROUP_TYPE_STEP = GROUP_TYPE_CLUSTERING_STEP
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 

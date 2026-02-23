@@ -219,22 +219,23 @@ def load_sweep_data(data_dir: str | Path) -> pd.DataFrame:
     data_dir = Path(data_dir)
     all_rows: list[dict] = []
 
-    # --- 50-runs files ---
-    for p in sorted(data_dir.glob("no_pca_50runs_*.pkl")):
-        try:
-            if p.stat().st_size == 0:
+    # --- 50-runs files (original and bigrun_300 series) ---
+    for pattern in ("no_pca_50runs_*.pkl", "bigrun_300_*.pkl"):
+        for p in sorted(data_dir.glob(pattern)):
+            try:
+                if p.stat().st_size == 0:
+                    continue
+                with open(p, "rb") as f:
+                    data = pickle.load(f)
+            except Exception as e:
+                logger.warning("Skip %s: %s", p.name, e)
                 continue
-            with open(p, "rb") as f:
-                data = pickle.load(f)
-        except Exception as e:
-            logger.warning("Skip %s: %s", p.name, e)
-            continue
-        if not isinstance(data, dict) or "result" not in data:
-            continue
-        try:
-            all_rows.extend(_rows_from_50runs({"data": data}))
-        except Exception as e:
-            logger.warning("Error parsing %s: %s", p.name, e)
+            if not isinstance(data, dict) or "result" not in data:
+                continue
+            try:
+                all_rows.extend(_rows_from_50runs({"data": data}))
+            except Exception as e:
+                logger.warning("Error parsing %s: %s", p.name, e)
 
     # --- multi-embedding sweep files ---
     for p in sorted(data_dir.glob("experimental_sweep_*.pkl")):
@@ -485,6 +486,16 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         width=420,
         placeholder="Path to folder containing .pkl files",
     )
+
+    # --- Widgets: clustering sweep selector (Database path only) ---
+    sweep_select = pn.widgets.Select(
+        name="Clustering Sweep",
+        options={"All": None},
+        value=None,
+        width=320,
+        visible=False,
+    )
+
     load_button = pn.widgets.Button(
         name="Load / Reload",
         button_type="primary",
@@ -664,6 +675,29 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     def on_source_change(event=None):
         is_files = source_toggle.value == "Files"
         data_dir_input.visible = is_files
+        sweep_select.visible = not is_files
+        if not is_files:
+            _populate_sweep_options()
+
+    def _populate_sweep_options():
+        """Fetch clustering_sweep list from DB and populate the selector."""
+        try:
+            from panel_app.helpers import get_db_connection
+            from study_query_llm.db.raw_call_repository import RawCallRepository
+            from study_query_llm.services.sweep_query_service import SweepQueryService
+            db = get_db_connection()
+            session = db.get_session()
+            repo = RawCallRepository(session)
+            svc = SweepQueryService(repo)
+            sweeps = svc.list_clustering_sweeps()
+            opts: dict = {"All": None}
+            for sw in sweeps:
+                label = f"{sw['name']}  ({sw['n_runs']} runs)"
+                opts[label] = sw["id"]
+            sweep_select.options = opts
+            sweep_select.value = None
+        except Exception as exc:
+            logger.warning("Could not populate sweep list: %s", exc)
 
     source_toggle.param.watch(on_source_change, "value")
 
@@ -731,7 +765,8 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         session = db.get_session()
         repo = RawCallRepository(session)
         svc = SweepQueryService(repo)
-        return svc.get_sweep_metrics_df()
+        clustering_sweep_id = sweep_select.value  # None means "All"
+        return svc.get_sweep_metrics_df(clustering_sweep_id=clustering_sweep_id)
 
     # --- Wire callbacks ---
     load_button.on_click(load_data)
@@ -749,7 +784,7 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     controls = pn.Column(
         pn.pane.Markdown("### Data Source"),
         source_toggle,
-        pn.Row(data_dir_input, load_button),
+        pn.Row(data_dir_input, sweep_select, load_button),
         load_status,
         pn.layout.Divider(),
         pn.pane.Markdown("### Axes"),

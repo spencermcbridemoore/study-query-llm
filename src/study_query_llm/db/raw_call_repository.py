@@ -836,7 +836,7 @@ class RawCallRepository:
         """
         links = self.session.query(GroupLink).filter_by(
             parent_group_id=run_id,
-            link_type="step",
+            link_type="clustering_step",
         ).order_by(GroupLink.position, GroupLink.created_at).all()
 
         step_ids = [link.child_group_id for link in links]

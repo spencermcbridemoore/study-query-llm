@@ -28,6 +28,7 @@ import numpy as np
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYMENT_MAX_TOKENS
+from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig
 
 from scripts.common.embedding_utils import fetch_embeddings_async
@@ -236,6 +237,7 @@ async def main(force: bool = False):
     # ------------------------------------------------------------------
     # Main sweep loop: dataset → embedding → summarizer
     # ------------------------------------------------------------------
+    run_ids_ingested: list[int] = []
     run_count = 0
     for dataset_name, info in loaded.items():
         texts = info["texts"]
@@ -341,12 +343,83 @@ async def main(force: bool = False):
                 print(f"  [PKL] {out_path.name}")
 
                 # 2. Ingest to NeonDB after pkl is confirmed written
-                ingest_result_to_db(result, metadata, gt_eng, db, run_key)
+                run_id = ingest_result_to_db(result, metadata, gt_eng, db, run_key)
+                if run_id is not None:
+                    run_ids_ingested.append(run_id)
 
     print(f"\n{'='*80}")
     print("[OK] All runs complete.")
     print(f"  Total sweeps executed: {run_count}/{total}")
     print("=" * 80)
+
+    # ------------------------------------------------------------------
+    # Register all newly ingested runs under a clustering_sweep group
+    # ------------------------------------------------------------------
+    if run_ids_ingested:
+        ts = datetime.now().strftime("%Y%m%d")
+        sweep_name = f"{OUT_PREFIX}_sweep_{ts}"
+        try:
+            with db.session_scope() as session:
+                from study_query_llm.db.models_v2 import Group, GroupLink
+                from study_query_llm.db.raw_call_repository import RawCallRepository
+                provenance = ProvenanceService(RawCallRepository(session))
+
+                existing = (
+                    session.query(Group)
+                    .filter(
+                        Group.group_type == "clustering_sweep",
+                        Group.name == sweep_name,
+                    )
+                    .first()
+                )
+                if existing:
+                    sweep_id = existing.id
+                    print(f"  [SWEEP] Using existing clustering_sweep '{sweep_name}' (id={sweep_id})")
+                else:
+                    sweep_id = provenance.create_clustering_sweep_group(
+                        sweep_name=sweep_name,
+                        algorithm="cosine_kllmeans_no_pca",
+                        fixed_config={
+                            "n_samples": ENTRY_MAX,
+                            "n_restarts": N_RESTARTS,
+                            "k_min": K_MIN,
+                            "k_max": K_MAX,
+                            **SWEEP_CONFIG.__dict__ if hasattr(SWEEP_CONFIG, "__dict__") else {},
+                        },
+                        parameter_axes={
+                            "datasets": list(loaded.keys()),
+                            "embedding_engines": EMBEDDING_ENGINES,
+                            "summarizers": [str(s) if s is not None else "None" for s in SUMMARIZERS],
+                        },
+                        description=(
+                            f"{OUT_PREFIX} sweep: {len(loaded)} datasets x "
+                            f"{len(EMBEDDING_ENGINES)} embeddings x "
+                            f"{len(SUMMARIZERS)} summarizers, "
+                            f"{N_RESTARTS} restarts each."
+                        ),
+                    )
+                    print(f"  [SWEEP] Created clustering_sweep '{sweep_name}' (id={sweep_id})")
+
+                linked = 0
+                for pos, run_id in enumerate(run_ids_ingested):
+                    existing_link = (
+                        session.query(GroupLink)
+                        .filter_by(
+                            parent_group_id=sweep_id,
+                            child_group_id=run_id,
+                            link_type="contains",
+                        )
+                        .first()
+                    )
+                    if not existing_link:
+                        provenance.link_run_to_clustering_sweep(sweep_id, run_id, position=pos)
+                        linked += 1
+
+                print(f"  [SWEEP] Linked {linked} new runs to sweep '{sweep_name}'.")
+        except Exception as exc:
+            import traceback
+            print(f"  [WARN] Failed to create/update clustering_sweep: {exc}")
+            traceback.print_exc()
 
 
 if __name__ == "__main__":

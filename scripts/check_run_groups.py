@@ -21,7 +21,7 @@ def main():
         
         # Find all run groups
         run_groups = session.query(Group).filter(
-            Group.group_type == "run"
+            Group.group_type == "clustering_run"
         ).all()
         
         print(f"Found {len(run_groups)} run group(s):")

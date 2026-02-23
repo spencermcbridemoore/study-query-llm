@@ -7,8 +7,8 @@ Summarizers: None, gpt-4o-mini, gpt-4o, gpt-5-chat, claude-opus-4-6
 Restarts  : 50  |  Sample: 300  |  k: 2–20  |  cosine, no PCA
 
 After each run:
-  1. Results saved to NeonDB immediately (Group/GroupLink via ProvenanceService).
-  2. Backup pkl written to experimental_results/ (for local analysis scripts).
+  1. Pkl written to experimental_results/ (compute is safe on disk first).
+  2. NeonDB ingestion from the in-memory result (Group/GroupLink via ProvenanceService).
 
 Total sweeps: 3 × 3 × 5 = 45 (each 50-restart sweep over k=2..20).
 """
@@ -330,10 +330,7 @@ async def main(force: bool = False):
                     "note": "300-sample bigrun sweep: 3 datasets × 3 embeddings × 5 summarizers",
                 }
 
-                # 1. Save to NeonDB immediately
-                ingest_result_to_db(result, metadata, gt_eng, db, run_key)
-
-                # 2. Save pkl backup
+                # 1. Save pkl first (compute is safe on disk)
                 save_pkl(
                     result,
                     str(out_path),
@@ -342,6 +339,9 @@ async def main(force: bool = False):
                     metadata=metadata,
                 )
                 print(f"  [PKL] {out_path.name}")
+
+                # 2. Ingest to NeonDB after pkl is confirmed written
+                ingest_result_to_db(result, metadata, gt_eng, db, run_key)
 
     print(f"\n{'='*80}")
     print("[OK] All runs complete.")

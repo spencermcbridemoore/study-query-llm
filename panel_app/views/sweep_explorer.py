@@ -285,35 +285,61 @@ def load_sweep_data(data_dir: str | Path) -> pd.DataFrame:
 # Aggregation
 # ===========================================================================
 
-def aggregate_df(df: pd.DataFrame, y_metric: str, agg_mode: str) -> pd.DataFrame:
+def aggregate_df(
+    df: pd.DataFrame,
+    y_metric: str,
+    agg_mode: str,
+    group_dims: list[str] | None = None,
+) -> pd.DataFrame:
     """
     Transform the flat DataFrame according to the aggregation mode.
+
+    Args:
+        group_dims: Which categorical dimensions to group by. Only dims that
+            have a visual role (Grid rows/cols/Color) should be included so that
+            "Free" dims don't accidentally split aggregated series. Defaults to
+            all CATEGORICAL_DIMS for backward compatibility.
 
     Returns a DataFrame ready for plotting, adding `y_err` column for Mean±stdev.
     """
     if df.empty:
         return df
 
+    if group_dims is None:
+        group_dims = CATEGORICAL_DIMS
+
     if agg_mode == "Raw runs":
         out = df.copy()
         out["y_err"] = np.nan
         return out
 
-    group_cols = [c for c in CATEGORICAL_DIMS + ["k", "n_samples"] if c in df.columns]
+    group_cols = [c for c in group_dims + ["k", "n_samples"] if c in df.columns]
 
     if agg_mode == "Last k only":
-        idx = df.groupby([c for c in CATEGORICAL_DIMS if c in df.columns])["k"].transform("max")
+        cat_cols = [c for c in group_dims if c in df.columns]
+        idx = df.groupby(cat_cols)["k"].transform("max") if cat_cols else df["k"].max()
         filtered = df[df["k"] == idx].copy()
-        out = filtered.groupby(group_cols, as_index=False)[y_metric].mean()
+        out = filtered.groupby(group_cols, as_index=False)[y_metric].mean() if group_cols else filtered
         out["y_err"] = np.nan
         return out
 
     if agg_mode in ("Mean", "Mean ± stdev"):
-        agg = df.groupby(group_cols, as_index=False).agg(
-            y_mean=(y_metric, "mean"),
-            y_std=(y_metric, "std"),
-        )
-        agg = agg.rename(columns={"y_mean": y_metric})
+        if not group_cols:
+            # No grouping dims — aggregate everything into one series
+            mean_val = df[y_metric].mean()
+            std_val = df[y_metric].std() if agg_mode == "Mean ± stdev" else np.nan
+            # Keep k progression by grouping on k alone
+            agg = df.groupby(["k"], as_index=False).agg(
+                y_mean=(y_metric, "mean"),
+                y_std=(y_metric, "std"),
+            )
+            agg = agg.rename(columns={"y_mean": y_metric})
+        else:
+            agg = df.groupby(group_cols, as_index=False).agg(
+                y_mean=(y_metric, "mean"),
+                y_std=(y_metric, "std"),
+            )
+            agg = agg.rename(columns={"y_mean": y_metric})
         if agg_mode == "Mean ± stdev":
             agg["y_err"] = agg["y_std"].fillna(0)
         else:
@@ -419,12 +445,27 @@ def build_figure(
     return fig
 
 
+# Roles available for each categorical dimension
+DIM_ROLES = ["Free", "Filter", "Grid rows", "Grid cols", "Color"]
+
+# Exclusive roles — only one dimension may hold each at a time
+EXCLUSIVE_ROLES = {"Grid rows", "Grid cols", "Color"}
+
+# Default role for each categorical dimension
+DIM_DEFAULT_ROLES = {
+    "dataset": "Grid cols",
+    "engine": "Color",
+    "summarizer": "Grid rows",
+    "data_type": "Filter",
+}
+
+
 # ===========================================================================
 # Panel UI
 # ===========================================================================
 
 def create_sweep_explorer_ui() -> pn.viewable.Viewable:
-    """Create the interactive Sweep Explorer tab."""
+    """Create the interactive Sweep Explorer tab with per-dimension role selectors."""
 
     # --- State ---
     _state: dict = {"df": pd.DataFrame(), "loaded": False}
@@ -457,27 +498,6 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         width=150,
     )
 
-    # --- Widgets: grid layout ---
-    dim_options = ["None"] + CATEGORICAL_DIMS
-    row_dim_sel = pn.widgets.Select(
-        name="Grid rows",
-        options=dim_options,
-        value="summarizer",
-        width=160,
-    )
-    col_dim_sel = pn.widgets.Select(
-        name="Grid cols",
-        options=dim_options,
-        value="dataset",
-        width=160,
-    )
-    color_dim_sel = pn.widgets.Select(
-        name="Color by",
-        options=dim_options,
-        value="engine",
-        width=160,
-    )
-
     # --- Widgets: aggregation ---
     agg_radio = pn.widgets.RadioButtonGroup(
         name="Aggregation",
@@ -496,36 +516,49 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         width=250,
     )
 
-    # --- Widgets: filters (populated after load) ---
-    dataset_filter = pn.widgets.MultiSelect(
-        name="Dataset filter",
-        options=[],
-        value=[],
-        height=100,
-        width=200,
-    )
-    engine_filter = pn.widgets.MultiSelect(
-        name="Engine filter",
-        options=[],
-        value=[],
-        height=100,
-        width=200,
-    )
-    summarizer_filter = pn.widgets.MultiSelect(
-        name="Summarizer filter",
-        options=[],
-        value=[],
-        height=80,
-        width=200,
-    )
+    # --- Widgets: k range ---
     k_slider = pn.widgets.RangeSlider(
         name="k range",
         start=2,
         end=20,
         value=(2, 20),
         step=1,
-        width=250,
+        width=300,
     )
+
+    # --- Per-dimension role widgets ---
+    # role_sels[dim]   = Select widget for the role
+    # val_filters[dim] = MultiSelect for value filtering (visible only when role == "Filter")
+    # dim_blocks[dim]  = Column containing both widgets (rendered in the layout)
+    role_sels: dict[str, pn.widgets.Select] = {}
+    val_filters: dict[str, pn.widgets.MultiSelect] = {}
+    dim_blocks: dict[str, pn.Column] = {}
+
+    for dim in CATEGORICAL_DIMS:
+        default_role = DIM_DEFAULT_ROLES.get(dim, "Free")
+        role_sel = pn.widgets.Select(
+            name=f"{dim} role",
+            options=DIM_ROLES,
+            value=default_role,
+            width=160,
+        )
+        val_filter = pn.widgets.MultiSelect(
+            name=f"values",
+            options=[],
+            value=[],
+            height=100,
+            width=175,
+            visible=(default_role == "Filter"),
+        )
+        role_sels[dim] = role_sel
+        val_filters[dim] = val_filter
+        dim_blocks[dim] = pn.Column(
+            pn.pane.Markdown(f"**{dim}**"),
+            role_sel,
+            val_filter,
+            width=190,
+            margin=(0, 8, 0, 0),
+        )
 
     # --- Plot pane ---
     plot_pane = pn.pane.Plotly(
@@ -533,6 +566,91 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         sizing_mode="stretch_width",
         height=700,
     )
+
+    # --- Conflict check ---
+    def _check_role_conflicts() -> str | None:
+        """Return a warning string if any exclusive role is assigned to 2+ dims."""
+        role_counts: dict[str, list[str]] = {}
+        for dim in CATEGORICAL_DIMS:
+            role = role_sels[dim].value
+            if role in EXCLUSIVE_ROLES:
+                role_counts.setdefault(role, []).append(dim)
+        conflicts = [
+            f"'{role}' assigned to: {', '.join(dims)}"
+            for role, dims in role_counts.items()
+            if len(dims) > 1
+        ]
+        return "; ".join(conflicts) if conflicts else None
+
+    # --- Plot refresh logic ---
+    def refresh_plot(event=None):
+        df = _state.get("df", pd.DataFrame())
+        if df.empty:
+            return
+
+        # Conflict guard
+        conflict = _check_role_conflicts()
+        if conflict:
+            load_status.object = f"**Role conflict** — {conflict}. Assign each role to at most one dimension."
+            return
+
+        # Read roles
+        roles = {dim: role_sels[dim].value for dim in CATEGORICAL_DIMS}
+
+        # 1. Apply value filters for dims with role == "Filter"
+        filtered = df.copy()
+        for dim, role in roles.items():
+            if role == "Filter":
+                selected = val_filters[dim].value
+                if selected:
+                    filtered = filtered[filtered[dim].isin(selected)]
+
+        # Apply k range
+        k_lo, k_hi = k_slider.value
+        filtered = filtered[(filtered["k"] >= k_lo) & (filtered["k"] <= k_hi)]
+
+        # 2. Resolve facet/color dims from roles
+        facet_row = next((d for d, r in roles.items() if r == "Grid rows"), None)
+        facet_col = next((d for d, r in roles.items() if r == "Grid cols"), None)
+        color_dim = next((d for d, r in roles.items() if r == "Color"), None)
+
+        # 3. Dims with a visual role are grouped in aggregation; Free/Filter dims are not
+        group_dims = [d for d, r in roles.items() if r in ("Grid rows", "Grid cols", "Color")]
+
+        y_metric = y_axis_sel.value
+        x_axis = x_axis_sel.value
+        agg_mode = agg_radio.value
+
+        aggregated = aggregate_df(filtered, y_metric, agg_mode, group_dims=group_dims)
+
+        fig = build_figure(
+            aggregated,
+            y_metric=y_metric,
+            x_axis=x_axis,
+            row_dim=facet_row,
+            col_dim=facet_col,
+            color_dim=color_dim,
+            agg_mode=agg_mode,
+            plot_height=height_slider.value,
+        )
+        plot_pane.object = fig
+        plot_pane.height = height_slider.value
+
+    # --- Role change callback ---
+    def make_role_callback(dim: str):
+        def on_role_change(event):
+            new_role = event.new
+            vf = val_filters[dim]
+            vf.visible = (new_role == "Filter")
+            # Populate filter options from loaded data if switching to Filter and empty
+            if new_role == "Filter" and not vf.options:
+                df = _state.get("df", pd.DataFrame())
+                if not df.empty and dim in df.columns:
+                    opts = sorted(df[dim].unique().tolist())
+                    vf.options = opts
+                    vf.value = opts
+            refresh_plot()
+        return on_role_change
 
     # --- Load logic ---
     def load_data(event=None):
@@ -548,83 +666,48 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                 return
 
             n_files_hint = f"{len(df)} rows from {data_dir}"
-
-            # Populate filters
-            datasets = sorted(df["dataset"].unique().tolist())
-            engines = sorted(df["engine"].unique().tolist())
-            summarizers = sorted(df["summarizer"].unique().tolist())
             k_min = int(df["k"].min())
             k_max = int(df["k"].max())
 
-            dataset_filter.options = datasets
-            dataset_filter.value = datasets
-            engine_filter.options = engines
-            engine_filter.value = engines
-            summarizer_filter.options = summarizers
-            summarizer_filter.value = summarizers
+            # Populate all Filter-role MultiSelects from the loaded data
+            for dim in CATEGORICAL_DIMS:
+                if dim in df.columns:
+                    opts = sorted(df[dim].unique().tolist())
+                    val_filters[dim].options = opts
+                    # If the dim is currently in Filter role, select all by default
+                    if role_sels[dim].value == "Filter":
+                        val_filters[dim].value = opts
+
             k_slider.start = k_min
             k_slider.end = k_max
             k_slider.value = (k_min, k_max)
 
+            dim_summary = " | ".join(
+                f"{dim}: {df[dim].nunique()}"
+                for dim in CATEGORICAL_DIMS
+                if dim in df.columns
+            )
             load_status.object = (
-                f"**Loaded:** {n_files_hint} | "
-                f"datasets: {len(datasets)} | "
-                f"engines: {len(engines)} | "
-                f"summarizers: {len(summarizers)} | "
-                f"k: {k_min}–{k_max}"
+                f"**Loaded:** {n_files_hint} | {dim_summary} | k: {k_min}–{k_max}"
             )
             refresh_plot()
         except Exception as e:
             logger.error("Failed to load sweep data: %s", e, exc_info=True)
             load_status.object = f"**Error:** {e}"
 
-    # --- Plot refresh logic ---
-    def refresh_plot(event=None):
-        df = _state.get("df", pd.DataFrame())
-        if df.empty:
-            return
-
-        # Apply filters
-        filtered = df.copy()
-        if dataset_filter.value:
-            filtered = filtered[filtered["dataset"].isin(dataset_filter.value)]
-        if engine_filter.value:
-            filtered = filtered[filtered["engine"].isin(engine_filter.value)]
-        if summarizer_filter.value:
-            filtered = filtered[filtered["summarizer"].isin(summarizer_filter.value)]
-        k_lo, k_hi = k_slider.value
-        filtered = filtered[(filtered["k"] >= k_lo) & (filtered["k"] <= k_hi)]
-
-        y_metric = y_axis_sel.value
-        x_axis = x_axis_sel.value
-        agg_mode = agg_radio.value
-
-        aggregated = aggregate_df(filtered, y_metric, agg_mode)
-
-        fig = build_figure(
-            aggregated,
-            y_metric=y_metric,
-            x_axis=x_axis,
-            row_dim=row_dim_sel.value,
-            col_dim=col_dim_sel.value,
-            color_dim=color_dim_sel.value,
-            agg_mode=agg_mode,
-            plot_height=height_slider.value,
-        )
-        plot_pane.object = fig
-        plot_pane.height = height_slider.value
-
     # --- Wire callbacks ---
     load_button.on_click(load_data)
 
-    for widget in [
-        y_axis_sel, x_axis_sel, row_dim_sel, col_dim_sel, color_dim_sel,
-        agg_radio, height_slider,
-        dataset_filter, engine_filter, summarizer_filter, k_slider,
-    ]:
+    for dim in CATEGORICAL_DIMS:
+        role_sels[dim].param.watch(make_role_callback(dim), "value")
+        val_filters[dim].param.watch(refresh_plot, "value")
+
+    for widget in [y_axis_sel, x_axis_sel, agg_radio, height_slider, k_slider]:
         widget.param.watch(refresh_plot, "value")
 
     # --- Layout ---
+    dim_roles_row = pn.Row(*[dim_blocks[dim] for dim in CATEGORICAL_DIMS])
+
     controls = pn.Column(
         pn.pane.Markdown("### Data Source"),
         pn.Row(data_dir_input, load_button),
@@ -633,19 +716,22 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         pn.pane.Markdown("### Axes"),
         pn.Row(y_axis_sel, x_axis_sel),
         pn.layout.Divider(),
-        pn.pane.Markdown("### Grid Layout"),
-        pn.Row(row_dim_sel, col_dim_sel, color_dim_sel),
+        pn.pane.Markdown(
+            "### Dimension Roles\n"
+            "_Each dimension can be: **Free** (pass-through), **Filter** (include/exclude values), "
+            "**Grid rows**, **Grid cols**, or **Color**. Each exclusive role may only be assigned to one dimension._"
+        ),
+        dim_roles_row,
         pn.layout.Divider(),
         pn.pane.Markdown("### Aggregation"),
         agg_radio,
         pn.layout.Divider(),
-        pn.pane.Markdown("### Filters"),
-        pn.Row(dataset_filter, engine_filter, summarizer_filter),
+        pn.pane.Markdown("### k Range"),
         k_slider,
         pn.layout.Divider(),
         pn.pane.Markdown("### Display"),
         height_slider,
-        width=480,
+        sizing_mode="stretch_width",
         margin=(10, 10),
     )
 

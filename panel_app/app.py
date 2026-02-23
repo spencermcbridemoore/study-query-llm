@@ -69,12 +69,28 @@ def create_app() -> pn.template.FastListTemplate:
     """Create and return the Panel application template."""
     logger.info("Creating Panel application...")
     dashboard = create_dashboard()
+
+    exit_button = pn.widgets.Button(
+        name="⏻  Exit Server",
+        button_type="danger",
+        width=130,
+    )
+
+    def _shutdown(event):
+        logger.info("Exit button clicked — shutting down Panel server.")
+        import threading, os, signal
+        # Give the response a moment to reach the browser before killing
+        threading.Timer(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+
+    exit_button.on_click(_shutdown)
+
     template = pn.template.FastListTemplate(
         title="Study Query LLM",
         sidebar=[],
         main=[dashboard],
         header_background=HEADER_BG,
         header_color=HEADER_FG,
+        header=[exit_button],
     )
     return template
 

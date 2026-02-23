@@ -144,6 +144,8 @@ def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None
     """Start the Panel server using CLI/environment configuration."""
     allowed_ws: Set[str] = {
         f"{address}:{port}",
+        f"localhost:{port}",
+        f"127.0.0.1:{port}",
         "localhost:5006",
         "127.0.0.1:5006",
     }

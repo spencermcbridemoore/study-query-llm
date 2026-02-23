@@ -37,6 +37,7 @@ if _is_notebook:
 
 # Configure Panel extensions
 pn.extension(
+    'plotly',
     design='material',
     sizing_mode='stretch_width',
     raw_css=_extra_css,

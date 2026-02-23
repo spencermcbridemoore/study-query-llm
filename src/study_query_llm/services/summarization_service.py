@@ -54,7 +54,7 @@ TEXT_STORAGE_TRUNCATION = 500
 
 
 DEFAULT_PROMPT_TEMPLATE = (
-    "Write a single question that represents the ones in this list concisely:\n- {text}"
+    "Write a single example that represents the ones in this list concisely:\n- {text}"
 )
 
 

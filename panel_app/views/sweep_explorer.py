@@ -470,6 +470,14 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     # --- State ---
     _state: dict = {"df": pd.DataFrame(), "loaded": False}
 
+    # --- Widgets: source toggle ---
+    source_toggle = pn.widgets.RadioButtonGroup(
+        name="Source",
+        options=["Files", "Database"],
+        value="Files",
+        button_type="default",
+    )
+
     # --- Widgets: data loading ---
     data_dir_input = pn.widgets.TextInput(
         name="Data directory",
@@ -652,29 +660,39 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             refresh_plot()
         return on_role_change
 
+    # --- Source toggle callback ---
+    def on_source_change(event=None):
+        is_files = source_toggle.value == "Files"
+        data_dir_input.visible = is_files
+
+    source_toggle.param.watch(on_source_change, "value")
+
     # --- Load logic ---
     def load_data(event=None):
-        data_dir = data_dir_input.value.strip()
         load_status.object = "_Loading…_"
         try:
-            df = load_sweep_data(data_dir)
+            if source_toggle.value == "Database":
+                df = _load_from_database()
+            else:
+                df = _load_from_files()
+
             _state["df"] = df
             _state["loaded"] = True
 
             if df.empty:
-                load_status.object = "**No matching pkl files found** in that directory."
+                if source_toggle.value == "Database":
+                    load_status.object = "**No sweep run groups found** in the database."
+                else:
+                    load_status.object = "**No matching pkl files found** in that directory."
                 return
 
-            n_files_hint = f"{len(df)} rows from {data_dir}"
             k_min = int(df["k"].min())
             k_max = int(df["k"].max())
 
-            # Populate all Filter-role MultiSelects from the loaded data
             for dim in CATEGORICAL_DIMS:
                 if dim in df.columns:
                     opts = sorted(df[dim].unique().tolist())
                     val_filters[dim].options = opts
-                    # If the dim is currently in Filter role, select all by default
                     if role_sels[dim].value == "Filter":
                         val_filters[dim].value = opts
 
@@ -687,13 +705,33 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                 for dim in CATEGORICAL_DIMS
                 if dim in df.columns
             )
+            if source_toggle.value == "Database":
+                source_hint = "database"
+            else:
+                source_hint = data_dir_input.value.strip()
             load_status.object = (
-                f"**Loaded:** {n_files_hint} | {dim_summary} | k: {k_min}–{k_max}"
+                f"**Loaded:** {len(df)} rows from {source_hint} | "
+                f"{dim_summary} | k: {k_min}–{k_max}"
             )
             refresh_plot()
         except Exception as e:
             logger.error("Failed to load sweep data: %s", e, exc_info=True)
             load_status.object = f"**Error:** {e}"
+
+    def _load_from_files() -> pd.DataFrame:
+        data_dir = data_dir_input.value.strip()
+        return load_sweep_data(data_dir)
+
+    def _load_from_database() -> pd.DataFrame:
+        from panel_app.helpers import get_db_connection
+        from study_query_llm.db.raw_call_repository import RawCallRepository
+        from study_query_llm.services.sweep_query_service import SweepQueryService
+
+        db = get_db_connection()
+        session = db.get_session()
+        repo = RawCallRepository(session)
+        svc = SweepQueryService(repo)
+        return svc.get_sweep_metrics_df()
 
     # --- Wire callbacks ---
     load_button.on_click(load_data)
@@ -710,6 +748,7 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
 
     controls = pn.Column(
         pn.pane.Markdown("### Data Source"),
+        source_toggle,
         pn.Row(data_dir_input, load_button),
         load_status,
         pn.layout.Divider(),

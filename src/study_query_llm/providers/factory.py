@@ -153,10 +153,31 @@ class ProviderFactory:
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
 
+        # Known chat-model ID prefixes (Azure catalog uses model-version IDs like "gpt-4o-2024-05-13")
+        _CHAT_PREFIXES = ("gpt-4", "gpt-35", "gpt-3.5", "o1", "o3")
+        _EMBED_PREFIXES = ("text-embedding",)
+
         if modality == "chat":
-            deployments = [d for d in deployments if d.supports_chat]
+            # Prefer deployments that explicitly report chat support.
+            # If the API returns no capability data (capabilities={}), fall back
+            # to name-based heuristics so the dropdown is never empty.
+            explicit = [d for d in deployments if d.supports_chat]
+            if explicit:
+                deployments = explicit
+            else:
+                deployments = [
+                    d for d in deployments
+                    if any(d.id.lower().startswith(p) for p in _CHAT_PREFIXES)
+                ]
         elif modality == "embedding":
-            deployments = [d for d in deployments if d.supports_embeddings]
+            explicit = [d for d in deployments if d.supports_embeddings]
+            if explicit:
+                deployments = explicit
+            else:
+                deployments = [
+                    d for d in deployments
+                    if any(d.id.lower().startswith(p) for p in _EMBED_PREFIXES)
+                ]
 
         return deployments
 

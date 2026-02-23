@@ -13,6 +13,7 @@ from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.summarization_service import (
     SummarizationService,
     SummarizationRequest,
+    DEFAULT_PROMPT_TEMPLATE,
 )
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "experimental_results"
@@ -56,21 +57,23 @@ def create_paraphraser_for_llm(
                 service = SummarizationService(repository=repo)
 
                 if combine_texts:
-                    combined = (
-                        "Summarize the following texts into a single "
-                        "coherent summary:\n\n"
-                    )
+                    combined = ""
                     for i, text in enumerate(texts, 1):
                         combined += f"Text {i}:\n{text}\n\n"
-                    req_texts = [combined]
+                    req_texts = [combined.strip()]
+                    cluster_prompt = (
+                        "Summarize the following texts into a single coherent summary:\n\n{text}"
+                    )
                 else:
                     req_texts = texts
+                    cluster_prompt = DEFAULT_PROMPT_TEMPLATE
 
                 request = SummarizationRequest(
                     texts=req_texts,
                     llm_deployment=llm_deployment,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    prompt_template=cluster_prompt,
                 )
 
                 try:

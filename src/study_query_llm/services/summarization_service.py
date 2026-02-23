@@ -53,6 +53,11 @@ logger = get_logger(__name__)
 TEXT_STORAGE_TRUNCATION = 500
 
 
+DEFAULT_PROMPT_TEMPLATE = (
+    "Write a single question that represents the ones in this list concisely:\n- {text}"
+)
+
+
 @dataclass
 class SummarizationRequest:
     """Request parameters for summarization."""
@@ -65,6 +70,7 @@ class SummarizationRequest:
     provider: str = "azure"
     validate_deployment: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
+    prompt_template: str = DEFAULT_PROMPT_TEMPLATE
 
 
 @dataclass
@@ -313,11 +319,7 @@ class SummarizationService:
                 summary = None
 
                 try:
-                    # Create prompt for summarization
-                    prompt = (
-                        "Write a single question that represents the ones in this list concisely:\n"
-                        f"- {text}"
-                    )
+                    prompt = request.prompt_template.format(text=text)
 
                     result = await service.run_inference(
                         prompt,

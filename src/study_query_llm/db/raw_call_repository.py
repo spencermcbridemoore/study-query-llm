@@ -8,7 +8,7 @@ raw calls in the v2 schema. Uses the Repository pattern to abstract database det
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, and_, or_, cast, Float, String
+from sqlalchemy import func, desc, and_, or_, cast, Float, String, text
 from .models_v2 import RawCall, Group, GroupMember, CallArtifact, EmbeddingVector, GroupLink
 from ..utils.logging_config import get_logger
 
@@ -212,27 +212,37 @@ class RawCallRepository:
             ]
         """
         try:
-            # PostgreSQL path: Use JSON operators for efficient extraction
-            # Extract total_tokens from tokens_json, trying multiple field names
-            token_expr = func.coalesce(
-                cast(RawCall.tokens_json['total_tokens'].astext, Float),
-                cast(RawCall.tokens_json['totalTokens'].astext, Float),
-                cast(RawCall.tokens_json['usage']['total_tokens'].astext, Float),
-                cast(RawCall.tokens_json['usage']['totalTokens'].astext, Float),
-                0.0
-            )
-            
-            # Aggregate by provider using SQL GROUP BY
-            query = self.session.query(
-                RawCall.provider,
-                func.count(RawCall.id).label('count'),
-                func.avg(token_expr).label('avg_tokens'),
-                func.avg(RawCall.latency_ms).label('avg_latency_ms'),
-                func.sum(token_expr).label('total_tokens')
-            ).group_by(RawCall.provider)
-            
+            # Use raw SQL with JSONB operators to avoid SQLAlchemy version issues
+            # with .astext on nested JSON paths.
+            sql = text("""
+                SELECT
+                    provider,
+                    COUNT(*) AS count,
+                    AVG(
+                        COALESCE(
+                            (tokens_json->>'total_tokens')::float,
+                            (tokens_json->>'totalTokens')::float,
+                            (tokens_json->'usage'->>'total_tokens')::float,
+                            (tokens_json->'usage'->>'totalTokens')::float,
+                            0.0
+                        )
+                    ) AS avg_tokens,
+                    AVG(latency_ms) AS avg_latency_ms,
+                    SUM(
+                        COALESCE(
+                            (tokens_json->>'total_tokens')::float,
+                            (tokens_json->>'totalTokens')::float,
+                            (tokens_json->'usage'->>'total_tokens')::float,
+                            (tokens_json->'usage'->>'totalTokens')::float,
+                            0.0
+                        )
+                    ) AS total_tokens
+                FROM raw_calls
+                GROUP BY provider
+            """)
+            rows = self.session.execute(sql).fetchall()
             results = []
-            for row in query.all():
+            for row in rows:
                 results.append({
                     'provider': row.provider,
                     'count': row.count,
@@ -240,9 +250,8 @@ class RawCallRepository:
                     'avg_latency_ms': round(float(row.avg_latency_ms or 0), 2),
                     'total_tokens': int(row.total_tokens or 0)
                 })
-            
             return results
-            
+
         except Exception as e:
             # Fallback for SQLite or other backends: use Python aggregation
             logger.warning(f"SQL aggregation failed, falling back to Python: {e}")

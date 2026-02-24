@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Optional, List
 
 import pandas as pd
-from sqlalchemy import text as sa_text
+from sqlalchemy import text as sa_text, func
 
 from ..db.models_v2 import Group, GroupLink
 from ..db.raw_call_repository import RawCallRepository
@@ -48,23 +48,35 @@ class SweepQueryService:
             .order_by(Group.created_at.desc())
             .all()
         )
+        if not sweeps:
+            return []
+
+        sweep_ids = [s.id for s in sweeps]
+
+        # Bulk-count child links for all sweeps in one query
+        count_rows = (
+            session.query(
+                GroupLink.parent_group_id,
+                func.count(GroupLink.id).label("n_runs"),
+            )
+            .filter(
+                GroupLink.parent_group_id.in_(sweep_ids),
+                GroupLink.link_type == "contains",
+            )
+            .group_by(GroupLink.parent_group_id)
+            .all()
+        )
+        counts = {row.parent_group_id: row.n_runs for row in count_rows}
+
         result = []
         for s in sweeps:
             meta = s.metadata_json or {}
-            n_runs = (
-                session.query(GroupLink)
-                .filter(
-                    GroupLink.parent_group_id == s.id,
-                    GroupLink.link_type == "contains",
-                )
-                .count()
-            )
             result.append({
                 "id": s.id,
                 "name": s.name,
                 "created_at": s.created_at,
                 "algorithm": meta.get("algorithm", "?"),
-                "n_runs": n_runs,
+                "n_runs": counts.get(s.id, 0),
                 "parameter_axes": meta.get("parameter_axes", {}),
             })
         return result
@@ -125,63 +137,86 @@ class SweepQueryService:
         if not runs:
             return _empty_df()
 
-        all_rows: list[dict] = []
-
+        # Build run metadata lookup keyed by run ID
+        run_meta: dict[int, dict] = {}
         for run in runs:
             meta = run.metadata_json or {}
-            ds = meta.get("dataset", "unknown")
-            eng = meta.get("embedding_engine", "?")
-            summ = meta.get("summarizer", "None")
-            data_type = meta.get("data_type", "unknown")
+            run_meta[run.id] = {
+                "dataset": meta.get("dataset", "unknown"),
+                "engine": meta.get("embedding_engine", "?"),
+                "summarizer": meta.get("summarizer", "None"),
+                "data_type": meta.get("data_type", "unknown"),
+            }
 
-            step_links = (
-                session.query(GroupLink)
-                .filter(
-                    GroupLink.parent_group_id == run.id,
-                    GroupLink.link_type == "clustering_step",
-                )
-                .order_by(GroupLink.position)
-                .all()
+        run_ids = list(run_meta.keys())
+
+        # Bulk fetch all clustering_step links for every run in one query
+        all_step_links = (
+            session.query(GroupLink)
+            .filter(
+                GroupLink.parent_group_id.in_(run_ids),
+                GroupLink.link_type == "clustering_step",
+            )
+            .all()
+        )
+
+        # Map step_id -> (run_id, position) and collect step IDs
+        step_id_to_run: dict[int, tuple[int, int]] = {
+            lnk.child_group_id: (lnk.parent_group_id, lnk.position)
+            for lnk in all_step_links
+        }
+        step_ids = list(step_id_to_run.keys())
+
+        if not step_ids:
+            return _empty_df()
+
+        # Bulk fetch all step groups in one query — only metadata_json needed
+        steps = (
+            session.query(Group)
+            .filter(Group.id.in_(step_ids))
+            .all()
+        )
+
+        # Expand each step's metric arrays into rows
+        all_rows: list[dict] = []
+        for step in steps:
+            run_id, position = step_id_to_run[step.id]
+            rmeta = run_meta[run_id]
+            smeta = step.metadata_json or {}
+
+            k = smeta.get("k", position)
+            n_samples = smeta.get("n_samples", 0)
+
+            objectives = smeta.get("objectives", [])
+            dispersions = smeta.get("dispersions", [])
+            aris = smeta.get("aris", [])
+            silhouettes = smeta.get("silhouettes", [])
+            cosine_sims = smeta.get("cosine_sims", [])
+            cosine_sim_norms = smeta.get("cosine_sim_norms", [])
+
+            n_restarts = max(
+                len(objectives), len(dispersions),
+                len(aris), len(silhouettes),
+                len(cosine_sims), len(cosine_sim_norms),
+                1,
             )
 
-            for link in step_links:
-                step = session.query(Group).get(link.child_group_id)
-                if step is None:
-                    continue
-                smeta = step.metadata_json or {}
-                k = smeta.get("k", link.position)
-                n_samples = smeta.get("n_samples", 0)
-
-                objectives = smeta.get("objectives", [])
-                dispersions = smeta.get("dispersions", [])
-                aris = smeta.get("aris", [])
-                silhouettes = smeta.get("silhouettes", [])
-                cosine_sims = smeta.get("cosine_sims", [])
-                cosine_sim_norms = smeta.get("cosine_sim_norms", [])
-
-                n_restarts = max(
-                    len(objectives), len(dispersions),
-                    len(aris), len(silhouettes),
-                    len(cosine_sims), len(cosine_sim_norms),
-                    1,
-                )
-
-                for i in range(n_restarts):
-                    all_rows.append({
-                        "dataset": ds,
-                        "engine": eng,
-                        "summarizer": summ,
-                        "data_type": data_type,
-                        "k": k,
-                        "run_idx": i,
-                        "n_samples": n_samples,
-                        "objective": _safe_idx(objectives, i),
-                        "dispersion": _safe_idx(dispersions, i),
-                        "silhouette": _safe_idx(silhouettes, i),
-                        "ari": _safe_idx(aris, i),
-                        "cosine_sim": _safe_idx(cosine_sims, i),
-                        "cosine_sim_norm": _safe_idx(cosine_sim_norms, i),
-                    })
+            for i in range(n_restarts):
+                all_rows.append({
+                    "dataset": rmeta["dataset"],
+                    "engine": rmeta["engine"],
+                    "summarizer": rmeta["summarizer"],
+                    "data_type": rmeta["data_type"],
+                    "k": k,
+                    "run_idx": i,
+                    "n_samples": n_samples,
+                    "objective": _safe_idx(objectives, i),
+                    "dispersion": _safe_idx(dispersions, i),
+                    "silhouette": _safe_idx(silhouettes, i),
+                    "ari": _safe_idx(aris, i),
+                    "cosine_sim": _safe_idx(cosine_sims, i),
+                    "cosine_sim_norm": _safe_idx(cosine_sim_norms, i),
+                })
 
         if not all_rows:
             return _empty_df()

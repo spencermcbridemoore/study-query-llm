@@ -26,15 +26,9 @@ Usage:
 
 import hashlib
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple
 
-
-@contextmanager
-def _nullcontext():
-    """No-op context manager (Python 3.7+ has contextlib.nullcontext)."""
-    yield
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -43,13 +37,10 @@ from tenacity import (
     retry_if_exception,
     RetryError,
 )
-from openai import AsyncAzureOpenAI
-from openai.types.embedding import Embedding
 from openai import InternalServerError, APIConnectionError, RateLimitError
 
-from ..config import Config
-from ..providers.factory import ProviderFactory
-from ._shared import should_retry_exception, handle_db_persistence_error, deployment_override
+from ..providers.base_embedding import BaseEmbeddingProvider, EmbeddingResult
+from ._shared import should_retry_exception, handle_db_persistence_error
 from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -156,6 +147,7 @@ class EmbeddingService:
         max_retries: int = 6,
         initial_wait: float = 1.0,
         max_wait: float = 30.0,
+        provider: Optional[BaseEmbeddingProvider] = None,
     ):
         """
         Initialize the embedding service.
@@ -168,6 +160,9 @@ class EmbeddingService:
             max_retries: Maximum number of retry attempts (default: 6)
             initial_wait: Initial wait time in seconds for exponential backoff (default: 1.0)
             max_wait: Maximum wait time in seconds between retries (default: 30.0)
+            provider: Optional embedding provider.  When ``None`` (default),
+                an ``AzureEmbeddingProvider`` is created from environment
+                config for backward compatibility.
         """
         self.repository = repository
         self.require_db_persistence = require_db_persistence
@@ -175,12 +170,21 @@ class EmbeddingService:
         self.initial_wait = initial_wait
         self.max_wait = max_wait
 
+        if provider is not None:
+            self._provider = provider
+            self._owns_provider = False
+        else:
+            from ..config import Config
+            from ..providers.azure_embedding_provider import AzureEmbeddingProvider
+
+            cfg = Config()
+            provider_config = cfg.get_provider_config("azure")
+            self._provider = AzureEmbeddingProvider(provider_config)
+            self._owns_provider = True
+
         # Cache for deployment validation results
         self._deployment_cache: Dict[str, bool] = {}
 
-        # Cache for Azure clients per deployment (to avoid recreating)
-        self._client_cache: Dict[str, AsyncAzureOpenAI] = {}
-        
         # Cache for deployment limits (max tokens)
         self._deployment_limits_cache: Dict[str, Optional[int]] = {}
 
@@ -390,6 +394,7 @@ class EmbeddingService:
         Validate that a deployment exists and supports embeddings.
 
         Uses cached results to avoid repeated validation.
+        Delegates the actual probe to the injected ``BaseEmbeddingProvider``.
 
         Args:
             deployment: Deployment name to validate
@@ -400,38 +405,16 @@ class EmbeddingService:
         """
         cache_key = f"{provider}:{deployment}"
 
-        # Check cache first
         if cache_key in self._deployment_cache:
             return self._deployment_cache[cache_key]
 
-        # Validate deployment
-        try:
-            with deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment) if provider == "azure" else _nullcontext():
-                fresh_config = Config()
-                provider_config = fresh_config.get_provider_config(provider)
+        is_valid = await self._provider.validate_model(deployment)
+        self._deployment_cache[cache_key] = is_valid
 
-                client = AsyncAzureOpenAI(
-                    api_key=provider_config.api_key,
-                    api_version=provider_config.api_version,
-                    azure_endpoint=provider_config.endpoint,
-                )
-                try:
-                    await client.embeddings.create(
-                        model=deployment, input=["test"]
-                    )
-                finally:
-                    await client.close()
+        if not is_valid:
+            logger.warning("Deployment validation failed: %s", deployment)
 
-                self._deployment_cache[cache_key] = True
-                return True
-
-        except Exception as e:
-            logger.warning(
-                f"Deployment validation failed: {deployment}, error: {str(e)}"
-            )
-            # Cache failure
-            self._deployment_cache[cache_key] = False
-            return False
+        return is_valid
 
     async def _create_embedding_with_retry(
         self,
@@ -439,41 +422,24 @@ class EmbeddingService:
         deployment: str,
         provider: str = "azure",
         dimensions: Optional[int] = None,
-    ) -> Embedding:
+    ) -> EmbeddingResult:
         """
         Create embedding with retry logic.
+
+        Delegates the raw API call to the injected ``BaseEmbeddingProvider``.
 
         Args:
             text: Input text
             deployment: Deployment name
-            provider: Provider name
+            provider: Provider name (kept for signature compatibility)
             dimensions: Optional dimension override
 
         Returns:
-            Embedding object from OpenAI SDK
+            ``EmbeddingResult`` with vector and index.
 
         Raises:
             Exception: If all retries are exhausted or non-retryable error occurs
         """
-        # Get or create client
-        client_key = f"{provider}:{deployment}"
-        if client_key not in self._client_cache:
-            # Create fresh Config to pick up environment changes
-            fresh_config = Config()
-            provider_config = fresh_config.get_provider_config(provider)
-
-            # For Azure, we need to use the deployment name directly in the API call
-            # The client doesn't need the deployment in env var for embeddings
-            client = AsyncAzureOpenAI(
-                api_key=provider_config.api_key,
-                api_version=provider_config.api_version,
-                azure_endpoint=provider_config.endpoint,
-            )
-            self._client_cache[client_key] = client
-
-        client = self._client_cache[client_key]
-
-        # Define retry strategy
         retry_decorator = retry(
             stop=stop_after_attempt(self.max_retries),
             wait=wait_exponential(
@@ -487,13 +453,11 @@ class EmbeddingService:
         )
 
         @retry_decorator
-        async def _make_call():
-            params = {"model": deployment, "input": [text]}
-            if dimensions:
-                params["dimensions"] = dimensions
-
-            response = await client.embeddings.create(**params)
-            return response.data[0]
+        async def _make_call() -> EmbeddingResult:
+            results = await self._provider.create_embeddings(
+                [text], deployment, dimensions
+            )
+            return results[0]
 
         return await _make_call()
 
@@ -503,39 +467,24 @@ class EmbeddingService:
         deployment: str,
         provider: str = "azure",
         dimensions: Optional[int] = None,
-    ) -> List[Embedding]:
+    ) -> List[EmbeddingResult]:
         """
         Create embeddings for multiple texts in a single API call with retry logic.
 
-        Sends all texts to the API as one request (input: [text1, text2, ...]) and
-        returns one Embedding object per text in the same order.  A single API call
-        per chunk dramatically reduces RPM and avoids thundering-herd 429s.
+        Delegates the raw API call to the injected ``BaseEmbeddingProvider``.
 
         Args:
             texts: List of input texts.
             deployment: Deployment name.
-            provider: Provider name (default: 'azure').
+            provider: Provider name (kept for signature compatibility).
             dimensions: Optional dimension override.
 
         Returns:
-            List of Embedding objects in the same order as ``texts``.
+            List of ``EmbeddingResult`` objects in the same order as *texts*.
 
         Raises:
             Exception: If all retries are exhausted or a non-retryable error occurs.
         """
-        client_key = f"{provider}:{deployment}"
-        if client_key not in self._client_cache:
-            fresh_config = Config()
-            provider_config = fresh_config.get_provider_config(provider)
-            client = AsyncAzureOpenAI(
-                api_key=provider_config.api_key,
-                api_version=provider_config.api_version,
-                azure_endpoint=provider_config.endpoint,
-            )
-            self._client_cache[client_key] = client
-
-        client = self._client_cache[client_key]
-
         retry_decorator = retry(
             stop=stop_after_attempt(self.max_retries),
             wait=wait_exponential(
@@ -549,21 +498,17 @@ class EmbeddingService:
         )
 
         @retry_decorator
-        async def _make_batch_call():
-            params = {"model": deployment, "input": texts}
-            if dimensions:
-                params["dimensions"] = dimensions
-            response = await client.embeddings.create(**params)
-            # response.data is sorted by index; return in input order
-            sorted_data = sorted(response.data, key=lambda e: e.index)
-            return sorted_data
+        async def _make_batch_call() -> List[EmbeddingResult]:
+            return await self._provider.create_embeddings(
+                texts, deployment, dimensions
+            )
 
         return await _make_batch_call()
 
     def _persist_embedding_batch(
         self,
         requests: List["EmbeddingRequest"],
-        embeddings: List[Embedding],
+        embeddings: List[EmbeddingResult],
         request_hashes: List[str],
         latency_ms: float,
     ) -> List[int]:
@@ -574,7 +519,7 @@ class EmbeddingService:
 
         Args:
             requests: Original EmbeddingRequest list.
-            embeddings: Corresponding Embedding objects from the API.
+            embeddings: Corresponding ``EmbeddingResult`` objects.
             request_hashes: Pre-computed hashes, one per request.
             latency_ms: Latency of the whole batch API call.
 
@@ -589,7 +534,7 @@ class EmbeddingService:
 
         raw_call_ids = []
         for req, emb_obj, req_hash in zip(requests, embeddings, request_hashes):
-            vector = emb_obj.embedding
+            vector = emb_obj.vector
             dimension = len(vector)
             vector_norm = float(np.linalg.norm(vector))
 
@@ -902,8 +847,7 @@ class EmbeddingService:
 
             latency_ms = (time.time() - start_time) * 1000
 
-            # Extract vector
-            vector = embedding_obj.embedding
+            vector = embedding_obj.vector
             dimension = len(vector)
 
             # Persist to database
@@ -1001,7 +945,7 @@ class EmbeddingService:
             for req, emb_obj, req_hash, raw_call_id in zip(
                 uncached_requests, emb_objects, uncached_hashes, raw_call_ids
             ):
-                vector = emb_obj.embedding
+                vector = emb_obj.vector
                 fetched_map[req_hash] = EmbeddingResponse(
                     vector=vector,
                     model=req.deployment,
@@ -1147,10 +1091,9 @@ class EmbeddingService:
         return valid
 
     async def close(self):
-        """Close all cached clients."""
-        for client in self._client_cache.values():
-            await client.close()
-        self._client_cache.clear()
+        """Close the underlying embedding provider."""
+        if self._owns_provider:
+            await self._provider.close()
 
     async def __aenter__(self):
         """Async context manager entry."""

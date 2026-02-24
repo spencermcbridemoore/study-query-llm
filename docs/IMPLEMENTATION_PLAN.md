@@ -895,6 +895,45 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - [x] Step 7.9: Summarization Service
 - [x] Step 7.10: Analysis Artifacts
 - [x] Step 7.11: Group-of-Groups / RunStep Schema
+- [x] Step 7.12: Embedding Provider Abstraction
+
+---
+
+## Phase 8: Multi-Provider Embedding Support
+
+### Step 7.12: Embedding Provider Abstraction ✅
+
+**Goal:** Decouple ``EmbeddingService`` from Azure-specific client code so that embeddings can be sourced from any provider (Azure OpenAI, HuggingFace TEI, local models via Ollama/vLLM, Together AI, Fireworks, direct OpenAI, etc.) through a single polymorphic interface.
+
+**Dependencies:**
+- Phase 7.5 (Embedding Service with Deterministic Caching)
+- Phase 1.1 (Base Provider Interface pattern)
+
+**Files created:**
+- [`src/study_query_llm/providers/base_embedding.py`](src/study_query_llm/providers/base_embedding.py): ``BaseEmbeddingProvider`` ABC and ``EmbeddingResult`` dataclass (provider-neutral, no OpenAI SDK dependency)
+- [`src/study_query_llm/providers/azure_embedding_provider.py`](src/study_query_llm/providers/azure_embedding_provider.py): Azure implementation wrapping ``AsyncAzureOpenAI``
+- [`src/study_query_llm/providers/openai_compatible_embedding_provider.py`](src/study_query_llm/providers/openai_compatible_embedding_provider.py): Generic implementation wrapping ``AsyncOpenAI`` with configurable ``base_url`` — covers HF TEI, Ollama, vLLM, Together, Fireworks, direct OpenAI, etc.
+
+**Files updated:**
+- [`src/study_query_llm/providers/factory.py`](src/study_query_llm/providers/factory.py): Added ``create_embedding_provider()`` factory method and ``get_available_embedding_providers()``
+- [`src/study_query_llm/providers/__init__.py`](src/study_query_llm/providers/__init__.py): Exports for new classes
+- [`src/study_query_llm/config.py`](src/study_query_llm/config.py): Added ``"huggingface"`` and ``"local"`` provider config entries
+- [`src/study_query_llm/services/embedding_service.py`](src/study_query_llm/services/embedding_service.py): Accepts ``provider`` parameter; delegates API calls to injected ``BaseEmbeddingProvider``; removed Azure-specific client code
+- [`scripts/common/embedding_utils.py`](scripts/common/embedding_utils.py): Added ``provider_name`` parameter (default ``"azure"``) to ``fetch_embeddings_async()``
+
+**Design:**
+- ``BaseEmbeddingProvider(ABC)`` defines ``create_embeddings()``, ``get_provider_name()``, ``close()``, and optional ``validate_model()``
+- ``EmbeddingResult`` dataclass (``vector``, ``index``) replaces direct dependency on ``openai.types.embedding.Embedding``
+- ``AzureEmbeddingProvider`` wraps ``AsyncAzureOpenAI`` and overrides ``validate_model()`` with probe call
+- ``OpenAICompatibleEmbeddingProvider`` wraps ``AsyncOpenAI(base_url=...)`` — single class covers all non-Azure endpoints
+- ``EmbeddingService`` auto-creates ``AzureEmbeddingProvider`` when no provider is injected (backward compatible)
+- Retry, caching, batching, DB persistence, and hashing logic unchanged
+
+**Tests:**
+- [`tests/test_providers/test_base_embedding.py`](tests/test_providers/test_base_embedding.py)
+- [`tests/test_providers/test_azure_embedding.py`](tests/test_providers/test_azure_embedding.py)
+- [`tests/test_providers/test_openai_compatible_embedding.py`](tests/test_providers/test_openai_compatible_embedding.py)
+- [`tests/test_services/test_embedding_service.py`](tests/test_services/test_embedding_service.py) (updated to inject mock provider)
 
 ---
 

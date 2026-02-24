@@ -7,8 +7,6 @@ Tests embedding generation, caching, deployment validation, retry logic, and DB 
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from openai.types.embedding import Embedding as EmbeddingObj
-from openai import InternalServerError, APIConnectionError, RateLimitError
 
 from study_query_llm.services.embedding_service import (
     EmbeddingService,
@@ -17,6 +15,7 @@ from study_query_llm.services.embedding_service import (
     DEPLOYMENT_MAX_TOKENS,
     estimate_tokens,
 )
+from study_query_llm.providers.base_embedding import BaseEmbeddingProvider, EmbeddingResult
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 
@@ -30,22 +29,27 @@ def db_connection():
 
 
 @pytest.fixture
+def mock_provider():
+    """A no-op BaseEmbeddingProvider for tests that mock internal methods."""
+    provider = AsyncMock(spec=BaseEmbeddingProvider)
+    provider.validate_model = AsyncMock(return_value=True)
+    provider.close = AsyncMock()
+    provider.get_provider_name = MagicMock(return_value="mock")
+    return provider
+
+
+@pytest.fixture
 def mock_embedding_response():
-    """Fixture for a mock embedding response."""
-    embedding_obj = EmbeddingObj(
-        embedding=[0.1, 0.2, 0.3, 0.4, 0.5],
-        index=0,
-        object="embedding",
-    )
-    return embedding_obj
+    """Fixture for a mock EmbeddingResult."""
+    return EmbeddingResult(vector=[0.1, 0.2, 0.3, 0.4, 0.5], index=0)
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_basic(mock_embedding_response, db_connection):
+async def test_get_embedding_basic(mock_embedding_response, db_connection, mock_provider):
     """Test basic embedding generation."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         # Mock the embedding API call
         with patch.object(
@@ -67,11 +71,11 @@ async def test_get_embedding_basic(mock_embedding_response, db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_cache_hit(mock_embedding_response, db_connection):
+async def test_get_embedding_cache_hit(mock_embedding_response, db_connection, mock_provider):
     """Test that cache hit returns stored vector without provider call."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         # First, create an embedding and store it
         with patch.object(
@@ -95,11 +99,11 @@ async def test_get_embedding_cache_hit(mock_embedding_response, db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_invalid_deployment(db_connection):
+async def test_get_embedding_invalid_deployment(db_connection, mock_provider):
     """Test that invalid deployment is skipped and logged once."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         # Mock validation to return False
         with patch.object(service, "_validate_deployment", return_value=False):
@@ -119,29 +123,29 @@ async def test_get_embedding_invalid_deployment(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_retry_configured():
+async def test_get_embedding_retry_configured(mock_provider):
     """Test that retry is configured for transient errors."""
-    service = EmbeddingService(max_retries=6, initial_wait=1.0, max_wait=30.0)
-    
-    # Verify retry configuration
+    from study_query_llm.services._shared import should_retry_exception
+
+    service = EmbeddingService(max_retries=6, initial_wait=1.0, max_wait=30.0, provider=mock_provider)
+
     assert service.max_retries == 6
     assert service.initial_wait == 1.0
     assert service.max_wait == 30.0
-    
-    # Verify _should_retry_exception identifies retryable errors
-    assert service._should_retry_exception(Exception("502 Bad Gateway")) is True
-    assert service._should_retry_exception(Exception("Rate limit exceeded")) is True
-    assert service._should_retry_exception(Exception("Connection timeout")) is True
-    assert service._should_retry_exception(Exception("503 Service Unavailable")) is True
-    assert service._should_retry_exception(Exception("401 Unauthorized")) is False
+
+    assert should_retry_exception(Exception("502 Bad Gateway")) is True
+    assert should_retry_exception(Exception("Rate limit exceeded")) is True
+    assert should_retry_exception(Exception("Connection timeout")) is True
+    assert should_retry_exception(Exception("503 Service Unavailable")) is True
+    assert should_retry_exception(Exception("401 Unauthorized")) is False
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_failure_logged(db_connection):
+async def test_get_embedding_failure_logged(db_connection, mock_provider):
     """Test that failed calls are persisted with status='failed' and error_json."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo, max_retries=1)
+        service = EmbeddingService(repository=repo, max_retries=1, provider=mock_provider)
 
         # Mock to always fail
         async def mock_create_with_retry(*args, **kwargs):
@@ -168,9 +172,9 @@ async def test_get_embedding_failure_logged(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_compute_request_hash_deterministic():
+async def test_compute_request_hash_deterministic(mock_provider):
     """Test that deterministic hashing ensures same input produces same hash."""
-    service = EmbeddingService()
+    service = EmbeddingService(provider=mock_provider)
 
     hash1 = service._compute_request_hash(
         "Hello world", "text-embedding-ada-002", None, "float", "azure"
@@ -189,9 +193,9 @@ async def test_compute_request_hash_deterministic():
 
 
 @pytest.mark.asyncio
-async def test_normalize_text():
+async def test_normalize_text(mock_provider):
     """Test that text normalization removes null bytes and normalizes whitespace."""
-    service = EmbeddingService()
+    service = EmbeddingService(provider=mock_provider)
 
     # Test null byte removal
     text1 = "Hello\x00world"
@@ -207,11 +211,11 @@ async def test_normalize_text():
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_rejects_empty_string(db_connection):
+async def test_get_embedding_rejects_empty_string(db_connection, mock_provider):
     """Test that empty strings are rejected before API calls."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         request = EmbeddingRequest(
             text="",
@@ -223,11 +227,11 @@ async def test_get_embedding_rejects_empty_string(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_rejects_whitespace_only(db_connection):
+async def test_get_embedding_rejects_whitespace_only(db_connection, mock_provider):
     """Test that whitespace-only strings are rejected."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         # Test various whitespace-only strings
         whitespace_strings = ["   ", "\n\t\n", "  \r\n  ", "\t"]
@@ -243,11 +247,11 @@ async def test_get_embedding_rejects_whitespace_only(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_rejects_null_bytes_only(db_connection):
+async def test_get_embedding_rejects_null_bytes_only(db_connection, mock_provider):
     """Test that strings with only null bytes are rejected."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         request = EmbeddingRequest(
             text="\x00\x00",
@@ -259,11 +263,11 @@ async def test_get_embedding_rejects_null_bytes_only(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_rejects_whitespace_and_null_bytes(db_connection):
+async def test_get_embedding_rejects_whitespace_and_null_bytes(db_connection, mock_provider):
     """Test that strings with only whitespace and null bytes are rejected."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         request = EmbeddingRequest(
             text="  \x00  \n\t",
@@ -275,11 +279,11 @@ async def test_get_embedding_rejects_whitespace_and_null_bytes(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_logs_failure_for_empty_string(db_connection):
+async def test_get_embedding_logs_failure_for_empty_string(db_connection, mock_provider):
     """Test that empty string failures are logged to the database."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         request = EmbeddingRequest(
             text="   ",
@@ -304,11 +308,11 @@ async def test_get_embedding_logs_failure_for_empty_string(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embeddings_batch(mock_embedding_response, db_connection):
+async def test_get_embeddings_batch(mock_embedding_response, db_connection, mock_provider):
     """Test that batch operations work correctly with caching per item."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         with patch.object(
             service, "_create_embedding_with_retry", return_value=mock_embedding_response
@@ -332,9 +336,9 @@ async def test_get_embeddings_batch(mock_embedding_response, db_connection):
 
 
 @pytest.mark.asyncio
-async def test_filter_valid_deployments():
+async def test_filter_valid_deployments(mock_provider):
     """Test deployment filtering."""
-    service = EmbeddingService()
+    service = EmbeddingService(provider=mock_provider)
 
     # Mock validation
     async def mock_validate(deployment, provider):
@@ -348,9 +352,9 @@ async def test_filter_valid_deployments():
 
 
 @pytest.mark.asyncio
-async def test_embedding_service_without_repository(mock_embedding_response):
+async def test_embedding_service_without_repository(mock_embedding_response, mock_provider):
     """Test that service works without repository (no persistence)."""
-    service = EmbeddingService(repository=None)
+    service = EmbeddingService(repository=None, provider=mock_provider)
 
     with patch.object(
         service, "_create_embedding_with_retry", return_value=mock_embedding_response
@@ -369,9 +373,9 @@ async def test_embedding_service_without_repository(mock_embedding_response):
 
 
 @pytest.mark.asyncio
-async def test_embedding_service_context_manager(mock_embedding_response):
+async def test_embedding_service_context_manager(mock_embedding_response, mock_provider):
     """Test that service works as async context manager."""
-    service = EmbeddingService(repository=None)
+    service = EmbeddingService(repository=None, provider=mock_provider)
 
     with patch.object(
         service, "_create_embedding_with_retry", return_value=mock_embedding_response
@@ -386,16 +390,13 @@ async def test_embedding_service_context_manager(mock_embedding_response):
                 result = await service.get_embedding(request)
                 assert result.vector == [0.1, 0.2, 0.3, 0.4, 0.5]
 
-            # After context exit, clients should be closed
-            assert len(service._client_cache) == 0
-
 
 @pytest.mark.asyncio
-async def test_require_db_persistence_default_raises_on_error(mock_embedding_response, db_connection):
+async def test_require_db_persistence_default_raises_on_error(mock_embedding_response, db_connection, mock_provider):
     """Test that default behavior (require_db_persistence=True) raises on DB save failure."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo, require_db_persistence=True)
+        service = EmbeddingService(repository=repo, require_db_persistence=True, provider=mock_provider)
         
         # Mock repository to raise an error on insert
         with patch.object(
@@ -416,11 +417,11 @@ async def test_require_db_persistence_default_raises_on_error(mock_embedding_res
 
 
 @pytest.mark.asyncio
-async def test_require_db_persistence_false_continues_on_error(mock_embedding_response, db_connection):
+async def test_require_db_persistence_false_continues_on_error(mock_embedding_response, db_connection, mock_provider):
     """Test that require_db_persistence=False allows graceful degradation on DB save failure."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo, require_db_persistence=False)
+        service = EmbeddingService(repository=repo, require_db_persistence=False, provider=mock_provider)
         
         # Mock repository to raise an error on insert
         with patch.object(
@@ -440,9 +441,9 @@ async def test_require_db_persistence_false_continues_on_error(mock_embedding_re
                     assert result.raw_call_id is None  # Not persisted due to error
 
 
-def test_get_deployment_max_tokens():
+def test_get_deployment_max_tokens(mock_provider):
     """Test getting maximum tokens for known deployments."""
-    service = EmbeddingService()
+    service = EmbeddingService(provider=mock_provider)
     
     # Test known deployments from lookup table
     for deployment, expected_max in DEPLOYMENT_MAX_TOKENS.items():
@@ -481,9 +482,9 @@ def test_estimate_tokens():
     assert tokens_with_model > 0
 
 
-def test_validate_text_length():
+def test_validate_text_length(mock_provider):
     """Test text length validation."""
-    service = EmbeddingService()
+    service = EmbeddingService(provider=mock_provider)
     
     # Test valid text (short)
     is_valid, est_tokens, max_tokens = service.validate_text_length(
@@ -513,11 +514,11 @@ def test_validate_text_length():
 
 
 @pytest.mark.asyncio
-async def test_get_embedding_rejects_text_exceeding_limit(mock_embedding_response, db_connection):
+async def test_get_embedding_rejects_text_exceeding_limit(mock_embedding_response, db_connection, mock_provider):
     """Test that get_embedding raises error for text exceeding token limit."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
         
         # Create text that exceeds the limit
         very_long_text = "This is a test sentence. " * 2000  # ~10,000 tokens
@@ -547,19 +548,18 @@ async def test_get_embedding_rejects_text_exceeding_limit(mock_embedding_respons
 # =============================================================================
 
 
-def _make_batch_embedding(index: int, vector=None) -> EmbeddingObj:
-    """Create a mock Embedding object for the given index."""
+def _make_batch_embedding(index: int, vector=None) -> EmbeddingResult:
+    """Create a mock EmbeddingResult for the given index."""
     vector = vector or [0.1 * (index + 1), 0.2, 0.3]
-    emb = EmbeddingObj(embedding=vector, index=index, object="embedding")
-    return emb
+    return EmbeddingResult(vector=vector, index=index)
 
 
 @pytest.mark.asyncio
-async def test_get_embeddings_batch_chunked_all_uncached(db_connection):
+async def test_get_embeddings_batch_chunked_all_uncached(db_connection, mock_provider):
     """With chunk_size set, all uncached texts are fetched in one batch call per chunk."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         texts = [f"Text {i}" for i in range(5)]
         requests = [
@@ -593,11 +593,11 @@ async def test_get_embeddings_batch_chunked_all_uncached(db_connection):
 
 
 @pytest.mark.asyncio
-async def test_get_embeddings_batch_chunked_mixed_cached_uncached(db_connection):
+async def test_get_embeddings_batch_chunked_mixed_cached_uncached(db_connection, mock_provider):
     """With chunk_size set, cached items are served from DB without API call."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         # Pre-insert two embeddings via the single path so they are in the DB
         pre_requests = [
@@ -637,11 +637,11 @@ async def test_get_embeddings_batch_chunked_mixed_cached_uncached(db_connection)
 
 
 @pytest.mark.asyncio
-async def test_get_embeddings_batch_chunked_preserves_order(db_connection):
+async def test_get_embeddings_batch_chunked_preserves_order(db_connection, mock_provider):
     """Results are returned in the same order as the input requests."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-        service = EmbeddingService(repository=repo)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
 
         n = 7
         requests = [
@@ -676,26 +676,22 @@ async def test_get_embeddings_batch_chunked_preserves_order(db_connection):
 
 @pytest.mark.asyncio
 async def test_batch_api_call_sends_multiple_inputs():
-    """_create_embedding_batch_with_retry sends all texts in one API call."""
-    service = EmbeddingService(repository=None)
-    texts = ["Hello", "World", "Foo"]
+    """_create_embedding_batch_with_retry delegates to provider.create_embeddings."""
     mock_embs = [_make_batch_embedding(i) for i in range(3)]
 
-    mock_response = MagicMock()
-    mock_response.data = mock_embs
+    provider = AsyncMock(spec=BaseEmbeddingProvider)
+    provider.create_embeddings = AsyncMock(return_value=mock_embs)
+    provider.close = AsyncMock()
+    provider.get_provider_name = MagicMock(return_value="mock")
 
-    mock_client = AsyncMock()
-    mock_client.embeddings.create = AsyncMock(return_value=mock_response)
-    service._client_cache["azure:test-deployment"] = mock_client
+    service = EmbeddingService(repository=None, provider=provider)
+    texts = ["Hello", "World", "Foo"]
 
     results = await service._create_embedding_batch_with_retry(
         texts, "test-deployment", "azure", None
     )
 
-    # Should have called create exactly once with all 3 texts
-    mock_client.embeddings.create.assert_called_once()
-    call_kwargs = mock_client.embeddings.create.call_args[1]
-    assert call_kwargs["input"] == texts
+    provider.create_embeddings.assert_called_once_with(texts, "test-deployment", None)
     assert len(results) == 3
 
 

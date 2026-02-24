@@ -7,7 +7,10 @@ needing to import provider classes directly.
 
 from typing import Optional
 from .base import BaseLLMProvider, DeploymentInfo
+from .base_embedding import BaseEmbeddingProvider
 from .azure_provider import AzureOpenAIProvider
+from .azure_embedding_provider import AzureEmbeddingProvider
+from .openai_compatible_embedding_provider import OpenAICompatibleEmbeddingProvider
 from ..config import ProviderConfig, Config
 
 
@@ -111,6 +114,48 @@ class ProviderFactory:
         """
         return self.config.get_available_providers()
     
+    # ------------------------------------------------------------------
+    # Embedding provider creation
+    # ------------------------------------------------------------------
+
+    def create_embedding_provider(
+        self, provider_name: str
+    ) -> BaseEmbeddingProvider:
+        """Create an embedding provider instance from application config.
+
+        Args:
+            provider_name: ``'azure'``, ``'openai'``, ``'huggingface'``,
+                ``'local'``, ``'ollama'``, or any OpenAI-compatible label.
+
+        Returns:
+            A ``BaseEmbeddingProvider`` ready to use.
+
+        Raises:
+            ValueError: If the provider is not configured.
+        """
+        provider_name = provider_name.lower()
+        provider_config = self.config.get_provider_config(
+            provider_name if provider_name != "ollama" else "local"
+        )
+
+        if provider_name == "azure":
+            return AzureEmbeddingProvider(provider_config)
+
+        base_url = provider_config.endpoint or ""
+        if provider_name == "ollama" and not base_url:
+            base_url = "http://localhost:11434/v1"
+
+        return OpenAICompatibleEmbeddingProvider(
+            base_url=base_url,
+            api_key=provider_config.api_key,
+            provider_label=provider_name,
+        )
+
+    @staticmethod
+    def get_available_embedding_providers() -> list[str]:
+        """Return list of supported embedding provider names."""
+        return ["azure", "openai", "huggingface", "local", "ollama"]
+
     async def list_provider_deployments(
         self,
         provider_name: str,

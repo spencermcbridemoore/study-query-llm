@@ -122,6 +122,22 @@ class Config:
                 api_key=os.getenv("HYPERBOLIC_API_KEY", ""),
                 endpoint=os.getenv("HYPERBOLIC_ENDPOINT", "https://api.hyperbolic.xyz"),
             )
+        elif provider_name == "huggingface":
+            config = ProviderConfig(
+                name="huggingface",
+                api_key=os.getenv("HF_API_TOKEN", "not-needed"),
+                endpoint=os.getenv("HF_EMBEDDING_ENDPOINT", ""),
+                model=os.getenv("HF_EMBEDDING_MODEL", ""),
+            )
+        elif provider_name == "local":
+            config = ProviderConfig(
+                name="local",
+                api_key=os.getenv("LOCAL_EMBEDDING_API_KEY", "not-needed"),
+                endpoint=os.getenv(
+                    "LOCAL_EMBEDDING_ENDPOINT", "http://localhost:8080/v1"
+                ),
+                model=os.getenv("LOCAL_EMBEDDING_MODEL", ""),
+            )
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
 
@@ -137,7 +153,7 @@ class Config:
             List of provider names with credentials set
         """
         available = []
-        for provider in ["azure", "openai", "hyperbolic"]:
+        for provider in ["azure", "openai", "hyperbolic", "huggingface", "local"]:
             try:
                 self.get_provider_config(provider)
                 available.append(provider)
@@ -194,6 +210,16 @@ def _get_provider_instructions(provider_name: str) -> str:
         "hyperbolic": """
   HYPERBOLIC_API_KEY=your-api-key
   HYPERBOLIC_ENDPOINT=https://api.hyperbolic.xyz
+        """,
+        "huggingface": """
+  HF_API_TOKEN=your-hf-token          (or "not-needed" for local TEI)
+  HF_EMBEDDING_ENDPOINT=https://your-endpoint.endpoints.huggingface.cloud/v1
+  HF_EMBEDDING_MODEL=BAAI/bge-m3      (model hosted on the endpoint)
+        """,
+        "local": """
+  LOCAL_EMBEDDING_ENDPOINT=http://localhost:8080/v1   (TEI / Ollama / vLLM)
+  LOCAL_EMBEDDING_API_KEY=not-needed                  (override if required)
+  LOCAL_EMBEDDING_MODEL=BAAI/bge-m3                   (model loaded on server)
         """,
     }
     return instructions.get(provider_name, "  (Unknown provider)")

@@ -105,7 +105,7 @@ def main() -> None:
                 fixed_config=FIXED_CONFIG,
                 parameter_axes=PARAMETER_AXES,
                 description=(
-                    "300-sample bigrun: 3 datasets × 3 embeddings × 5 summarizers, "
+                    "300-sample bigrun: 3 datasets x 3 embeddings x 5 summarizers, "
                     "50 restarts, cosine distance, no PCA, Feb 2026."
                 ),
             )

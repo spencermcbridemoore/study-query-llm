@@ -111,6 +111,7 @@ class ACITEIManager:
         self.health_check_interval = health_check_interval
 
         self.endpoint_url: Optional[str] = None
+        self.provider_label: str = "aci_tei"
 
         self._client = None
         self._idle_timer: Optional[threading.Timer] = None

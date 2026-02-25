@@ -1008,6 +1008,78 @@ for model_id in HF_MODELS:
 
 ---
 
+### Step 7.14: Local Docker TEI Manager + ManagedTEIEmbeddingProvider ✅
+
+**Goal:** Enable GPU-accelerated embedding sweeps using a local Docker container (RTX 4090), eliminating cloud costs for development/test runs. Simultaneously, collapse the separate per-backend provider wrappers (`ACITEIEmbeddingProvider`, etc.) into a single generic `ManagedTEIEmbeddingProvider` that works with any manager via duck-typing.
+
+**Dependencies:**
+- Step 7.13 (ACI TEI Manager)
+- Docker Desktop + NVIDIA Container Toolkit (verified: RTX 4090, CUDA 12.6)
+
+**New packages (added to** ``requirements.txt``**):**
+- ``docker>=7.0`` — Python SDK for local Docker daemon control
+
+**Files created:**
+- [`scripts/common/local_docker_tei_manager.py`](scripts/common/local_docker_tei_manager.py): `LocalDockerTEIManager` — pull TEI GPU image, start/stop container, mount HF cache, idle timer, context manager
+- [`src/study_query_llm/providers/managed_tei_embedding_provider.py`](src/study_query_llm/providers/managed_tei_embedding_provider.py): `ManagedTEIEmbeddingProvider` — generic wrapper for any TEI manager (ACI or local Docker)
+- [`tests/test_scripts/test_local_docker_tei_manager.py`](tests/test_scripts/test_local_docker_tei_manager.py): 26 unit tests for `LocalDockerTEIManager` with mocked Docker SDK
+- [`tests/test_providers/test_managed_tei_embedding.py`](tests/test_providers/test_managed_tei_embedding.py): 14 unit tests for `ManagedTEIEmbeddingProvider`, parameterised across ACI and local-Docker mock managers
+
+**Files updated:**
+- [`src/study_query_llm/providers/__init__.py`](src/study_query_llm/providers/__init__.py): Exports `ManagedTEIEmbeddingProvider` (replaces `ACITEIEmbeddingProvider`)
+- [`scripts/common/aci_tei_manager.py`](scripts/common/aci_tei_manager.py): Added `provider_label = "aci_tei"` instance attribute
+- [`requirements.txt`](requirements.txt): Added `docker>=7.0`
+- [`.env.example`](.env.example): Added `HF_CACHE_DIR`
+
+**Files removed:**
+- `src/study_query_llm/providers/aci_tei_embedding_provider.py` — merged into `ManagedTEIEmbeddingProvider`
+- `tests/test_providers/test_aci_tei_embedding.py` — replaced by `test_managed_tei_embedding.py`
+
+**Design:**
+
+Manager duck-type contract (both `ACITEIManager` and `LocalDockerTEIManager` satisfy):
+| Attribute/method | Description |
+|---|---|
+| `endpoint_url` | `str` after `start()`/`create()`; `None` otherwise |
+| `model_id` | HuggingFace model ID |
+| `provider_label` | Short label for DB records (`"aci_tei"` or `"local_docker_tei"`) |
+| `ping()` | Resets idle shutdown timer |
+
+`LocalDockerTEIManager`:
+- `start()` — remove any stale same-name container, `docker.containers.run()` with GPU device requests and HF cache volume mount, poll `GET /health` until ready, start idle timer
+- `stop()` — `container.stop()` + `container.remove()`, cancel idle timer; idempotent
+- `ping()` / `_idle_shutdown()` — same pattern as `ACITEIManager`
+- Model weights mount from `HF_CACHE_DIR` (default `~/.cache/huggingface`), downloaded once and reused
+
+**Env vars:**
+
+| Variable | Required | Default |
+|---|---|---|
+| `HF_CACHE_DIR` | No | `~/.cache/huggingface` |
+
+**Typical sweep usage:**
+
+```python
+from scripts.common.local_docker_tei_manager import LocalDockerTEIManager
+from study_query_llm.providers import ManagedTEIEmbeddingProvider
+from study_query_llm.services.embedding_service import EmbeddingService
+
+HF_MODELS = ["BAAI/bge-m3", "BAAI/bge-large-en-v1.5", "nomic-ai/nomic-embed-text-v1.5"]
+
+for model_id in HF_MODELS:
+    with LocalDockerTEIManager(model_id=model_id) as manager:
+        async with ManagedTEIEmbeddingProvider(manager) as provider:
+            service = EmbeddingService(repository=repo, provider=provider)
+            # ... run embeddings for this model ...
+```
+
+**Cost notes:**
+- Zero cloud cost — uses local RTX 4090
+- Idle timer (default 30 min) stops container and frees GPU VRAM between models in a sweep
+- Context manager guarantees cleanup even on crash
+
+---
+
 ## Next Steps
 - Implement OpenAI + Hyperbolic providers and expand `ProviderFactory`
 - Add conversation service if needed

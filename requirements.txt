@@ -21,3 +21,6 @@ ipykernel
 # Azure infrastructure (ACI lifecycle management for TEI containers)
 azure-mgmt-containerinstance>=10.0
 azure-identity>=1.15
+
+# Local Docker TEI management
+docker>=7.0

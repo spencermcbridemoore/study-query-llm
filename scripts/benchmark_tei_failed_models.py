@@ -1,16 +1,9 @@
 """
-Quick benchmark: TEI model load time + embedding latency on local RTX 4090.
+Benchmark the 4 models that previously failed due to CUDA < 12.9.
+Now using TEI 89-1.9 (Ada Lovelace optimised, requires CUDA 12.9+).
 
 Usage:
-    python scripts/benchmark_tei_models.py
-
-Tests each model in sequence:
-  - Container start + model load time
-  - Single-text latency (p50, p95)
-  - Batch-32 throughput (texts/sec)
-  - GPU VRAM used by the model
-
-Requires Docker to be running and TEI image 89-1.9 to be pulled.
+    python scripts/benchmark_tei_failed_models.py
 """
 
 import asyncio
@@ -25,10 +18,11 @@ import os
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
-HF_CACHE = str(Path.home() / ".cache" / "huggingface")
-TEI_PORT  = 9900
+HF_CACHE   = str(Path.home() / ".cache" / "huggingface")
+TEI_PORT   = 9900
 WARMUP_RUNS = 3
 TIMED_RUNS  = 10
+TEI_IMAGE   = "ghcr.io/huggingface/text-embeddings-inference:89-1.9"
 
 SAMPLE_TEXTS_1  = ["What is the Pythagorean theorem?"]
 SAMPLE_TEXTS_32 = [
@@ -36,35 +30,29 @@ SAMPLE_TEXTS_32 = [
     for i in range(32)
 ]
 
+# Only the 4 models that timed out with TEI 1.5 / CUDA 12.6
 MODELS = [
-    # (model_id, display_name)
-    ("nomic-ai/nomic-embed-text-v1.5",           "nomic-v1.5          137M "),
-    ("WhereIsAI/UAE-Large-V1",                   "UAE-Large-V1        335M "),
-    ("BAAI/bge-large-en-v1.5",                   "bge-large-en-v1.5   335M "),
-    ("Snowflake/snowflake-arctic-embed-l-v2.0",  "arctic-embed-l-v2   568M "),
-    ("Alibaba-NLP/gte-large-en-v1.5",            "gte-large-en-v1.5   434M "),
-    ("intfloat/multilingual-e5-large-instruct",  "me5-large-instruct  560M "),
-    ("BAAI/bge-m3",                              "bge-m3              570M "),
-    ("Alibaba-NLP/gte-Qwen2-1.5B-instruct",      "gte-Qwen2-1.5B      1.5B "),
-    ("Qwen/Qwen3-Embedding-0.6B",                "Qwen3-Embed-0.6B    0.6B "),
-    ("Qwen/Qwen3-Embedding-4B",                  "Qwen3-Embed-4B      4B   "),
-    ("Alibaba-NLP/gte-Qwen2-7B-instruct",        "gte-Qwen2-7B        7.6B "),
-    ("Qwen/Qwen3-Embedding-8B",                  "Qwen3-Embed-8B      8B   "),
+    ("BAAI/bge-m3",               "bge-m3              570M "),
+    ("Qwen/Qwen3-Embedding-0.6B", "Qwen3-Embed-0.6B    0.6B "),
+    ("Qwen/Qwen3-Embedding-4B",   "Qwen3-Embed-4B      4B   "),
+    ("Qwen/Qwen3-Embedding-8B",   "Qwen3-Embed-8B      8B   "),
 ]
 
 
 def _start_container(model_id: str) -> tuple:
-    import docker, docker.types
+    import docker
+    import docker.types
     client = docker.from_env()
     name = "tei-bench-" + model_id.replace("/", "-").replace(".", "-").lower()
     try:
         old = client.containers.get(name)
-        old.stop(); old.remove()
+        old.stop()
+        old.remove()
     except Exception:
         pass
 
     container = client.containers.run(
-        image="ghcr.io/huggingface/text-embeddings-inference:89-1.9",
+        image=TEI_IMAGE,
         command=["--model-id", model_id, "--port", "80"],
         name=name,
         detach=True,
@@ -76,7 +64,7 @@ def _start_container(model_id: str) -> tuple:
     return client, container, name
 
 
-def _wait_healthy(timeout: int = 300, interval: float = 2.0) -> float:
+def _wait_healthy(timeout: int = 400, interval: float = 2.0) -> bool:
     url = f"http://localhost:{TEI_PORT}/health"
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -90,11 +78,11 @@ def _wait_healthy(timeout: int = 300, interval: float = 2.0) -> float:
     return False
 
 
-def _embed(texts: list[str], model_id: str) -> float:
+def _embed(texts: list, model_id: str) -> float:
     """POST to /v1/embeddings, return elapsed seconds."""
     import json
     body = json.dumps({"model": model_id, "input": texts}).encode()
-    req  = urllib.request.Request(
+    req = urllib.request.Request(
         f"http://localhost:{TEI_PORT}/v1/embeddings",
         data=body,
         headers={"Content-Type": "application/json"},
@@ -125,29 +113,48 @@ def _stop_container(client, container, name: str):
         pass
 
 
-def run_benchmark():
-    print("=" * 72)
-    print("  TEI GPU Benchmark  —  RTX 4090  (89-1.9 image)")
-    print(f"  HF cache: {HF_CACHE}")
-    print("=" * 72)
-    print()
-    print(f"{'Model':<32}  {'Load':>7}  {'1-text p50':>10}  {'1-text p95':>10}  {'32-batch t/s':>12}  {'VRAM':>6}")
-    print("-" * 80)
+def _tail_logs(container, lines: int = 15) -> str:
+    try:
+        return container.logs(tail=lines).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
 
-    results = []
+
+def run_benchmark():
+    print("=" * 80)
+    print(f"  TEI GPU Benchmark (previously failed models)  --  RTX 4090")
+    print(f"  Image : {TEI_IMAGE}")
+    print(f"  Cache : {HF_CACHE}")
+    print("=" * 80)
+    print()
+    print(
+        f"{'Model':<32}  {'Load':>7}  {'1-text p50':>10}  "
+        f"{'1-text p95':>10}  {'32-batch t/s':>12}  {'VRAM':>7}"
+    )
+    print("-" * 82)
 
     for model_id, display in MODELS:
-        sys.stdout.write(f"  {display:<30}  starting... ")
+        sys.stdout.write(f"  {display:<30}  starting...")
         sys.stdout.flush()
 
         t_start = time.time()
-        client, container, name = _start_container(model_id)
-        healthy = _wait_healthy(timeout=300)
+        try:
+            client, container, name = _start_container(model_id)
+        except Exception as exc:
+            print(f"  DOCKER ERROR: {exc}")
+            continue
+
+        healthy = _wait_healthy(timeout=400)
         load_secs = time.time() - t_start
 
         if not healthy:
+            logs = _tail_logs(container)
             _stop_container(client, container, name)
-            print("TIMEOUT")
+            print(f"  TIMEOUT after {load_secs:.0f}s")
+            if logs:
+                print("  Last container logs:")
+                for line in logs.strip().splitlines()[-8:]:
+                    print(f"    {line}")
             continue
 
         vram = _gpu_vram_mb()
@@ -179,20 +186,19 @@ def run_benchmark():
         _stop_container(client, container, name)
 
         if not single_times:
-            print("FAILED")
+            print("  FAILED (no successful inference)")
             continue
 
-        p50   = statistics.median(single_times) * 1000
-        p95   = sorted(single_times)[int(len(single_times) * 0.95)] * 1000
-        tps   = (32 / statistics.median(batch_times)) if batch_times else 0
+        p50 = statistics.median(single_times) * 1000
+        p95 = sorted(single_times)[int(len(single_times) * 0.95)] * 1000
+        tps = (32 / statistics.median(batch_times)) if batch_times else 0
         vram_str = f"{vram}MB" if vram else "n/a"
 
         print(
             f"\r  {display:<30}  {load_secs:>6.0f}s  "
             f"{p50:>9.0f}ms  {p95:>9.0f}ms  "
-            f"{tps:>11.0f}/s  {vram_str:>6}"
+            f"{tps:>11.0f}/s  {vram_str:>7}"
         )
-        results.append((display, load_secs, p50, p95, tps, vram_str))
 
     print()
     print("=" * 80)

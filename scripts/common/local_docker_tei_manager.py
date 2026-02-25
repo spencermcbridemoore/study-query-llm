@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # (Ada Lovelace, compute cap 8.9) with CUDA 12.6 drivers and gives full GPU acceleration.
 # When NVIDIA updates drivers to CUDA >= 12.9, swap to :89-1.9 for Ada-specific
 # Flash Attention 2 kernel optimisations.
-_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:1.5"
+_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:89-1.9"
 _TEI_CPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.5"
 
 # Default HuggingFace model cache directory on the host.

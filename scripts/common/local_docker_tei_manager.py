@@ -39,12 +39,12 @@ import docker.types
 
 logger = logging.getLogger(__name__)
 
-# :89-1.9 targets CUDA compute capability 8.9 (Ada Lovelace — RTX 4090, RTX 4000 series).
-# It enables Ada-specific Flash Attention 2 kernels for materially faster throughput
-# vs. the generic :1.9 image.  Swap to :86-1.9 for Ampere 86 (A10/A40) or
-# :1.9 for Ampere 80 (A100).
-_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:89-1.9"
-_TEI_CPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9"
+# :1.9 is the Ampere 8.0 image (CUDA >= 11.8).  It runs correctly on the RTX 4090
+# (Ada Lovelace, compute cap 8.9) with CUDA 12.6 drivers and gives full GPU acceleration.
+# When NVIDIA updates drivers to CUDA >= 12.9, swap to :89-1.9 for Ada-specific
+# Flash Attention 2 kernel optimisations.
+_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:1.5"
+_TEI_CPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.5"
 
 # Default HuggingFace model cache directory on the host.
 # Shared with the conda environment and other tools so models are not
@@ -234,7 +234,7 @@ class LocalDockerTEIManager:
             name=self.container_name,
             detach=True,
             ports={"80/tcp": self.port},
-            volumes={hf_cache: {"bind": "/root/.cache/huggingface", "mode": "rw"}},
+            volumes={hf_cache: {"bind": "/data", "mode": "rw"}},
             device_requests=device_requests,
             remove=False,
         )

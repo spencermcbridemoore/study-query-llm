@@ -17,3 +17,7 @@ hvplot>=0.9.0
 plotly>=5.0.0
 jupyter
 ipykernel
+
+# Azure infrastructure (ACI lifecycle management for TEI containers)
+azure-mgmt-containerinstance>=10.0
+azure-identity>=1.15

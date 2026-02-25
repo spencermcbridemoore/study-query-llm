@@ -13,6 +13,7 @@ from .base_embedding import BaseEmbeddingProvider, EmbeddingResult
 from .azure_provider import AzureOpenAIProvider
 from .azure_embedding_provider import AzureEmbeddingProvider
 from .openai_compatible_embedding_provider import OpenAICompatibleEmbeddingProvider
+from .aci_tei_embedding_provider import ACITEIEmbeddingProvider
 from .factory import ProviderFactory
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "AzureOpenAIProvider",
     "AzureEmbeddingProvider",
     "OpenAICompatibleEmbeddingProvider",
+    "ACITEIEmbeddingProvider",
     "ProviderFactory",
 ]

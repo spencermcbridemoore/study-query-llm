@@ -937,6 +937,77 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
+### Step 7.13: ACI TEI Manager ✅
+
+**Goal:** Provide a Python-controlled lifecycle manager for Azure Container Instances (ACI) running HuggingFace Text Embeddings Inference (TEI), with idle timeout, context-manager teardown guarantees, and a wrapping embedding provider that integrates with the existing ``BaseEmbeddingProvider`` abstraction.
+
+**Dependencies:**
+- Step 7.12 (Embedding Provider Abstraction)
+- Azure account with resource group ``URAIT-USE1-NET-PROBLEMBANKGENERATOR-001-RGP``
+
+**New packages (added to** ``requirements.txt``**):**
+- ``azure-mgmt-containerinstance>=10.0`` — ACI ARM operations (create, delete, poll)
+- ``azure-identity>=1.15`` — ``DefaultAzureCredential`` (works with ``az login``, managed identity, env vars)
+
+**Files created:**
+- [`scripts/common/aci_tei_manager.py`](scripts/common/aci_tei_manager.py): ``ACITEIManager`` class + ``manager_from_env()`` convenience factory
+- [`src/study_query_llm/providers/aci_tei_embedding_provider.py`](src/study_query_llm/providers/aci_tei_embedding_provider.py): ``ACITEIEmbeddingProvider`` — extends ``OpenAICompatibleEmbeddingProvider``, pings idle timer on every call
+- [`tests/test_scripts/test_aci_tei_manager.py`](tests/test_scripts/test_aci_tei_manager.py): 24 unit tests for ``ACITEIManager`` with fully mocked Azure SDK
+- [`tests/test_providers/test_aci_tei_embedding.py`](tests/test_providers/test_aci_tei_embedding.py): 8 unit tests for ``ACITEIEmbeddingProvider``
+
+**Files updated:**
+- [`src/study_query_llm/providers/__init__.py`](src/study_query_llm/providers/__init__.py): Exports ``ACITEIEmbeddingProvider``
+- [`requirements.txt`](requirements.txt): Added Azure SDK dependencies
+- [`.env.example`](.env.example): Added ``AZURE_SUBSCRIPTION_ID``, ``AZURE_RESOURCE_GROUP``, ``ACI_TEI_LOCATION``, ``ACI_TEI_IDLE_TIMEOUT``
+
+**Design:**
+
+``ACITEIManager`` (synchronous, in ``scripts/common/``):
+- ``create()`` — calls ``begin_create_or_update()`` with TEI Docker image, polls until IP is assigned, then polls ``GET /health`` until model is loaded; starts idle timer; returns endpoint URL
+- ``delete()`` — calls ``begin_delete()``, cancels idle timer; idempotent (safe to call multiple times)
+- ``ping()`` — resets the idle ``threading.Timer``; called automatically by ``ACITEIEmbeddingProvider`` on every embedding request
+- ``_idle_shutdown()`` — called by the daemon timer thread when ``idle_timeout_seconds`` of inactivity elapses; triggers ``delete()``
+- Context manager ``__enter__``/``__exit__`` — ``create()`` on enter, ``delete()`` on exit (guaranteed cleanup even on crash)
+
+``ACITEIEmbeddingProvider`` (in ``src/study_query_llm/providers/``):
+- Extends ``OpenAICompatibleEmbeddingProvider`` — inherits all retry, batch, and caching delegation
+- ``create_embeddings()`` calls ``manager.ping()`` before the API request, then delegates to parent
+- ``close()`` closes the HTTP client only; ACI teardown is the caller's responsibility
+
+**Env vars (read directly by** ``ACITEIManager``/``manager_from_env``**):**
+
+| Variable | Required | Default |
+|---|---|---|
+| ``AZURE_SUBSCRIPTION_ID`` | Yes | — |
+| ``AZURE_RESOURCE_GROUP`` | No | ``URAIT-USE1-NET-PROBLEMBANKGENERATOR-001-RGP`` |
+| ``ACI_TEI_LOCATION`` | No | ``eastus`` |
+| ``ACI_TEI_IDLE_TIMEOUT`` | No | ``1800`` (30 min) |
+
+**Typical sweep usage:**
+
+```python
+from scripts.common.aci_tei_manager import manager_from_env
+from study_query_llm.providers.aci_tei_embedding_provider import ACITEIEmbeddingProvider
+from study_query_llm.services.embedding_service import EmbeddingService
+
+HF_MODELS = ["BAAI/bge-m3", "BAAI/bge-large-en-v1.5", "nomic-ai/nomic-embed-text-v1.5"]
+
+for model_id in HF_MODELS:
+    safe_name = model_id.replace("/", "-").lower()
+    with manager_from_env(f"tei-{safe_name}", model_id) as manager:
+        provider = ACITEIEmbeddingProvider(manager)
+        async with provider:
+            service = EmbeddingService(repository=repo, provider=provider)
+            # ... run embeddings for this model ...
+```
+
+**Cost notes:**
+- ACI CPU (4 vCPU, 16 GB): ~$0.15/hour (~$3.60/day)
+- Context manager and idle timer together ensure containers are not left running unintentionally
+- Set an Azure budget alert as an additional safety net
+
+---
+
 ## Next Steps
 - Implement OpenAI + Hyperbolic providers and expand `ProviderFactory`
 - Add conversation service if needed

@@ -33,9 +33,10 @@ from azure.mgmt.containerinstance import ContainerInstanceManagementClient
 logger = logging.getLogger(__name__)
 
 # TEI CPU image -- no CUDA driver needed, works on all ACI SKUs.
-# Swap to a GPU variant if you provision gpu_count > 0.
-_TEI_CPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.5"
-_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:1.5"
+# :1.9 (Ampere 80) is the generic GPU image used for ACI, which provisions
+# A100-class hardware.  Swap to :86-1.9 if you use A10/A40 ACI SKUs.
+_TEI_CPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9"
+_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:1.9"
 
 
 class ACITEIManager:

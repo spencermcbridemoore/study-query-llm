@@ -6,7 +6,11 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from scripts.common.local_docker_tei_manager import LocalDockerTEIManager, _TEI_GPU_IMAGE, _TEI_CPU_IMAGE
+from scripts.common.local_docker_tei_manager import (
+    LocalDockerTEIManager,
+    _TEI_GPU_IMAGE,
+    _TEI_CPU_IMAGE,
+)
 
 
 # ---------------------------------------------------------------------------

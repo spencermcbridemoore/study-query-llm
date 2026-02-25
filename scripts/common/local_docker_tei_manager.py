@@ -39,8 +39,12 @@ import docker.types
 
 logger = logging.getLogger(__name__)
 
-_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:1.5"
-_TEI_CPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.5"
+# :89-1.9 targets CUDA compute capability 8.9 (Ada Lovelace — RTX 4090, RTX 4000 series).
+# It enables Ada-specific Flash Attention 2 kernels for materially faster throughput
+# vs. the generic :1.9 image.  Swap to :86-1.9 for Ampere 86 (A10/A40) or
+# :1.9 for Ampere 80 (A100).
+_TEI_GPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:89-1.9"
+_TEI_CPU_IMAGE = "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9"
 
 # Default HuggingFace model cache directory on the host.
 # Shared with the conda environment and other tools so models are not

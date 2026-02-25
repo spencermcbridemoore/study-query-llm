@@ -11,7 +11,11 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from openai.types.embedding import Embedding as EmbeddingObj
 
-from study_query_llm.providers.managed_tei_embedding_provider import ManagedTEIEmbeddingProvider
+from study_query_llm.providers.managed_tei_embedding_provider import (
+    ManagedTEIEmbeddingProvider,
+    get_prompt_name_for_model,
+    _INSTRUCT_MODEL_PROMPT_NAMES,
+)
 from study_query_llm.providers.base_embedding import EmbeddingResult
 
 
@@ -200,3 +204,153 @@ def test_constructor_local_docker_endpoint():
 async def test_validate_model_defaults_to_true(provider):
     """Default validate_model always returns True (inherited from base)."""
     assert await provider.validate_model("any-model") is True
+
+
+# ---------------------------------------------------------------------------
+# get_prompt_name_for_model helper
+# ---------------------------------------------------------------------------
+
+def test_get_prompt_name_for_known_instruct_model():
+    """Known instruct models return 'query'."""
+    assert get_prompt_name_for_model("Qwen/Qwen3-Embedding-8B") == "query"
+    assert get_prompt_name_for_model("Alibaba-NLP/gte-Qwen2-7B-instruct") == "query"
+    assert get_prompt_name_for_model("intfloat/multilingual-e5-large-instruct") == "query"
+
+
+def test_get_prompt_name_for_unknown_model_returns_none():
+    """Non-instruct models return None."""
+    assert get_prompt_name_for_model("BAAI/bge-m3") is None
+    assert get_prompt_name_for_model("nomic-ai/nomic-embed-text-v1.5") is None
+    assert get_prompt_name_for_model("not-a-real-model") is None
+
+
+def test_instruct_model_registry_all_have_string_prompt_names():
+    """Every entry in the registry maps to a non-empty string."""
+    for model_id, name in _INSTRUCT_MODEL_PROMPT_NAMES.items():
+        assert isinstance(name, str) and name, f"{model_id!r} has invalid prompt_name {name!r}"
+
+
+# ---------------------------------------------------------------------------
+# prompt_name auto-detection (prompt_name="auto", the default)
+# ---------------------------------------------------------------------------
+
+def test_auto_sets_extra_body_for_instruct_model():
+    """Auto-mode sets _extra_body when model_id is in the registry."""
+    manager = MagicMock()
+    manager.endpoint_url = "http://localhost:8080/v1"
+    manager.model_id = "Qwen/Qwen3-Embedding-8B"
+    manager.provider_label = "local_docker_tei"
+
+    with patch("study_query_llm.providers.openai_compatible_embedding_provider.AsyncOpenAI"):
+        prov = ManagedTEIEmbeddingProvider(manager)
+
+    assert prov._extra_body == {"prompt_name": "query"}
+
+
+def test_auto_leaves_extra_body_none_for_non_instruct_model():
+    """Auto-mode does NOT set _extra_body for models not in the registry."""
+    manager = MagicMock()
+    manager.endpoint_url = "http://localhost:8080/v1"
+    manager.model_id = "BAAI/bge-m3"
+    manager.provider_label = "local_docker_tei"
+
+    with patch("study_query_llm.providers.openai_compatible_embedding_provider.AsyncOpenAI"):
+        prov = ManagedTEIEmbeddingProvider(manager)
+
+    assert prov._extra_body is None
+
+
+# ---------------------------------------------------------------------------
+# prompt_name explicit overrides
+# ---------------------------------------------------------------------------
+
+def test_explicit_prompt_name_overrides_registry():
+    """An explicit prompt_name string is used regardless of the registry."""
+    manager = MagicMock()
+    manager.endpoint_url = "http://localhost:8080/v1"
+    manager.model_id = "BAAI/bge-m3"  # not an instruct model
+    manager.provider_label = "local_docker_tei"
+
+    with patch("study_query_llm.providers.openai_compatible_embedding_provider.AsyncOpenAI"):
+        prov = ManagedTEIEmbeddingProvider(manager, prompt_name="passage")
+
+    assert prov._extra_body == {"prompt_name": "passage"}
+
+
+def test_prompt_name_none_disables_for_known_instruct_model():
+    """prompt_name=None suppresses prompt injection even for a registered model."""
+    manager = MagicMock()
+    manager.endpoint_url = "http://localhost:8080/v1"
+    manager.model_id = "Qwen/Qwen3-Embedding-8B"
+    manager.provider_label = "local_docker_tei"
+
+    with patch("study_query_llm.providers.openai_compatible_embedding_provider.AsyncOpenAI"):
+        prov = ManagedTEIEmbeddingProvider(manager, prompt_name=None)
+
+    assert prov._extra_body is None
+
+
+# ---------------------------------------------------------------------------
+# extra_body is forwarded to the API call
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extra_body_passed_to_api_for_instruct_model():
+    """For instruct models, extra_body={'prompt_name': 'query'} is sent to the API."""
+    manager = MagicMock()
+    manager.endpoint_url = "http://localhost:8080/v1"
+    manager.model_id = "Qwen/Qwen3-Embedding-4B"
+    manager.provider_label = "local_docker_tei"
+    manager.ping = MagicMock()
+
+    api_kwargs = {}
+
+    with patch(
+        "study_query_llm.providers.openai_compatible_embedding_provider.AsyncOpenAI"
+    ) as MockClient:
+        mock_client = AsyncMock()
+
+        async def capture_create(**kwargs):
+            api_kwargs.update(kwargs)
+            sdk_emb = EmbeddingObj(embedding=[0.1, 0.2], index=0, object="embedding")
+            resp = MagicMock()
+            resp.data = [sdk_emb]
+            return resp
+
+        mock_client.embeddings.create = capture_create
+        MockClient.return_value = mock_client
+        prov = ManagedTEIEmbeddingProvider(manager)
+        await prov.create_embeddings(["test"], "Qwen/Qwen3-Embedding-4B")
+
+    assert api_kwargs.get("extra_body") == {"prompt_name": "query"}
+
+
+@pytest.mark.asyncio
+async def test_no_extra_body_for_non_instruct_model():
+    """For non-instruct models, extra_body is not included in the API call."""
+    manager = MagicMock()
+    manager.endpoint_url = "http://localhost:8080/v1"
+    manager.model_id = "BAAI/bge-m3"
+    manager.provider_label = "local_docker_tei"
+    manager.ping = MagicMock()
+
+    api_kwargs = {}
+
+    with patch(
+        "study_query_llm.providers.openai_compatible_embedding_provider.AsyncOpenAI"
+    ) as MockClient:
+        mock_client = AsyncMock()
+
+        async def capture_create(**kwargs):
+            api_kwargs.update(kwargs)
+            sdk_emb = EmbeddingObj(embedding=[0.1, 0.2], index=0, object="embedding")
+            resp = MagicMock()
+            resp.data = [sdk_emb]
+            return resp
+
+        mock_client.embeddings.create = capture_create
+        MockClient.return_value = mock_client
+        prov = ManagedTEIEmbeddingProvider(manager)
+        await prov.create_embeddings(["test"], "BAAI/bge-m3")
+
+    assert "extra_body" not in api_kwargs

@@ -43,6 +43,10 @@ class OpenAICompatibleEmbeddingProvider(BaseEmbeddingProvider):
             provider_label,
         )
 
+    # Extra fields forwarded verbatim to the request body (e.g. TEI's
+    # ``prompt_name``).  Set via subclass __init__, not exposed in the ABC.
+    _extra_body: Optional[dict] = None
+
     async def create_embeddings(
         self,
         texts: List[str],
@@ -52,6 +56,8 @@ class OpenAICompatibleEmbeddingProvider(BaseEmbeddingProvider):
         params: dict = {"model": model, "input": texts}
         if dimensions is not None:
             params["dimensions"] = dimensions
+        if self._extra_body:
+            params["extra_body"] = self._extra_body
 
         response = await self._client.embeddings.create(**params)
 

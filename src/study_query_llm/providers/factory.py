@@ -11,6 +11,7 @@ from .base_embedding import BaseEmbeddingProvider
 from .azure_provider import AzureOpenAIProvider
 from .azure_embedding_provider import AzureEmbeddingProvider
 from .openai_compatible_embedding_provider import OpenAICompatibleEmbeddingProvider
+from .openai_compatible_chat_provider import OpenAICompatibleChatProvider
 from ..config import ProviderConfig, Config
 
 
@@ -101,7 +102,7 @@ class ProviderFactory:
         Returns:
             List of provider names that can be created by this factory
         """
-        return ["azure"]  # TODO: Add "openai", "hyperbolic" as they are implemented
+        return ["azure", "local_llm", "ollama"]
 
     def get_configured_providers(self) -> list[str]:
         """
@@ -155,6 +156,45 @@ class ProviderFactory:
     def get_available_embedding_providers() -> list[str]:
         """Return list of supported embedding provider names."""
         return ["azure", "openai", "huggingface", "local", "ollama"]
+
+    def create_chat_provider(
+        self, provider_name: str, model: str
+    ) -> BaseLLMProvider:
+        """Create a chat completion provider, with model specified at call-time.
+
+        For Azure, the ``model`` argument is ignored -- the deployment name
+        comes from config/env as usual.  For all other providers (``local_llm``,
+        ``ollama``), ``model`` is forwarded verbatim as the request-body
+        ``model`` field so one provider instance per model can be created
+        without touching env vars.
+
+        Args:
+            provider_name: ``'azure'``, ``'local_llm'``, or ``'ollama'``.
+            model: Model identifier string (e.g. ``"qwen2.5:32b"``).
+                   Ignored for Azure.
+
+        Returns:
+            A ``BaseLLMProvider`` ready to use.
+        """
+        # Normalise 'ollama' alias to the 'local_llm' config key
+        config_key = "local_llm" if provider_name == "ollama" else provider_name
+        provider_config = self.config.get_provider_config(config_key)
+
+        if provider_name == "azure":
+            return AzureOpenAIProvider(provider_config)
+
+        base_url = provider_config.endpoint or "http://localhost:11434/v1"
+        return OpenAICompatibleChatProvider(
+            base_url=base_url,
+            model=model,
+            api_key=provider_config.api_key,
+            provider_label=provider_name,
+        )
+
+    @staticmethod
+    def get_available_chat_providers() -> list[str]:
+        """Return list of supported chat provider names."""
+        return ["azure", "local_llm", "ollama"]
 
     async def list_provider_deployments(
         self,

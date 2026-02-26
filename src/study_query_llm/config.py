@@ -138,6 +138,18 @@ class Config:
                 ),
                 model=os.getenv("LOCAL_EMBEDDING_MODEL", ""),
             )
+        elif provider_name == "local_llm":
+            # Infrastructure-only config: endpoint + auth.
+            # Model is NOT read from env vars -- it is specified per-call
+            # in the sweep script's summarizer list and passed to
+            # ProviderFactory.create_chat_provider(provider, model).
+            config = ProviderConfig(
+                name="local_llm",
+                api_key=os.getenv("LOCAL_LLM_API_KEY", "not-needed"),
+                endpoint=os.getenv(
+                    "LOCAL_LLM_ENDPOINT", "http://localhost:11434/v1"
+                ),
+            )
         else:
             raise ValueError(f"Unknown provider: {provider_name}")
 
@@ -153,7 +165,7 @@ class Config:
             List of provider names with credentials set
         """
         available = []
-        for provider in ["azure", "openai", "hyperbolic", "huggingface", "local"]:
+        for provider in ["azure", "openai", "hyperbolic", "huggingface", "local", "local_llm"]:
             try:
                 self.get_provider_config(provider)
                 available.append(provider)

@@ -352,6 +352,19 @@ class ACITEIManager:
         self.delete()
 
     # ------------------------------------------------------------------
+    # ModelManager Protocol aliases
+    # ------------------------------------------------------------------
+
+    def start(self) -> str:
+        """Alias for ``create()`` so that ``ACITEIManager`` satisfies the
+        ``ModelManager`` protocol (which standardises on ``start``/``stop``)."""
+        return self.create()
+
+    def stop(self) -> None:
+        """Alias for ``delete()`` — see ``start()``."""
+        self.delete()
+
+    # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
 

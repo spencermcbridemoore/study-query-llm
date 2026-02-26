@@ -39,6 +39,7 @@ from study_query_llm.algorithms import SweepConfig
 from scripts.common.embedding_utils import fetch_embeddings_async
 from scripts.common.sweep_utils import (
     create_paraphraser_for_llm,
+    ollama_vram_scope,
     save_single_sweep_result as save_results,
     OUTPUT_DIR,
 )
@@ -372,86 +373,88 @@ async def main(force: bool = False):
                 # Use the SHARED embeddings from this embedding engine
                 embeddings = shared_embeddings
                 
-                # Run sweep with no-PCA config
-                result = None
-                try:
-                    result = await asyncio.wait_for(
-                        run_single_sweep_no_pca(
-                            filtered_texts, embeddings, llm_deployment, db,
-                            embedding_engine, NO_PCA_SWEEP_CONFIG,
-                            llm_provider=llm_provider,
-                            embedding_provider=embedding_provider,
-                        ),
-                        timeout=3600.0  # 1 hour timeout (longer for no-PCA)
-                    )
-                except asyncio.TimeoutError:
-                    print(f"      [ERROR] Sweep execution timed out after 1 hour")
-                    print(f"      [INFO] Skipping this run and continuing...")
-                    continue
-                except Exception as e:
-                    print(f"      [WARN] Sweep execution failed: {e}")
-                    print(f"      [INFO] Will attempt to continue...")
-                    import traceback
-                    traceback.print_exc()
-                    continue
+                # Wrap local-LLM iterations so VRAM is freed between models
+                with ollama_vram_scope(llm_deployment, llm_provider):
+                    # Run sweep with no-PCA config
+                    result = None
+                    try:
+                        result = await asyncio.wait_for(
+                            run_single_sweep_no_pca(
+                                filtered_texts, embeddings, llm_deployment, db,
+                                embedding_engine, NO_PCA_SWEEP_CONFIG,
+                                llm_provider=llm_provider,
+                                embedding_provider=embedding_provider,
+                            ),
+                            timeout=3600.0
+                        )
+                    except asyncio.TimeoutError:
+                        print(f"      [ERROR] Sweep execution timed out after 1 hour")
+                        print(f"      [INFO] Skipping this run and continuing...")
+                        continue
+                    except Exception as e:
+                        print(f"      [WARN] Sweep execution failed: {e}")
+                        print(f"      [INFO] Will attempt to continue...")
+                        import traceback
+                        traceback.print_exc()
+                        continue
                 
-                # Generate output filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_file = str(OUTPUT_DIR / (
-                    f"experimental_sweep_"
-                    f"entry{ENTRY_MAX}_"
-                    f"{dataset_name}_"
-                    f"labelmax{label_max}_"
-                    f"{engine_safe}_"
-                    f"{summarizer_name.replace('-', '_')}_"
-                    f"{timestamp}.pkl"
-                ))
+                    # Generate output filename
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    output_file = str(OUTPUT_DIR / (
+                        f"experimental_sweep_"
+                        f"entry{ENTRY_MAX}_"
+                        f"{dataset_name}_"
+                        f"labelmax{label_max}_"
+                        f"{engine_safe}_"
+                        f"{summarizer_name.replace('-', '_')}_"
+                        f"{timestamp}.pkl"
+                    ))
                 
-                # Save results with metadata
-                metadata = {
-                    "entry_max": ENTRY_MAX,
-                    "label_max": label_max,
-                    "actual_entry_count": len(filtered_texts),
-                    "actual_label_count": len(set(filtered_labels)),
-                    "benchmark_source": dataset_name,
-                    "categories": dataset_info['category_names'],
-                    "summarizer": summarizer_name,
-                    "llm_provider": llm_provider,
-                    "embedding_engine": embedding_engine,
-                    "embedding_provider": embedding_provider,
-                    "embedding_dimension": shared_embeddings.shape[1],
-                    "sweep_config": {
-                        "skip_pca": NO_PCA_SWEEP_CONFIG.skip_pca,
-                        "k_min": NO_PCA_SWEEP_CONFIG.k_min,
-                        "k_max": NO_PCA_SWEEP_CONFIG.k_max,
-                        "max_iter": NO_PCA_SWEEP_CONFIG.max_iter,
-                        "n_restarts": NO_PCA_SWEEP_CONFIG.n_restarts,
-                        "compute_stability": NO_PCA_SWEEP_CONFIG.compute_stability,
-                    },
-                    "note": "No-PCA multi-embedding sweep: full dimensions, extended k range (1-20), single run",
-                }
+                    # Save results with metadata
+                    metadata = {
+                        "entry_max": ENTRY_MAX,
+                        "label_max": label_max,
+                        "actual_entry_count": len(filtered_texts),
+                        "actual_label_count": len(set(filtered_labels)),
+                        "benchmark_source": dataset_name,
+                        "categories": dataset_info['category_names'],
+                        "summarizer": summarizer_name,
+                        "llm_provider": llm_provider,
+                        "embedding_engine": embedding_engine,
+                        "embedding_provider": embedding_provider,
+                        "embedding_dimension": shared_embeddings.shape[1],
+                        "sweep_config": {
+                            "skip_pca": NO_PCA_SWEEP_CONFIG.skip_pca,
+                            "k_min": NO_PCA_SWEEP_CONFIG.k_min,
+                            "k_max": NO_PCA_SWEEP_CONFIG.k_max,
+                            "max_iter": NO_PCA_SWEEP_CONFIG.max_iter,
+                            "n_restarts": NO_PCA_SWEEP_CONFIG.n_restarts,
+                            "compute_stability": NO_PCA_SWEEP_CONFIG.compute_stability,
+                        },
+                        "note": "No-PCA multi-embedding sweep: full dimensions, extended k range (1-20), single run",
+                    }
                 
-                try:
-                    saved_file = save_results(
-                        result,
-                        output_file,
-                        ground_truth_labels=filtered_labels,
-                        dataset_name=dataset_name,
-                        metadata=metadata,
-                    )
-                    print(f"      [OK] Saved to: {Path(saved_file).name}")
-                except Exception as e:
-                    print(f"      [ERROR] Failed to save results file: {e}")
-                    print(f"      [WARN] Results were computed but could not be saved!")
-                    import traceback
-                    traceback.print_exc()
+                    try:
+                        saved_file = save_results(
+                            result,
+                            output_file,
+                            ground_truth_labels=filtered_labels,
+                            dataset_name=dataset_name,
+                            metadata=metadata,
+                        )
+                        print(f"      [OK] Saved to: {Path(saved_file).name}")
+                    except Exception as e:
+                        print(f"      [ERROR] Failed to save results file: {e}")
+                        print(f"      [WARN] Results were computed but could not be saved!")
+                        import traceback
+                        traceback.print_exc()
                 
-                # Progress update
-                elapsed = time.time() - start_time
-                avg_time = elapsed / run_count
-                remaining = (total_runs - run_count) * avg_time
-                print(f"      Progress: {run_count}/{total_runs} ({100*run_count/total_runs:.1f}%)")
-                print(f"      Elapsed: {elapsed/3600:.2f}h | ETA: {remaining/3600:.1f}h")
+                    # Progress update
+                    elapsed = time.time() - start_time
+                    avg_time = elapsed / run_count
+                    remaining = (total_runs - run_count) * avg_time
+                    print(f"      Progress: {run_count}/{total_runs} ({100*run_count/total_runs:.1f}%)")
+                    print(f"      Elapsed: {elapsed/3600:.2f}h | ETA: {remaining/3600:.1f}h")
     
     total_elapsed = time.time() - start_time
     print(f"\n{'='*80}")

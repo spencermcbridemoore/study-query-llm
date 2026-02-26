@@ -1,6 +1,7 @@
 """Sweep result saving and paraphraser factory shared across sweep scripts."""
 
 import asyncio
+import contextlib
 import pickle
 import sys
 from collections import defaultdict
@@ -22,6 +23,35 @@ from study_query_llm.services.summarization_service import (
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "experimental_results"
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# VRAM lifecycle helper
+# ---------------------------------------------------------------------------
+
+_LOCAL_LLM_PROVIDERS = {"local_llm", "ollama"}
+
+
+@contextlib.contextmanager
+def ollama_vram_scope(model: Optional[str], provider: str):
+    """Context manager that loads/unloads an Ollama model when *provider* is local.
+
+    For non-local providers (e.g. ``"azure"``) this is a transparent no-op.
+
+    Usage in sweep loops::
+
+        for llm_deployment, llm_provider in LLM_SUMMARIZERS:
+            with ollama_vram_scope(llm_deployment, llm_provider):
+                result = await run_single_sweep(...)
+    """
+    if model is None or provider not in _LOCAL_LLM_PROVIDERS:
+        yield
+        return
+
+    from scripts.common.ollama_model_manager import OllamaModelManager
+
+    with OllamaModelManager(model) as _mgr:
+        yield
 
 
 # ---------------------------------------------------------------------------

@@ -45,6 +45,7 @@ from study_query_llm.algorithms import SweepConfig, run_sweep
 from scripts.common.embedding_utils import fetch_embeddings_async
 from scripts.common.sweep_utils import (
     create_paraphraser_for_llm,
+    ollama_vram_scope,
     save_single_sweep_result as save_results,
     OUTPUT_DIR,
 )
@@ -763,81 +764,77 @@ async def main():
                     # The LLM will ONLY influence centroid updates via paraphraser in run_sweep()
                     embeddings = shared_embeddings
                     
-                    # Run sweep - wrap in try/except to ensure file is saved even if DB fails
-                    result = None
-                    try:
-                        # Add timeout for sweep execution (30 minutes)
-                        # Note: We pass sampled_texts (original) and shared_embeddings (from original texts)
-                        # The paraphraser is used ONLY inside clustering for in-loop centroid updates
-                        # This ensures we test "which LLM makes better centroids" not "which summaries embed better"
-                        result = await asyncio.wait_for(
-                            run_single_sweep(sampled_texts, embeddings, llm_deployment, db, llm_provider),
-                            timeout=1800.0
-                        )
-                    except asyncio.TimeoutError:
-                        print(f"        [ERROR] Sweep execution timed out after 30 minutes")
-                        print(f"        [INFO] Skipping this run and continuing...")
-                        continue
-                    except Exception as e:
-                        print(f"        [WARN] Sweep execution failed: {e}")
-                        print(f"        [INFO] Will attempt to save any partial results...")
-                        import traceback
-                        traceback.print_exc()
-                        # If sweep failed, we can't save results, but continue to next
-                        continue
+                    # Wrap local-LLM iterations so VRAM is freed between models
+                    with ollama_vram_scope(llm_deployment, llm_provider):
+                        # Run sweep - wrap in try/except to ensure file is saved even if DB fails
+                        result = None
+                        try:
+                            result = await asyncio.wait_for(
+                                run_single_sweep(sampled_texts, embeddings, llm_deployment, db, llm_provider),
+                                timeout=1800.0
+                            )
+                        except asyncio.TimeoutError:
+                            print(f"        [ERROR] Sweep execution timed out after 30 minutes")
+                            print(f"        [INFO] Skipping this run and continuing...")
+                            continue
+                        except Exception as e:
+                            print(f"        [WARN] Sweep execution failed: {e}")
+                            print(f"        [INFO] Will attempt to save any partial results...")
+                            import traceback
+                            traceback.print_exc()
+                            continue
                     
-                    # Generate output filename
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    output_file = str(OUTPUT_DIR / (
-                        f"experimental_sweep_"
-                        f"entry{entry_max}_"
-                        f"{source_name}_"
-                        f"labelmax{label_max}_"
-                        f"{summarizer_name.replace('-', '_')}_"
-                        f"{timestamp}.pkl"
-                    ))
+                        # Generate output filename
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        output_file = str(OUTPUT_DIR / (
+                            f"experimental_sweep_"
+                            f"entry{entry_max}_"
+                            f"{source_name}_"
+                            f"labelmax{label_max}_"
+                            f"{summarizer_name.replace('-', '_')}_"
+                            f"{timestamp}.pkl"
+                        ))
                     
-                    # Save results with metadata - ensure this happens even if DB operations fail
-                    metadata = {
-                        "entry_max": entry_max,
-                        "label_max": label_max,
-                        "actual_entry_count": actual_entry_count,
-                        "actual_label_count": actual_label_count,
-                        "benchmark_source": source_name,
-                        "categories": benchmark_source.get('categories'),
-                        "summarizer": summarizer_name,
-                        "embedding_deployment": EMBEDDING_DEPLOYMENT,
-                        "sweep_config": {
-                            "pca_dim": SWEEP_CONFIG.pca_dim,
-                            "k_min": SWEEP_CONFIG.k_min,
-                            "k_max": SWEEP_CONFIG.k_max,
-                            "max_iter": SWEEP_CONFIG.max_iter,
-                            "n_restarts": SWEEP_CONFIG.n_restarts,
-                        },
-                    }
+                        # Save results with metadata - ensure this happens even if DB operations fail
+                        metadata = {
+                            "entry_max": entry_max,
+                            "label_max": label_max,
+                            "actual_entry_count": actual_entry_count,
+                            "actual_label_count": actual_label_count,
+                            "benchmark_source": source_name,
+                            "categories": benchmark_source.get('categories'),
+                            "summarizer": summarizer_name,
+                            "embedding_deployment": EMBEDDING_DEPLOYMENT,
+                            "sweep_config": {
+                                "pca_dim": SWEEP_CONFIG.pca_dim,
+                                "k_min": SWEEP_CONFIG.k_min,
+                                "k_max": SWEEP_CONFIG.k_max,
+                                "max_iter": SWEEP_CONFIG.max_iter,
+                                "n_restarts": SWEEP_CONFIG.n_restarts,
+                            },
+                        }
                     
-                    try:
-                        saved_file = save_results(
-                            result,
-                            output_file,
-                            ground_truth_labels=sampled_labels,
-                            dataset_name=source_name,
-                            metadata=metadata,
-                        )
-                        print(f"        [OK] Saved to: {saved_file}")
-                    except Exception as e:
-                        print(f"        [ERROR] Failed to save results file: {e}")
-                        print(f"        [WARN] Results were computed but could not be saved!")
-                        import traceback
-                        traceback.print_exc()
-                        # Continue anyway - don't let file save failure stop the experiment
+                        try:
+                            saved_file = save_results(
+                                result,
+                                output_file,
+                                ground_truth_labels=sampled_labels,
+                                dataset_name=source_name,
+                                metadata=metadata,
+                            )
+                            print(f"        [OK] Saved to: {saved_file}")
+                        except Exception as e:
+                            print(f"        [ERROR] Failed to save results file: {e}")
+                            print(f"        [WARN] Results were computed but could not be saved!")
+                            import traceback
+                            traceback.print_exc()
                     
-                    # Progress update
-                    elapsed = time.time() - start_time
-                    avg_time = elapsed / run_count
-                    remaining = (total_runs - run_count) * avg_time
-                    print(f"        Progress: {run_count}/{total_runs} ({100*run_count/total_runs:.1f}%)")
-                    print(f"        ETA: {remaining/3600:.1f} hours")
+                        # Progress update
+                        elapsed = time.time() - start_time
+                        avg_time = elapsed / run_count
+                        remaining = (total_runs - run_count) * avg_time
+                        print(f"        Progress: {run_count}/{total_runs} ({100*run_count/total_runs:.1f}%)")
+                        print(f"        ETA: {remaining/3600:.1f} hours")
     
     total_elapsed = time.time() - start_time
     print(f"\n{'='*80}")

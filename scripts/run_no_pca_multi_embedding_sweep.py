@@ -58,14 +58,17 @@ from datetime import datetime
 import glob
 from concurrent.futures import ThreadPoolExecutor
 
-# Embedding engines to test
+# Embedding engines to test.
+# Each entry is a (model, provider) tuple.
+# provider can be "azure", "openai", "huggingface", "local", "ollama", etc.
+# Example local entries: ("BAAI/bge-m3", "ollama"), ("nomic-embed-text", "ollama")
 EMBEDDING_ENGINES = [
-    "embed-v-4-0",  # Hyperbolic
-    "Cohere-embed-v3-multilingual",
-    "Cohere-embed-v3-english",
-    "text-embedding-ada-002",  # OpenAI legacy
-    "text-embedding-3-large",  # OpenAI
-    "text-embedding-3-small",  # OpenAI
+    ("embed-v-4-0", "azure"),             # Hyperbolic via Azure
+    ("Cohere-embed-v3-multilingual", "azure"),
+    ("Cohere-embed-v3-english", "azure"),
+    ("text-embedding-ada-002", "azure"),  # OpenAI legacy via Azure
+    ("text-embedding-3-large", "azure"),  # OpenAI via Azure
+    ("text-embedding-3-small", "azure"),  # OpenAI via Azure
 ]
 
 # Single entry_max value
@@ -109,7 +112,8 @@ NO_PCA_SWEEP_CONFIG = SweepConfig(
 
 
 async def run_single_sweep_no_pca(
-    texts, embeddings, llm_deployment, db, embedding_engine, sweep_config
+    texts, embeddings, llm_deployment, db, embedding_engine, sweep_config,
+    llm_provider: str = "azure", embedding_provider: str = "azure",
 ):
     """
     Run sweep with no-PCA config and custom embedding engine.
@@ -117,18 +121,20 @@ async def run_single_sweep_no_pca(
     Args:
         texts: List of text strings
         embeddings: Pre-computed embeddings (full-dimensional)
-        llm_deployment: LLM to use for summarization (or None)
+        llm_deployment: LLM model name to use for summarization (or None)
         db: Database connection
-        embedding_engine: Name of embedding engine used
+        embedding_engine: Name of embedding engine / model used
         sweep_config: SweepConfig with skip_pca=True
+        llm_provider: Provider for the paraphraser (default "azure")
+        embedding_provider: Provider for the embedder used in centroid updates (default "azure")
     """
     from study_query_llm.algorithms.sweep import run_sweep
     
-    paraphraser = create_paraphraser_for_llm(llm_deployment, db)
+    paraphraser = create_paraphraser_for_llm(llm_deployment, db, provider=llm_provider)
     
     async def embedder_func(texts_list):
         """Embed texts using the specified embedding engine."""
-        return await fetch_embeddings_async(texts_list, embedding_engine, db)
+        return await fetch_embeddings_async(texts_list, embedding_engine, db, provider_name=embedding_provider)
     
     def embedder_sync(texts_list):
         """Synchronous wrapper for embedder."""
@@ -270,8 +276,10 @@ async def main(force: bool = False):
         print(f"  Sampled: {actual_entry_count} entries, {actual_label_count} unique labels (all categories)")
         
         # Loop over embedding engines
-        for embedding_engine in EMBEDDING_ENGINES:
-            print(f"\n  EMBEDDING ENGINE: {embedding_engine}")
+        for engine_entry in EMBEDDING_ENGINES:
+            # Unpack (model, provider) tuple
+            embedding_engine, embedding_provider = engine_entry
+            print(f"\n  EMBEDDING ENGINE: {embedding_engine} (provider: {embedding_provider})")
             
             # Filter texts that exceed token limit for this embedding engine
             max_tokens = DEPLOYMENT_MAX_TOKENS.get(embedding_engine)
@@ -318,7 +326,10 @@ async def main(force: bool = False):
                         fetch_embeddings_async,
                     )
                 else:
-                    shared_embeddings = await fetch_embeddings_async(filtered_texts, embedding_engine, db)
+                    shared_embeddings = await fetch_embeddings_async(
+                        filtered_texts, embedding_engine, db,
+                        provider_name=embedding_provider,
+                    )
                 print(f"    [OK] Fetched {len(shared_embeddings)} embeddings (shape: {shared_embeddings.shape})")
                 print(f"    [INFO] Embedding dimension: {shared_embeddings.shape[1]} (full, no PCA)")
             except Exception as e:
@@ -329,7 +340,13 @@ async def main(force: bool = False):
                 continue
             
             # Run sweep for each LLM summarizer
-            for llm_deployment in LLM_SUMMARIZERS:
+            for summarizer_entry in LLM_SUMMARIZERS:
+                # Unpack (model, provider) tuple or handle None
+                if summarizer_entry is None:
+                    llm_deployment = None
+                    llm_provider = "azure"
+                else:
+                    llm_deployment, llm_provider = summarizer_entry
                 run_count += 1
                 summarizer_name = "None" if llm_deployment is None else llm_deployment
                 
@@ -350,7 +367,7 @@ async def main(force: bool = False):
                     print(f"\n      [{run_count}/{total_runs}] {summarizer_name} (SKIP - already exists)")
                     continue
                 
-                print(f"\n      [{run_count}/{total_runs}] Summarizer: {summarizer_name}")
+                print(f"\n      [{run_count}/{total_runs}] Summarizer: {summarizer_name} (provider: {llm_provider})")
                 
                 # Use the SHARED embeddings from this embedding engine
                 embeddings = shared_embeddings
@@ -361,7 +378,9 @@ async def main(force: bool = False):
                     result = await asyncio.wait_for(
                         run_single_sweep_no_pca(
                             filtered_texts, embeddings, llm_deployment, db,
-                            embedding_engine, NO_PCA_SWEEP_CONFIG
+                            embedding_engine, NO_PCA_SWEEP_CONFIG,
+                            llm_provider=llm_provider,
+                            embedding_provider=embedding_provider,
                         ),
                         timeout=3600.0  # 1 hour timeout (longer for no-PCA)
                     )
@@ -397,8 +416,10 @@ async def main(force: bool = False):
                     "benchmark_source": dataset_name,
                     "categories": dataset_info['category_names'],
                     "summarizer": summarizer_name,
-                    "embedding_engine": embedding_engine,  # NEW: Track embedding engine
-                    "embedding_dimension": shared_embeddings.shape[1],  # NEW: Track dimension
+                    "llm_provider": llm_provider,
+                    "embedding_engine": embedding_engine,
+                    "embedding_provider": embedding_provider,
+                    "embedding_dimension": shared_embeddings.shape[1],
                     "sweep_config": {
                         "skip_pca": NO_PCA_SWEEP_CONFIG.skip_pca,
                         "k_min": NO_PCA_SWEEP_CONFIG.k_min,

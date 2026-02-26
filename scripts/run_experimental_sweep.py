@@ -67,12 +67,15 @@ except ImportError:
 # Embedding deployment
 EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small")
 
-# LLM deployments for summarization
+# LLM deployments for summarization.
+# Each entry is either None (no paraphraser) or a (model, provider) tuple.
+# provider can be "azure", "local_llm", "ollama", etc.
+# Example local entries: ("qwen2.5:32b", "local_llm"), ("mistral-small:24b", "local_llm")
 LLM_SUMMARIZERS = [
     None,  # Non-LLM summaries (just use original representatives)
-    "gpt-4o-mini",
-    "gpt-4o",
-    "gpt-5-chat",
+    ("gpt-4o-mini", "azure"),
+    ("gpt-4o", "azure"),
+    ("gpt-5-chat", "azure"),
 ]
 
 # Experimental parameters
@@ -536,6 +539,7 @@ async def run_single_sweep(
     embeddings: np.ndarray,
     llm_deployment: Optional[str],
     db: DatabaseConnectionV2,
+    llm_provider: str = "azure",
 ) -> Any:
     """
     Run a single sweep for a given LLM deployment.
@@ -553,7 +557,7 @@ async def run_single_sweep(
     summarizer_name = "None" if llm_deployment is None else llm_deployment
     
     # Create paraphraser for in-loop centroid updates (None if no LLM)
-    paraphraser = create_paraphraser_for_llm(llm_deployment, db)
+    paraphraser = create_paraphraser_for_llm(llm_deployment, db, provider=llm_provider)
     
     # Create embedder for re-embedding LLM summaries during centroid updates
     # This is ONLY used inside k_llmmeans for centroid calculation, NOT for the data points
@@ -729,7 +733,13 @@ async def main():
                 # Run sweep for each LLM summarizer sequentially (save separate pickle for each)
                 # NOTE: All summarizers use the SAME embeddings from original texts
                 # LLM influence is ONLY during in-loop centroid updates via paraphraser
-                for llm_deployment in LLM_SUMMARIZERS:
+                for summarizer_entry in LLM_SUMMARIZERS:
+                    # Unpack (model, provider) tuple or handle None
+                    if summarizer_entry is None:
+                        llm_deployment = None
+                        llm_provider = "azure"
+                    else:
+                        llm_deployment, llm_provider = summarizer_entry
                     run_count += 1
                     summarizer_name = "None" if llm_deployment is None else llm_deployment
                     
@@ -761,7 +771,7 @@ async def main():
                         # The paraphraser is used ONLY inside clustering for in-loop centroid updates
                         # This ensures we test "which LLM makes better centroids" not "which summaries embed better"
                         result = await asyncio.wait_for(
-                            run_single_sweep(sampled_texts, embeddings, llm_deployment, db),
+                            run_single_sweep(sampled_texts, embeddings, llm_deployment, db, llm_provider),
                             timeout=1800.0
                         )
                     except asyncio.TimeoutError:

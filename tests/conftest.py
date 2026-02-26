@@ -5,6 +5,10 @@ This file is automatically discovered by pytest and provides fixtures
 available to all test modules.
 """
 
+import json
+import urllib.request
+import urllib.error
+
 import pytest
 import asyncio
 from typing import AsyncGenerator
@@ -248,4 +252,77 @@ def variable_provider():
             return "variable_provider"
     
     return VariableProvider()
+
+
+# ---------------------------------------------------------------------------
+# Integration test fixtures
+# ---------------------------------------------------------------------------
+
+OLLAMA_API = "http://localhost:11434"
+
+
+@pytest.fixture(scope="session")
+def ollama_available():
+    """Skip the entire test if the Ollama server is not reachable.
+
+    Usage::
+
+        @pytest.mark.requires_ollama
+        def test_something(ollama_available):
+            ...
+    """
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_API}/api/tags", timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            models = {m["name"] for m in data.get("models", [])}
+            return models
+    except Exception:
+        pytest.skip("Ollama is not running at localhost:11434")
+
+
+@pytest.fixture(scope="session")
+def tei_manager_factory():
+    """Return a factory function that creates a ``LocalDockerTEIManager``.
+
+    The fixture itself does NOT start a container; individual tests call the
+    factory with their desired ``model_id``.  The container is stopped in
+    teardown.  Skips if Docker is unavailable.
+
+    Usage::
+
+        @pytest.mark.requires_tei
+        @pytest.mark.requires_gpu
+        def test_embedding(tei_manager_factory):
+            with tei_manager_factory("nomic-ai/nomic-embed-text-v1.5") as mgr:
+                endpoint = mgr.endpoint_url
+                ...
+    """
+    try:
+        import docker
+        docker.from_env().ping()
+    except Exception:
+        pytest.skip("Docker is not available (needed for TEI containers)")
+
+    from scripts.common.local_docker_tei_manager import LocalDockerTEIManager
+
+    managers: list = []
+
+    def _create(model_id: str, port: int = 9900, **kwargs) -> LocalDockerTEIManager:
+        mgr = LocalDockerTEIManager(
+            model_id=model_id,
+            port=port,
+            idle_timeout_seconds=300,
+            container_name=f"tei-pytest-{model_id.replace('/', '-').replace('.', '-').lower()}",
+            **kwargs,
+        )
+        managers.append(mgr)
+        return mgr
+
+    yield _create
+
+    for mgr in managers:
+        try:
+            mgr.stop()
+        except Exception:
+            pass
 

@@ -8,6 +8,9 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from study_query_llm.providers.factory import ProviderFactory
 from study_query_llm.providers.azure_provider import AzureOpenAIProvider
+from study_query_llm.providers.openai_compatible_chat_provider import (
+    OpenAICompatibleChatProvider,
+)
 from study_query_llm.providers.base import DeploymentInfo
 from study_query_llm.config import ProviderConfig, Config
 
@@ -167,4 +170,56 @@ async def test_list_provider_deployments_returns_deployment_info():
     with patch.object(AzureOpenAIProvider, "list_deployments", new_callable=AsyncMock, return_value=mock_deployments):
         result = await factory.list_provider_deployments("azure")
     assert all(isinstance(d, DeploymentInfo) for d in result)
+
+
+# ---------------------------------------------------------------------------
+# create_chat_provider tests
+# ---------------------------------------------------------------------------
+
+
+def test_create_chat_provider_local_llm():
+    """create_chat_provider('local_llm', model) returns OpenAICompatibleChatProvider."""
+    with patch(
+        "study_query_llm.providers.openai_compatible_chat_provider.AsyncOpenAI"
+    ):
+        factory = ProviderFactory()
+        provider = factory.create_chat_provider("local_llm", "qwen2.5:32b")
+
+        assert isinstance(provider, OpenAICompatibleChatProvider)
+        assert provider._model == "qwen2.5:32b"
+        assert provider.get_provider_name() == "local_llm"
+
+
+def test_create_chat_provider_ollama_alias():
+    """'ollama' is an alias that maps to the local_llm config."""
+    with patch(
+        "study_query_llm.providers.openai_compatible_chat_provider.AsyncOpenAI"
+    ):
+        factory = ProviderFactory()
+        provider = factory.create_chat_provider("ollama", "llama3.1:8b")
+
+        assert isinstance(provider, OpenAICompatibleChatProvider)
+        assert provider._model == "llama3.1:8b"
+
+
+def test_create_chat_provider_azure():
+    """create_chat_provider('azure', ...) returns AzureOpenAIProvider."""
+    factory = ProviderFactory()
+    # Need Azure env to be configured; test with explicit config
+    config = Config()
+    try:
+        config.get_provider_config("azure")
+    except ValueError:
+        pytest.skip("Azure credentials not configured")
+
+    provider = factory.create_chat_provider("azure", "gpt-4o")
+    assert isinstance(provider, AzureOpenAIProvider)
+
+
+def test_get_available_chat_providers():
+    """get_available_chat_providers includes azure, local_llm, ollama."""
+    providers = ProviderFactory.get_available_chat_providers()
+    assert "azure" in providers
+    assert "local_llm" in providers
+    assert "ollama" in providers
 

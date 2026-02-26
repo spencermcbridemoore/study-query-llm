@@ -299,3 +299,69 @@ async def test_summarize_batch_without_repository(mock_inference_service):
 
         assert len(result.summaries) == 1
         assert result.raw_call_ids == [0]  # No persistence, so 0 placeholder
+
+
+# ---------------------------------------------------------------------------
+# local_llm provider path tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_summarize_batch_local_llm_uses_create_chat_provider(
+    mock_inference_service, db_connection
+):
+    """Non-Azure provider uses factory.create_chat_provider() directly."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = SummarizationService(repository=repo)
+
+        request = SummarizationRequest(
+            texts=["Text 1"],
+            llm_deployment="llama3.1:8b",
+            provider="local_llm",
+            validate_deployment=False,
+        )
+
+        with patch(
+            "study_query_llm.services.summarization_service.ProviderFactory"
+        ) as MockFactory, patch(
+            "study_query_llm.services.summarization_service.InferenceService",
+            return_value=mock_inference_service,
+        ):
+            mock_factory = MockFactory.return_value
+            mock_factory.create_chat_provider.return_value = AsyncMock()
+
+            result = await service.summarize_batch(request)
+
+            mock_factory.create_chat_provider.assert_called_once_with(
+                "local_llm", "llama3.1:8b"
+            )
+            assert len(result.summaries) == 1
+
+
+@pytest.mark.asyncio
+async def test_validate_deployment_local_llm_uses_create_chat_provider():
+    """_validate_deployment for non-Azure uses create_chat_provider."""
+    service = SummarizationService(repository=None)
+
+    with patch(
+        "study_query_llm.services.summarization_service.ProviderFactory"
+    ) as MockFactory, patch(
+        "study_query_llm.services.summarization_service.InferenceService"
+    ) as MockInference:
+        mock_factory = MockFactory.return_value
+        mock_factory.create_chat_provider.return_value = AsyncMock()
+        mock_svc = AsyncMock()
+        mock_svc.run_inference = AsyncMock(
+            return_value={"response": "ok", "metadata": {}}
+        )
+        MockInference.return_value = mock_svc
+
+        result = await service._validate_deployment(
+            "llama3.1:8b", provider="local_llm"
+        )
+
+        mock_factory.create_chat_provider.assert_called_once_with(
+            "local_llm", "llama3.1:8b"
+        )
+        assert result is True

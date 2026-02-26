@@ -263,15 +263,18 @@ def test_get_groups_for_call(v2_db_connection):
 
 def test_get_or_create_defective_group(v2_db_connection):
     """Test getting or creating the defective_data group."""
+    from study_query_llm.services.data_quality_service import DataQualityService
+    
     with v2_db_connection.session_scope() as session:
         repo = RawCallRepository(session)
+        quality_service = DataQualityService(repo)
         
         # First call should create the group
-        group_id1 = repo.get_or_create_defective_group()
+        group_id1 = quality_service.get_or_create_defective_group()
         assert group_id1 > 0
         
         # Second call should return the same group
-        group_id2 = repo.get_or_create_defective_group()
+        group_id2 = quality_service.get_or_create_defective_group()
         assert group_id2 == group_id1
         
         # Verify group properties
@@ -283,30 +286,36 @@ def test_get_or_create_defective_group(v2_db_connection):
 
 def test_is_call_defective(v2_db_connection):
     """Test checking if a call is marked as defective."""
+    from study_query_llm.services.data_quality_service import DataQualityService
+    
     with v2_db_connection.session_scope() as session:
         repo = RawCallRepository(session)
+        quality_service = DataQualityService(repo)
         
         # Create test calls
         call_id1 = repo.insert_raw_call("test", {"prompt": "P1"}, response_json={"text": "R1"})
         call_id2 = repo.insert_raw_call("test", {"prompt": "P2"}, response_json={"text": "R2"})
         
         # Initially, calls should not be defective
-        assert not repo.is_call_defective(call_id1)
-        assert not repo.is_call_defective(call_id2)
+        assert not quality_service.is_call_defective(call_id1)
+        assert not quality_service.is_call_defective(call_id2)
         
         # Mark call_id1 as defective
-        group_id = repo.get_or_create_defective_group()
+        group_id = quality_service.get_or_create_defective_group()
         repo.add_call_to_group(group_id, call_id1, role="bogus_run")
         
         # Now call_id1 should be defective, call_id2 should not
-        assert repo.is_call_defective(call_id1)
-        assert not repo.is_call_defective(call_id2)
+        assert quality_service.is_call_defective(call_id1)
+        assert not quality_service.is_call_defective(call_id2)
 
 
 def test_query_raw_calls_excluding_defective(v2_db_connection):
     """Test querying raw calls with defective exclusion."""
+    from study_query_llm.services.data_quality_service import DataQualityService
+    
     with v2_db_connection.session_scope() as session:
         repo = RawCallRepository(session)
+        quality_service = DataQualityService(repo)
         
         # Create test calls with different modalities
         call_id1 = repo.insert_raw_call("test", {"input": "text1"}, modality="embedding", response_json={"embedding": [0.1, 0.2]})
@@ -314,7 +323,7 @@ def test_query_raw_calls_excluding_defective(v2_db_connection):
         call_id3 = repo.insert_raw_call("test", {"input": "text3"}, modality="text", response_json={"text": "response"})
         
         # Mark call_id2 as defective
-        group_id = repo.get_or_create_defective_group()
+        group_id = quality_service.get_or_create_defective_group()
         repo.add_call_to_group(group_id, call_id2, role="bogus_embedding")
         
         # Query all embeddings - should exclude call_id2

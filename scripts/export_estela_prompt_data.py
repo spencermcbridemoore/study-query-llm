@@ -2,9 +2,18 @@
 """
 Export the estela database dict to notebooks/estela_prompt_data.pkl.
 
+notebooks/estela_prompt_data.pkl is the SOURCE OF TRUTH for all experiments.
+It is committed to git and should only be updated deliberately by running this
+script and committing the result.  Do NOT regenerate the pkl mid-experiment.
+
 Loads data/estela/estela_db.py (which defines database_estela_dict and uses
-datetime.date). The pickle is the format expected by load_estela_dict() in
-analyze_dataset_lengths.py and analyze_dbpedia_character_length_grid.py.
+datetime.date objects). The pickle preserves those native Python types and is
+the format expected by load_estela_dict() across all sweep and analysis scripts.
+
+To update the snapshot:
+    python scripts/export_estela_prompt_data.py
+    git add notebooks/estela_prompt_data.pkl
+    git commit -m "data: update estela snapshot (<reason>)"
 """
 
 import runpy

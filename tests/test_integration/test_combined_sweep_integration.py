@@ -4,6 +4,9 @@ Tier 4 -- Combined integration tests.
 Require BOTH a running TEI Docker container AND Ollama server simultaneously.
 This is the real-world smoke test for the full local sweep pipeline.
 
+Uses ``OllamaModelManager`` as a context manager so VRAM is deterministically
+reclaimed after the test module finishes.
+
 Run with:
     pytest tests/test_integration/test_combined_sweep_integration.py -m "requires_tei and requires_ollama"
 """
@@ -17,6 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from scripts.common.ollama_model_manager import OllamaModelManager
 from study_query_llm.providers.openai_compatible_embedding_provider import (
     OpenAICompatibleEmbeddingProvider,
 )
@@ -26,7 +30,6 @@ from study_query_llm.providers.openai_compatible_chat_provider import (
 
 TEI_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 CHAT_MODEL = "llama3.1:8b"
-OLLAMA_URL = "http://localhost:11434/v1"
 TEI_PORT = 9900
 
 
@@ -49,11 +52,18 @@ def tei_endpoint(tei_manager_factory):
     mgr.stop()
 
 
+@pytest.fixture(scope="module")
+def ollama_chat_mgr(ollama_available):
+    """Module-scoped OllamaModelManager -- model loaded once, unloaded at teardown."""
+    with OllamaModelManager(CHAT_MODEL, idle_timeout_seconds=300) as mgr:
+        yield mgr
+
+
 @pytest.mark.requires_tei
 @pytest.mark.requires_ollama
 @pytest.mark.requires_gpu
 @pytest.mark.asyncio
-async def test_embedding_and_summarizer_coexist(tei_endpoint, ollama_available):
+async def test_embedding_and_summarizer_coexist(tei_endpoint, ollama_chat_mgr):
     """TEI and Ollama serving simultaneously -- embed 20 texts, then summarize 3."""
     texts = [f"Sample text number {i} about science and nature." for i in range(20)]
 
@@ -69,7 +79,7 @@ async def test_embedding_and_summarizer_coexist(tei_endpoint, ollama_available):
     assert embeddings.shape[1] > 0
 
     chat_provider = OpenAICompatibleChatProvider(
-        base_url=OLLAMA_URL, model=CHAT_MODEL
+        base_url=ollama_chat_mgr.endpoint_url, model=ollama_chat_mgr.model_id,
     )
     summaries = []
     for text in texts[:3]:
@@ -90,7 +100,7 @@ async def test_embedding_and_summarizer_coexist(tei_endpoint, ollama_available):
 @pytest.mark.requires_gpu
 @pytest.mark.slow
 @pytest.mark.asyncio
-async def test_mini_sweep_local(tei_endpoint, ollama_available):
+async def test_mini_sweep_local(tei_endpoint, ollama_chat_mgr):
     """Run a small sweep with local embedder + local paraphraser end-to-end."""
     os.environ["LOCAL_EMBEDDING_ENDPOINT"] = tei_endpoint
 

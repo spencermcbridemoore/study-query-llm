@@ -326,3 +326,42 @@ def tei_manager_factory():
         except Exception:
             pass
 
+
+@pytest.fixture(scope="session")
+def ollama_model_manager_factory(ollama_available):
+    """Return a factory that creates ``OllamaModelManager`` instances.
+
+    All managers created during the session are stopped (model unloaded,
+    VRAM freed) in teardown.  Skips if Ollama is not reachable.
+
+    Usage::
+
+        @pytest.mark.requires_ollama
+        def test_something(ollama_model_manager_factory):
+            with ollama_model_manager_factory("llama3.1:8b") as mgr:
+                provider = OpenAICompatibleChatProvider(
+                    base_url=mgr.endpoint_url, model=mgr.model_id,
+                )
+                ...
+    """
+    from scripts.common.ollama_model_manager import OllamaModelManager
+
+    managers: list = []
+
+    def _create(model_id: str, **kwargs) -> OllamaModelManager:
+        mgr = OllamaModelManager(
+            model_id=model_id,
+            idle_timeout_seconds=kwargs.pop("idle_timeout_seconds", 300),
+            **kwargs,
+        )
+        managers.append(mgr)
+        return mgr
+
+    yield _create
+
+    for mgr in managers:
+        try:
+            mgr.stop()
+        except Exception:
+            pass
+

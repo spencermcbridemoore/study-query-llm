@@ -125,18 +125,25 @@ class SummarizationService:
             True if deployment is valid, False otherwise
         """
         try:
-            with deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment) if provider == "azure" else _nullcontext():
-                fresh_config = Config()
-                if provider in fresh_config._provider_configs:
-                    del fresh_config._provider_configs[provider]
-                fresh_config.get_provider_config(provider)
+            if provider == "azure":
+                # Azure ties model identity to the deployment name in the URL,
+                # so we must temporarily override the env var before Config().
+                with deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment):
+                    fresh_config = Config()
+                    if provider in fresh_config._provider_configs:
+                        del fresh_config._provider_configs[provider]
+                    fresh_config.get_provider_config(provider)
+                    factory = ProviderFactory(fresh_config)
+                    provider_instance = factory.create_from_config(provider)
+            else:
+                # For local/OpenAI-compatible providers the model is just a
+                # request-body field -- no env-var dance needed.
+                factory = ProviderFactory()
+                provider_instance = factory.create_chat_provider(provider, deployment)
 
-                factory = ProviderFactory(fresh_config)
-                provider_instance = factory.create_from_config(provider)
-                service = InferenceService(provider_instance, repository=None)
-
-                await service.run_inference("ping", temperature=0.0, max_tokens=1)
-                return True
+            service = InferenceService(provider_instance, repository=None)
+            await service.run_inference("ping", temperature=0.0, max_tokens=1)
+            return True
 
         except Exception as e:
             logger.warning(
@@ -294,116 +301,125 @@ class SummarizationService:
                         raw_call_ids.append(call_id)
                 raise error
 
-        # Temporarily override deployment BEFORE creating config
-        _cm = deployment_override("AZURE_OPENAI_DEPLOYMENT", request.llm_deployment) if request.provider == "azure" else _nullcontext()
-        with _cm:
-            fresh_config = Config()
-            if request.provider in fresh_config._provider_configs:
-                del fresh_config._provider_configs[request.provider]
-            fresh_config.get_provider_config(request.provider)
+        if request.provider == "azure":
+            # Azure encodes model identity in the deployment URL, so the name
+            # must be injected via env var before a fresh Config() is built.
+            _cm = deployment_override("AZURE_OPENAI_DEPLOYMENT", request.llm_deployment)
+            with _cm:
+                fresh_config = Config()
+                if request.provider in fresh_config._provider_configs:
+                    del fresh_config._provider_configs[request.provider]
+                fresh_config.get_provider_config(request.provider)
+                factory = ProviderFactory(fresh_config)
+                provider_instance = factory.create_from_config(request.provider)
+        else:
+            # For OpenAI-compatible local providers (local_llm, ollama, etc.)
+            # the model is simply a request-body field -- pass it directly.
+            factory = ProviderFactory()
+            provider_instance = factory.create_chat_provider(
+                request.provider, request.llm_deployment
+            )
 
-            factory = ProviderFactory(fresh_config)
-            provider_instance = factory.create_from_config(request.provider)
-            service = InferenceService(
-                provider_instance, repository=None
-            )  # We'll log manually
+        service = InferenceService(
+            provider_instance, repository=None
+        )  # We'll log manually
 
-            # Process all texts concurrently
-            async def summarize_one(text: str) -> tuple[str, int, Optional[Exception]]:
-                """Summarize a single text and return (summary, call_id, error)."""
-                import time
+        # Process all texts concurrently
+        async def summarize_one(text: str) -> tuple[str, int, Optional[Exception]]:
+            """Summarize a single text and return (summary, call_id, error)."""
+            import time
 
-                start_time = time.time()
-                call_id = None
-                error = None
-                summary = None
+            start_time = time.time()
+            call_id = None
+            error = None
+            summary = None
 
-                try:
-                    prompt = request.prompt_template.format(text=text)
+            try:
+                prompt = request.prompt_template.format(text=text)
 
-                    result = await service.run_inference(
-                        prompt,
-                        temperature=request.temperature,
-                        max_tokens=request.max_tokens,
-                    )
-
-                    summary = result["response"].strip()
-                    latency_ms = (time.time() - start_time) * 1000
-
-                    # Log success
-                    call_id = self._log_summarization_call(
-                        text=text,
-                        summary=summary,
-                        deployment=request.llm_deployment,
-                        provider=request.provider,
-                        request=request,
-                        latency_ms=latency_ms,
-                    )
-
-                except Exception as e:
-                    latency_ms = (time.time() - start_time) * 1000
-                    error = e
-
-                    # Log failure
-                    call_id = self._log_summarization_call(
-                        text=text,
-                        summary=None,
-                        deployment=request.llm_deployment,
-                        provider=request.provider,
-                        request=request,
-                        error=error,
-                        latency_ms=latency_ms,
-                    )
-
-                    # Re-raise for batch processing (we'll collect errors)
-                    raise
-
-                return summary, call_id or 0, error
-
-            # Process all texts concurrently
-            tasks = [summarize_one(text) for text in request.texts]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Collect summaries and call IDs
-            summaries = []
-            raw_call_ids = []
-            errors = []
-
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    # Error occurred
-                    errors.append((i, result))
-                    summaries.append("")  # Placeholder
-                    raw_call_ids.append(0)  # Placeholder (already logged)
-                else:
-                    summary, call_id, error = result
-                    summaries.append(summary)
-                    raw_call_ids.append(call_id)
-                    if error:
-                        errors.append((i, error))
-
-            # If all failed, raise an error
-            if len(errors) == len(request.texts):
-                error_msg = f"All {len(request.texts)} summarizations failed"
-                raise RuntimeError(error_msg) from errors[0][1]
-
-            # Log any partial failures
-            if errors:
-                logger.warning(
-                    f"{len(errors)} out of {len(request.texts)} summarizations failed"
+                result = await service.run_inference(
+                    prompt,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
                 )
 
-            return SummarizationResponse(
-                summaries=summaries,
-                raw_call_ids=raw_call_ids,
-                metadata={
-                    "deployment": request.llm_deployment,
-                    "provider": request.provider,
-                    "total_texts": len(request.texts),
-                    "successful": len(summaries) - len(errors),
-                    "failed": len(errors),
-                },
+                summary = result["response"].strip()
+                latency_ms = (time.time() - start_time) * 1000
+
+                # Log success
+                call_id = self._log_summarization_call(
+                    text=text,
+                    summary=summary,
+                    deployment=request.llm_deployment,
+                    provider=request.provider,
+                    request=request,
+                    latency_ms=latency_ms,
+                )
+
+            except Exception as e:
+                latency_ms = (time.time() - start_time) * 1000
+                error = e
+
+                # Log failure
+                call_id = self._log_summarization_call(
+                    text=text,
+                    summary=None,
+                    deployment=request.llm_deployment,
+                    provider=request.provider,
+                    request=request,
+                    error=error,
+                    latency_ms=latency_ms,
+                )
+
+                # Re-raise for batch processing (we'll collect errors)
+                raise
+
+            return summary, call_id or 0, error
+
+        # Process all texts concurrently
+        tasks = [summarize_one(text) for text in request.texts]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect summaries and call IDs
+        summaries = []
+        raw_call_ids = []
+        errors = []
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                # Error occurred
+                errors.append((i, result))
+                summaries.append("")  # Placeholder
+                raw_call_ids.append(0)  # Placeholder (already logged)
+            else:
+                summary, call_id, error = result
+                summaries.append(summary)
+                raw_call_ids.append(call_id)
+                if error:
+                    errors.append((i, error))
+
+        # If all failed, raise an error
+        if len(errors) == len(request.texts):
+            error_msg = f"All {len(request.texts)} summarizations failed"
+            raise RuntimeError(error_msg) from errors[0][1]
+
+        # Log any partial failures
+        if errors:
+            logger.warning(
+                f"{len(errors)} out of {len(request.texts)} summarizations failed"
             )
+
+        return SummarizationResponse(
+            summaries=summaries,
+            raw_call_ids=raw_call_ids,
+            metadata={
+                "deployment": request.llm_deployment,
+                "provider": request.provider,
+                "total_texts": len(request.texts),
+                "successful": len(summaries) - len(errors),
+                "failed": len(errors),
+            },
+        )
 
     def create_paraphraser_for_llm(
         self, llm_deployment: str, provider: str = "azure"

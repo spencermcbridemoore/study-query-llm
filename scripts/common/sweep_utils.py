@@ -33,6 +33,7 @@ def create_paraphraser_for_llm(
     llm_deployment: Optional[str],
     db: DatabaseConnectionV2,
     *,
+    provider: str = "azure",
     combine_texts: bool = True,
     temperature: float = 0.2,
     max_tokens: int = 256,
@@ -41,8 +42,10 @@ def create_paraphraser_for_llm(
     """Create a synchronous paraphraser callable for use inside ``run_sweep``.
 
     Args:
-        llm_deployment: Azure deployment name (``None`` → return ``None``).
+        llm_deployment: Model/deployment name (``None`` → return ``None``).
         db: Database connection for the summarization service.
+        provider: Provider name, e.g. ``"azure"``, ``"local_llm"``,
+            ``"ollama"``.  Defaults to ``"azure"`` for backward compatibility.
         combine_texts: When ``True`` (default), concatenate all input texts
             into a single prompt and return one summary string.  When
             ``False``, pass texts directly to ``SummarizationService`` and
@@ -71,6 +74,7 @@ def create_paraphraser_for_llm(
                 request = SummarizationRequest(
                     texts=req_texts,
                     llm_deployment=llm_deployment,
+                    provider=provider,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )

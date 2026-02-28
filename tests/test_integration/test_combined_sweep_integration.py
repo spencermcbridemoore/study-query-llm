@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tier 4 -- Combined integration tests.
 
 Require BOTH a running TEI Docker container AND Ollama server simultaneously.
@@ -106,7 +106,7 @@ async def test_mini_sweep_local(tei_endpoint, ollama_chat_mgr):
 
     from study_query_llm.db.connection_v2 import DatabaseConnectionV2
     from study_query_llm.algorithms.sweep import run_sweep, SweepConfig
-    from scripts.common.embedding_utils import fetch_embeddings_async
+    from study_query_llm.services.embedding_helpers import fetch_embeddings_async
     from scripts.common.sweep_utils import create_paraphraser_for_llm
 
     db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)

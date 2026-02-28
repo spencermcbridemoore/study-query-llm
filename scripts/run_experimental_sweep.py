@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Experimental PCA KLLMeans Sweep - Nested Parameter Exploration
 
@@ -42,7 +42,7 @@ from study_query_llm.services.summarization_service import SummarizationService,
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
 
-from scripts.common.embedding_utils import fetch_embeddings_async
+from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from scripts.common.sweep_utils import (
     create_paraphraser_for_llm,
     ollama_vram_scope,

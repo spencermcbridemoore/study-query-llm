@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 PCA KLLMeans Sweep - Full Data Source Support
 
@@ -39,7 +39,7 @@ from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
 
 from study_query_llm.utils.text_utils import flatten_prompt_dict, clean_texts, is_prompt_key
-from scripts.common.embedding_utils import fetch_embeddings_async
+from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from scripts.common.sweep_utils import (
     create_paraphraser_for_llm,
     save_batch_sweep_results as save_results,

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Custom Sweep: Full Categories, Variable K and Entry Count
 
 Configuration:
@@ -29,7 +29,7 @@ from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYME
 from study_query_llm.algorithms import SweepConfig
 
 # Shared script utilities
-from scripts.common.embedding_utils import fetch_embeddings_async
+from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from scripts.common.sweep_utils import (
     create_paraphraser_for_llm,
     save_single_sweep_result as save_results,

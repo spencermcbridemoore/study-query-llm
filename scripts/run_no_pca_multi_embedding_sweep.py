@@ -1,4 +1,4 @@
-"""
+﻿"""
 No-PCA Multi-Embedding Sweep: Test Multiple Embedding Engines Without Dimensionality Reduction
 
 Configuration:
@@ -36,7 +36,7 @@ from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYME
 from study_query_llm.algorithms import SweepConfig
 
 # Shared script utilities
-from scripts.common.embedding_utils import fetch_embeddings_async
+from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from scripts.common.sweep_utils import (
     create_paraphraser_for_llm,
     ollama_vram_scope,

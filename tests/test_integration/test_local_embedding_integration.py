@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tier 2 -- Embedding-only integration tests.
 
 Require a running TEI Docker container with GPU support.
@@ -109,7 +109,7 @@ async def test_fetch_embeddings_async_local_provider(tei_endpoint):
     os.environ["LOCAL_EMBEDDING_ENDPOINT"] = tei_endpoint
 
     from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-    from scripts.common.embedding_utils import fetch_embeddings_async
+    from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 
     db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
     db.init_db()

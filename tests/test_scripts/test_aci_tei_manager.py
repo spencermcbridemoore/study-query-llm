@@ -10,7 +10,7 @@ import pytest
 # The module is in scripts/common which is not a proper package install,
 # so we import it directly. The conftest.py / pytest.ini setup should have
 # sys.path configured so that `scripts/` is importable.
-from scripts.common.aci_tei_manager import ACITEIManager, manager_from_env
+from study_query_llm.providers.managers.aci_tei import ACITEIManager, manager_from_env
 
 
 # ---------------------------------------------------------------------------
@@ -69,9 +69,9 @@ def test_get_client_creates_management_client():
     mock_client = MagicMock()
 
     with patch(
-        "scripts.common.aci_tei_manager.DefaultAzureCredential"
+        "study_query_llm.providers.managers.aci_tei.DefaultAzureCredential"
     ) as MockCred, patch(
-        "scripts.common.aci_tei_manager.ContainerInstanceManagementClient"
+        "study_query_llm.providers.managers.aci_tei.ContainerInstanceManagementClient"
     ) as MockClient:
         MockClient.return_value = mock_client
         result = manager._get_client()
@@ -84,8 +84,8 @@ def test_get_client_creates_management_client():
 def test_get_client_is_cached():
     """_get_client() returns the same client on repeated calls."""
     manager = _make_manager()
-    with patch("scripts.common.aci_tei_manager.DefaultAzureCredential"), \
-         patch("scripts.common.aci_tei_manager.ContainerInstanceManagementClient") as MockClient:
+    with patch("study_query_llm.providers.managers.aci_tei.DefaultAzureCredential"), \
+         patch("study_query_llm.providers.managers.aci_tei.ContainerInstanceManagementClient") as MockClient:
         MockClient.return_value = MagicMock()
         c1 = manager._get_client()
         c2 = manager._get_client()
@@ -100,7 +100,7 @@ def test_get_client_is_cached():
 
 def test_build_container_group_cpu_image():
     """CPU image is used when gpu_count == 0."""
-    from scripts.common.aci_tei_manager import _TEI_CPU_IMAGE
+    from study_query_llm.providers.managers.aci_tei import _TEI_CPU_IMAGE
 
     manager = _make_manager(gpu_count=0)
     with _patch_aci_models():
@@ -112,7 +112,7 @@ def test_build_container_group_cpu_image():
 
 def test_build_container_group_gpu_image():
     """GPU image is used when gpu_count > 0."""
-    from scripts.common.aci_tei_manager import _TEI_GPU_IMAGE
+    from study_query_llm.providers.managers.aci_tei import _TEI_GPU_IMAGE
 
     manager = _make_manager(gpu_count=1, gpu_sku="V100")
     with _patch_aci_models():
@@ -499,7 +499,7 @@ def test_manager_from_env_raises_without_subscription_id(monkeypatch):
 def _patch_aci_sdk(aci_client):
     """Patch DefaultAzureCredential and ContainerInstanceManagementClient."""
     return patch.multiple(
-        "scripts.common.aci_tei_manager",
+        "study_query_llm.providers.managers.aci_tei",
         DefaultAzureCredential=MagicMock(return_value=MagicMock()),
         ContainerInstanceManagementClient=MagicMock(return_value=aci_client),
     )

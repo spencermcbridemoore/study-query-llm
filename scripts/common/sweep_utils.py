@@ -48,7 +48,7 @@ def ollama_vram_scope(model: Optional[str], provider: str):
         yield
         return
 
-    from scripts.common.ollama_model_manager import OllamaModelManager
+    from study_query_llm.providers.managers import OllamaModelManager
 
     with OllamaModelManager(model) as _mgr:
         yield

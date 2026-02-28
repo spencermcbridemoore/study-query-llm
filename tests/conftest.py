@@ -303,7 +303,7 @@ def tei_manager_factory():
     except Exception:
         pytest.skip("Docker is not available (needed for TEI containers)")
 
-    from scripts.common.local_docker_tei_manager import LocalDockerTEIManager
+    from study_query_llm.providers.managers import LocalDockerTEIManager
 
     managers: list = []
 
@@ -344,7 +344,7 @@ def ollama_model_manager_factory(ollama_available):
                 )
                 ...
     """
-    from scripts.common.ollama_model_manager import OllamaModelManager
+    from study_query_llm.providers.managers import OllamaModelManager
 
     managers: list = []
 

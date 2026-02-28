@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from scripts.common.ollama_model_manager import OllamaModelManager
+from study_query_llm.providers.managers import OllamaModelManager
 from study_query_llm.providers.openai_compatible_embedding_provider import (
     OpenAICompatibleEmbeddingProvider,
 )

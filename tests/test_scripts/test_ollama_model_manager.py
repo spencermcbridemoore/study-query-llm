@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from scripts.common.ollama_model_manager import OllamaModelManager
+from study_query_llm.providers.managers.ollama import OllamaModelManager
 
 
 # ---------------------------------------------------------------------------

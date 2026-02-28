@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from scripts.common.local_docker_tei_manager import (
+from study_query_llm.providers.managers.local_docker_tei import (
     LocalDockerTEIManager,
     _TEI_GPU_IMAGE,
     _TEI_CPU_IMAGE,
@@ -40,7 +40,7 @@ def _make_docker_client(container=None):
 
 
 def _patch_docker(client):
-    return patch("scripts.common.local_docker_tei_manager.docker.from_env", return_value=client)
+    return patch("study_query_llm.providers.managers.local_docker_tei.docker.from_env", return_value=client)
 
 
 def _patch_health():

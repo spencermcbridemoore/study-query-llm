@@ -5,10 +5,12 @@ verify that each concrete class satisfies the structural interface at
 runtime via ``isinstance()``.
 """
 
-from scripts.common.model_manager_protocol import ModelManager
-from scripts.common.ollama_model_manager import OllamaModelManager
-from scripts.common.local_docker_tei_manager import LocalDockerTEIManager
-from scripts.common.aci_tei_manager import ACITEIManager
+from study_query_llm.providers.managers import (
+    ModelManager,
+    OllamaModelManager,
+    LocalDockerTEIManager,
+    ACITEIManager,
+)
 
 
 def test_ollama_model_manager_satisfies_protocol():

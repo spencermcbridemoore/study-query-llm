@@ -8,6 +8,8 @@ from .session_utils import (
     ensure_plans_dir,
     sanitize_for_filename,
 )
+from .text_utils import is_prompt_key, flatten_prompt_dict, clean_texts
+from .estela_loader import load_estela_dict
 
 __all__ = [
     "get_logger",
@@ -17,5 +19,9 @@ __all__ = [
     "get_plan_filename",
     "ensure_plans_dir",
     "sanitize_for_filename",
+    "is_prompt_key",
+    "flatten_prompt_dict",
+    "clean_texts",
+    "load_estela_dict",
 ]
 

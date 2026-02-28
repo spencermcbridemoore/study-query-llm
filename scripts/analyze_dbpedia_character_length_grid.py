@@ -27,7 +27,7 @@ sys.path.insert(0, _REPO_ROOT)
 from scripts.run_experimental_sweep import load_dbpedia_full, load_yahoo_answers_full
 from study_query_llm.services.embedding_service import estimate_tokens
 
-from scripts.common.data_utils import flatten_prompt_dict as _flatten_prompt_dict, clean_texts as _clean_texts
+from study_query_llm.utils.text_utils import flatten_prompt_dict as _flatten_prompt_dict, clean_texts as _clean_texts
 
 PCT_LEVELS = [0, 1, 5, 10, 25, 50, 75, 90, 95, 99, 100]
 PCT_NAMES = ["min", "1st", "5th", "10th", "25th", "50th", "75th", "90th", "95th", "99th", "max"]

@@ -21,7 +21,7 @@ from scripts.run_experimental_sweep import (
     BENCHMARK_SOURCES,
     load_benchmark_dataset,
 )
-from scripts.common.data_utils import flatten_prompt_dict, clean_texts
+from study_query_llm.utils.text_utils import flatten_prompt_dict, clean_texts
 
 _clean_texts = clean_texts  # backward-compat alias
 

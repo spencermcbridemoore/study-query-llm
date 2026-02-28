@@ -38,8 +38,8 @@ from scripts.common.sweep_utils import (
     ingest_result_to_db,
     OUTPUT_DIR,
 )
-from scripts.common.estela_loader import load_estela_dict
-from scripts.common.data_utils import flatten_prompt_dict
+from study_query_llm.utils.estela_loader import load_estela_dict
+from study_query_llm.utils.text_utils import flatten_prompt_dict
 from scripts.run_experimental_sweep import (
     load_dbpedia_full,
     load_yahoo_answers_full,

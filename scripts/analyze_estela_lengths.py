@@ -16,7 +16,7 @@ from typing import List, Tuple, Dict
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.common.data_utils import flatten_prompt_dict
+from study_query_llm.utils.text_utils import flatten_prompt_dict
 
 
 def load_estela_dict() -> List[str]:

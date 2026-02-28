@@ -38,7 +38,7 @@ from study_query_llm.services.summarization_service import SummarizationService,
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
 
-from scripts.common.data_utils import flatten_prompt_dict, clean_texts, is_prompt_key
+from study_query_llm.utils.text_utils import flatten_prompt_dict, clean_texts, is_prompt_key
 from scripts.common.embedding_utils import fetch_embeddings_async
 from scripts.common.sweep_utils import (
     create_paraphraser_for_llm,

@@ -85,10 +85,13 @@ def create_embeddings_ui() -> pn.viewable.Viewable:
                             cache_misses += 1
 
                 call_ids = [c.id for c in embedding_calls if c.status == 'success']
+                vectors = []
+                vector_by_call_id: dict = {}
                 if call_ids:
                     vectors = session.query(EmbeddingVector).filter(
                         EmbeddingVector.call_id.in_(call_ids)
                     ).all()
+                    vector_by_call_id = {v.call_id: v for v in vectors}
                     dimensions = {v.dimension for v in vectors}
                     avg_dimension = sum(dimensions) / len(dimensions) if dimensions else 0
                 else:
@@ -117,7 +120,7 @@ def create_embeddings_ui() -> pn.viewable.Viewable:
                         if isinstance(request, dict):
                             input_text = request.get('input', '') or request.get('text', '') or ''
 
-                        vector = session.query(EmbeddingVector).filter_by(call_id=call.id).first()
+                        vector = vector_by_call_id.get(call.id)
 
                         cached = False
                         if call.metadata_json and isinstance(call.metadata_json, dict):
@@ -141,27 +144,19 @@ def create_embeddings_ui() -> pn.viewable.Viewable:
                 else:
                     embeddings_table.object = None
 
-                if call_ids:
-                    vectors = session.query(EmbeddingVector).filter(
-                        EmbeddingVector.call_id.in_(call_ids[:50])
-                    ).all()
-
-                    if vectors:
-                        vectors_data = []
-                        for vector in vectors:
-                            call = session.query(RawCall).filter_by(id=vector.call_id).first()
-                            vectors_data.append({
-                                'call_id': vector.call_id,
-                                'deployment': call.model if call else 'N/A',
-                                'dimension': vector.dimension,
-                                'norm': f"{vector.norm:.4f}" if vector.norm else 'N/A',
-                                'has_vector': 'Yes' if vector.vector else 'No',
-                            })
-
-                        vectors_df = pd.DataFrame(vectors_data)
-                        embedding_vectors_table.object = vectors_df
-                    else:
-                        embedding_vectors_table.object = None
+                if vectors:
+                    call_by_id = {c.id: c for c in embedding_calls}
+                    vectors_data = []
+                    for vector in vectors[:50]:
+                        call = call_by_id.get(vector.call_id)
+                        vectors_data.append({
+                            'call_id': vector.call_id,
+                            'deployment': call.model if call else 'N/A',
+                            'dimension': vector.dimension,
+                            'norm': f"{vector.norm:.4f}" if vector.norm else 'N/A',
+                            'has_vector': 'Yes' if vector.vector else 'No',
+                        })
+                    embedding_vectors_table.object = pd.DataFrame(vectors_data)
                 else:
                     embedding_vectors_table.object = None
 

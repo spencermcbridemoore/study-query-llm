@@ -1,4 +1,4 @@
-"""Tests for scripts.common.local_docker_tei_manager.LocalDockerTEIManager."""
+"""Tests for study_query_llm.providers.managers.local_docker_tei.LocalDockerTEIManager."""
 
 import time
 from pathlib import Path

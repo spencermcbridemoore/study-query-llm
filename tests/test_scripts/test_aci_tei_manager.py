@@ -1,4 +1,4 @@
-"""Tests for scripts.common.aci_tei_manager.ACITEIManager."""
+"""Tests for study_query_llm.providers.managers.aci_tei.ACITEIManager."""
 
 import os
 import threading

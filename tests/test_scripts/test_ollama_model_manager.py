@@ -1,4 +1,4 @@
-"""Tests for scripts.common.ollama_model_manager.OllamaModelManager.
+"""Tests for study_query_llm.providers.managers.ollama.OllamaModelManager.
 
 All Ollama API calls are mocked -- no live server required.
 """

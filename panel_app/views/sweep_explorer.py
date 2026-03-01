@@ -614,8 +614,10 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         role_sels[dim].param.watch(make_role_callback(dim), "value")
         val_filters[dim].param.watch(refresh_plot, "value")
 
-    for widget in [y_axis_sel, x_axis_sel, agg_radio, height_slider, k_slider]:
+    for widget in [y_axis_sel, x_axis_sel, agg_radio]:
         widget.param.watch(refresh_plot, "value")
+    for widget in [height_slider, k_slider]:
+        widget.param.watch(refresh_plot, "value_throttled")
 
     # --- Layout ---
     dim_roles_row = pn.Row(*[dim_blocks[dim] for dim in CATEGORICAL_DIMS])

@@ -59,7 +59,8 @@ def create_dashboard() -> pn.viewable.Viewable:
         ("Embeddings", embeddings_tab),
         ("Groups", groups_tab),
         ("Sweep Explorer", sweep_explorer_tab),
-        sizing_mode='stretch_width'
+        sizing_mode='stretch_width',
+        dynamic=True,
     )
 
     return tabs

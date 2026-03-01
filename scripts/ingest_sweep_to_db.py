@@ -38,11 +38,10 @@ from study_query_llm.utils.logging_config import get_logger, setup_logging
 setup_logging()
 logger = get_logger(__name__)
 
-# Re-use the extraction helpers from sweep_explorer
-from panel_app.views.sweep_explorer import (
-    _rows_from_50runs,
-    _rows_from_sweep,
-    _dist_from_z,
+from study_query_llm.experiments.result_metrics import (
+    rows_from_50runs as _rows_from_50runs,
+    rows_from_sweep as _rows_from_sweep,
+    dist_from_result as _dist_from_z,
     METRICS,
 )
 

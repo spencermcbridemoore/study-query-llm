@@ -50,17 +50,7 @@ def load_50runs_pickles(data_dir: Path) -> list:
     return out
 
 
-def _dist_from_z(result: dict) -> np.ndarray | None:
-    dist = result.get("dist")
-    if dist is not None:
-        return np.asarray(dist)
-    Z = result.get("Z")
-    if Z is None:
-        return None
-    Z = np.asarray(Z)
-    norms = np.linalg.norm(Z, axis=1, keepdims=True)
-    Z_norm = Z / np.maximum(norms, 1e-12)
-    return np.clip(1.0 - (Z_norm @ Z_norm.T), 0.0, 2.0)
+from study_query_llm.experiments.result_metrics import dist_from_result as _dist_from_z
 
 
 def extract_50_values_per_metric(loaded: list, k_range: list[int] | None = None):

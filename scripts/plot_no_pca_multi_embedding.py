@@ -79,14 +79,7 @@ def _silhouette_precomputed(labels, dist, silhouette_score_fn):
     return float(silhouette_score_fn(dist, labels, metric="precomputed"))
 
 
-def _dist_from_z(result: dict) -> np.ndarray | None:
-    Z = result.get("Z")
-    if Z is None:
-        return None
-    Z = np.asarray(Z)
-    norms = np.linalg.norm(Z, axis=1, keepdims=True)
-    Z_norm = Z / np.maximum(norms, 1e-12)
-    return np.clip(1.0 - (Z_norm @ Z_norm.T), 0.0, 2.0)
+from study_query_llm.experiments.result_metrics import dist_from_result as _dist_from_z
 
 
 def build_grid_data(loaded: list, k_range: list[int] | None = None):

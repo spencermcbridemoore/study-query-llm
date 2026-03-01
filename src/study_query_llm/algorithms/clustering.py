@@ -323,8 +323,6 @@ def k_llmmeans(
     use_llm = (
         paraphraser is not None
         and embedder is not None
-        and pca_components is not None
-        and pca_mean is not None
     )
 
     n_iter = 0

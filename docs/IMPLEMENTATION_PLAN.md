@@ -919,7 +919,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - [`src/study_query_llm/providers/__init__.py`](src/study_query_llm/providers/__init__.py): Exports for new classes
 - [`src/study_query_llm/config.py`](src/study_query_llm/config.py): Added ``"huggingface"`` and ``"local"`` provider config entries
 - [`src/study_query_llm/services/embedding_service.py`](src/study_query_llm/services/embedding_service.py): Accepts ``provider`` parameter; delegates API calls to injected ``BaseEmbeddingProvider``; removed Azure-specific client code
-- [`scripts/common/embedding_utils.py`](scripts/common/embedding_utils.py): Added ``provider_name`` parameter (default ``"azure"``) to ``fetch_embeddings_async()``
+- [`src/study_query_llm/services/embedding_helpers.py`](src/study_query_llm/services/embedding_helpers.py): ``fetch_embeddings_async()`` with ``provider_name`` parameter (default ``"azure"``)
 
 **Design:**
 - ``BaseEmbeddingProvider(ABC)`` defines ``create_embeddings()``, ``get_provider_name()``, ``close()``, and optional ``validate_model()``
@@ -950,7 +950,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - ``azure-identity>=1.15`` — ``DefaultAzureCredential`` (works with ``az login``, managed identity, env vars)
 
 **Files created:**
-- [`scripts/common/aci_tei_manager.py`](scripts/common/aci_tei_manager.py): ``ACITEIManager`` class + ``manager_from_env()`` convenience factory
+- [`src/study_query_llm/providers/managers/aci_tei.py`](src/study_query_llm/providers/managers/aci_tei.py): ``ACITEIManager`` class + ``manager_from_env()`` convenience factory
 - [`src/study_query_llm/providers/aci_tei_embedding_provider.py`](src/study_query_llm/providers/aci_tei_embedding_provider.py): ``ACITEIEmbeddingProvider`` — extends ``OpenAICompatibleEmbeddingProvider``, pings idle timer on every call
 - [`tests/test_scripts/test_aci_tei_manager.py`](tests/test_scripts/test_aci_tei_manager.py): 24 unit tests for ``ACITEIManager`` with fully mocked Azure SDK
 - [`tests/test_providers/test_aci_tei_embedding.py`](tests/test_providers/test_aci_tei_embedding.py): 8 unit tests for ``ACITEIEmbeddingProvider``
@@ -962,7 +962,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 **Design:**
 
-``ACITEIManager`` (synchronous, in ``scripts/common/``):
+``ACITEIManager`` (synchronous, in ``src/study_query_llm/providers/managers/``):
 - ``create()`` — calls ``begin_create_or_update()`` with TEI Docker image, polls until IP is assigned, then polls ``GET /health`` until model is loaded; starts idle timer; returns endpoint URL
 - ``delete()`` — calls ``begin_delete()``, cancels idle timer; idempotent (safe to call multiple times)
 - ``ping()`` — resets the idle ``threading.Timer``; called automatically by ``ACITEIEmbeddingProvider`` on every embedding request
@@ -986,7 +986,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 **Typical sweep usage:**
 
 ```python
-from scripts.common.aci_tei_manager import manager_from_env
+from study_query_llm.providers.managers import manager_from_env
 from study_query_llm.providers.aci_tei_embedding_provider import ACITEIEmbeddingProvider
 from study_query_llm.services.embedding_service import EmbeddingService
 
@@ -1020,14 +1020,14 @@ for model_id in HF_MODELS:
 - ``docker>=7.0`` — Python SDK for local Docker daemon control
 
 **Files created:**
-- [`scripts/common/local_docker_tei_manager.py`](scripts/common/local_docker_tei_manager.py): `LocalDockerTEIManager` — pull TEI GPU image, start/stop container, mount HF cache, idle timer, context manager
+- [`src/study_query_llm/providers/managers/local_docker_tei.py`](src/study_query_llm/providers/managers/local_docker_tei.py): `LocalDockerTEIManager` — pull TEI GPU image, start/stop container, mount HF cache, idle timer, context manager
 - [`src/study_query_llm/providers/managed_tei_embedding_provider.py`](src/study_query_llm/providers/managed_tei_embedding_provider.py): `ManagedTEIEmbeddingProvider` — generic wrapper for any TEI manager (ACI or local Docker)
 - [`tests/test_scripts/test_local_docker_tei_manager.py`](tests/test_scripts/test_local_docker_tei_manager.py): 26 unit tests for `LocalDockerTEIManager` with mocked Docker SDK
 - [`tests/test_providers/test_managed_tei_embedding.py`](tests/test_providers/test_managed_tei_embedding.py): 14 unit tests for `ManagedTEIEmbeddingProvider`, parameterised across ACI and local-Docker mock managers
 
 **Files updated:**
 - [`src/study_query_llm/providers/__init__.py`](src/study_query_llm/providers/__init__.py): Exports `ManagedTEIEmbeddingProvider` (replaces `ACITEIEmbeddingProvider`)
-- [`scripts/common/aci_tei_manager.py`](scripts/common/aci_tei_manager.py): Added `provider_label = "aci_tei"` instance attribute
+- [`src/study_query_llm/providers/managers/aci_tei.py`](src/study_query_llm/providers/managers/aci_tei.py): Added `provider_label = "aci_tei"` instance attribute
 - [`requirements.txt`](requirements.txt): Added `docker>=7.0`
 - [`.env.example`](.env.example): Added `HF_CACHE_DIR`
 
@@ -1060,7 +1060,7 @@ Manager duck-type contract (both `ACITEIManager` and `LocalDockerTEIManager` sat
 **Typical sweep usage:**
 
 ```python
-from scripts.common.local_docker_tei_manager import LocalDockerTEIManager
+from study_query_llm.providers.managers import LocalDockerTEIManager
 from study_query_llm.providers import ManagedTEIEmbeddingProvider
 from study_query_llm.services.embedding_service import EmbeddingService
 

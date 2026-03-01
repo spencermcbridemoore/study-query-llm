@@ -92,7 +92,7 @@ This project is a Panel-based web application for running LLM inference experime
 ---
 
 ### 2. Service Layer (Business Logic)
-**Location:** `panel_app/services/`
+**Location:** `src/study_query_llm/services/`
 
 **Responsibilities:**
 - Orchestrate provider calls with retry/preprocessing
@@ -134,7 +134,7 @@ This project is a Panel-based web application for running LLM inference experime
 ---
 
 ### 3. Provider Layer (LLM Abstraction)
-**Location:** `panel_app/providers/`
+**Location:** `src/study_query_llm/providers/`
 
 **Responsibilities:**
 - Abstract interface for all LLM providers
@@ -173,7 +173,7 @@ class BaseLLMProvider(ABC):
 ---
 
 ### 4. Data Access Layer (Repository)
-**Location:** `panel_app/db/`
+**Location:** `src/study_query_llm/db/`
 
 **Responsibilities:**
 - All database interactions (writes and queries)
@@ -202,7 +202,7 @@ class BaseLLMProvider(ABC):
 ---
 
 ### 5. Database Layer (PostgreSQL + Langfuse)
-**Location:** `panel_app/db/models.py`
+**Location:** `src/study_query_llm/db/models_v2.py`
 
 **Responsibilities:**
 - Data persistence
@@ -227,6 +227,31 @@ class BaseLLMProvider(ABC):
 - Langfuse for LLM observability
 - PostgreSQL for structured storage
 - Potential vector extensions for similarity search
+
+---
+
+### 6. Algorithms Layer
+**Location:** `src/study_query_llm/algorithms/`
+
+Core clustering and dimensionality reduction algorithms (PCA, KLLMeans sweep).
+Framework-agnostic -- no database or provider dependencies.
+
+### 7. Experiments Layer
+**Location:** `src/study_query_llm/experiments/`
+
+Experiment orchestration, result analysis, and sweep pipeline support:
+- `result_metrics.py` -- canonical metric computation (ARI, silhouette, distance matrices)
+- `sweep_io.py` -- sweep result serialization and file I/O
+- `ingestion.py` -- in-memory sweep result ingestion to database
+
+### 8. Model Lifecycle Managers
+**Location:** `src/study_query_llm/providers/managers/`
+
+Infrastructure lifecycle managers for embedding/LLM backends:
+- `protocol.py` -- `ModelManager` structural protocol
+- `aci_tei.py` -- Azure Container Instances TEI manager
+- `local_docker_tei.py` -- local Docker TEI manager
+- `ollama.py` -- Ollama model VRAM lifecycle manager
 
 ---
 

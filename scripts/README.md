@@ -1,6 +1,19 @@
 # Scripts Directory
 
-This directory contains standalone utility scripts for the Study Query LLM project.
+This directory contains standalone utility and sweep runner scripts for the Study Query LLM project.
+
+**Note:** The `scripts/common/` subdirectory has been removed. All shared library code
+previously in `scripts/common/` now lives in canonical locations under `src/study_query_llm/`:
+
+| Former `scripts/common/` module | New canonical location |
+|---|---|
+| Model managers (protocol, ACI, Docker, Ollama) | `study_query_llm.providers.managers` |
+| `data_utils.py`, `estela_loader.py` | `study_query_llm.utils` |
+| `embedding_utils.py` | `study_query_llm.services.embedding_helpers` |
+| `sweep_utils.py` (serialization/save) | `study_query_llm.experiments.sweep_io` |
+| `sweep_utils.py` (paraphraser factory) | `study_query_llm.services.paraphraser_factory` |
+| `sweep_utils.py` (DB ingestion) | `study_query_llm.experiments.ingestion` |
+| `sweep_utils.py` (metric helpers) | `study_query_llm.experiments.result_metrics` |
 
 ## Script Status
 

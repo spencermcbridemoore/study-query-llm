@@ -524,10 +524,10 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             from study_query_llm.db.raw_call_repository import RawCallRepository
             from study_query_llm.services.sweep_query_service import SweepQueryService
             db = get_db_connection()
-            session = db.get_session()
-            repo = RawCallRepository(session)
-            svc = SweepQueryService(repo)
-            sweeps = svc.list_clustering_sweeps()
+            with db.session_scope() as session:
+                repo = RawCallRepository(session)
+                svc = SweepQueryService(repo)
+                sweeps = svc.list_clustering_sweeps()
             opts: dict = {"All": None}
             for sw in sweeps:
                 label = f"{sw['name']}  ({sw['n_runs']} runs)"
@@ -600,11 +600,12 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         from study_query_llm.services.sweep_query_service import SweepQueryService
 
         db = get_db_connection()
-        session = db.get_session()
-        repo = RawCallRepository(session)
-        svc = SweepQueryService(repo)
-        clustering_sweep_id = sweep_select.value  # None means "All"
-        return svc.get_sweep_metrics_df(clustering_sweep_id=clustering_sweep_id)
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            svc = SweepQueryService(repo)
+            clustering_sweep_id = sweep_select.value  # None means "All"
+            df = svc.get_sweep_metrics_df(clustering_sweep_id=clustering_sweep_id)
+        return df
 
     # --- Wire callbacks ---
     load_button.on_click(load_data)

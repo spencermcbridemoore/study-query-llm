@@ -220,6 +220,7 @@ def ingest_one_pkl(
         "embedding_engine": info["engine"],
         "summarizer": info["summarizer"],
         "n_restarts": info["n_restarts"],
+        "n_samples": info.get("n_samples", 0),
         "k_range": info["k_range"],
         "data_type": info["data_type"],
         "source_file": source_file,
@@ -311,6 +312,11 @@ def main():
             pkl_infos.append(info)
 
     for p in sorted(data_dir.glob("local_gpu_300_*.pkl")):
+        info = load_and_group_pkl(p, "50runs")
+        if info:
+            pkl_infos.append(info)
+
+    for p in sorted(data_dir.glob("local_gpu_multi_*.pkl")):
         info = load_and_group_pkl(p, "50runs")
         if info:
             pkl_infos.append(info)
@@ -424,6 +430,87 @@ def main():
                 print(f"Linked {linked} local_gpu_300 run(s) to sweep.")
             else:
                 print(f"All {len(local_runs)} local_gpu_300 run(s) already linked.")
+
+        # Create clustering_sweep and link local_gpu_multi runs
+        multi_runs = (
+            session.query(Group)
+            .filter(
+                Group.group_type == "clustering_run",
+                sa_text("metadata_json->>'source_file' LIKE :pat"),
+            )
+            .params(pat="%local_gpu_multi%")
+            .order_by(Group.id)
+            .all()
+        )
+
+        if multi_runs:
+            MULTI_SWEEP_NAME = "local_gpu_multi_mar2026"
+            MULTI_ALGORITHM = "cosine_kllmeans_no_pca"
+            MULTI_FIXED_CONFIG = {
+                "n_restarts": 50,
+                "k_min": 2,
+                "k_max": 20,
+                "skip_pca": True,
+                "distance_metric": "cosine",
+                "normalize_vectors": True,
+                "llm_interval": 20,
+            }
+            multi_datasets = sorted({(r.metadata_json or {}).get("dataset", "?") for r in multi_runs})
+            multi_engines = sorted({(r.metadata_json or {}).get("embedding_engine", "?") for r in multi_runs})
+            multi_summarizers = sorted({(r.metadata_json or {}).get("summarizer", "?") for r in multi_runs})
+            multi_n_samples = sorted({(r.metadata_json or {}).get("n_samples", 0) for r in multi_runs})
+            MULTI_PARAMETER_AXES = {
+                "datasets": multi_datasets,
+                "embedding_engines": multi_engines,
+                "summarizers": multi_summarizers,
+                "n_samples": multi_n_samples,
+            }
+
+            existing_multi_sweep = (
+                session.query(Group)
+                .filter(
+                    Group.group_type == "clustering_sweep",
+                    Group.name == MULTI_SWEEP_NAME,
+                )
+                .first()
+            )
+
+            if existing_multi_sweep:
+                multi_sweep_id = existing_multi_sweep.id
+                print(f"\nUsing existing clustering_sweep '{MULTI_SWEEP_NAME}' (id={multi_sweep_id})")
+            else:
+                multi_sweep_id = provenance.create_clustering_sweep_group(
+                    sweep_name=MULTI_SWEEP_NAME,
+                    algorithm=MULTI_ALGORITHM,
+                    fixed_config=MULTI_FIXED_CONFIG,
+                    parameter_axes=MULTI_PARAMETER_AXES,
+                    description=(
+                        "Multi-sample local GPU sweep: local embedding engines, "
+                        "2 datasets x 3 sample sizes x N engines x 5 summarizers, "
+                        "50 restarts, cosine, no PCA."
+                    ),
+                )
+                print(f"\nCreated clustering_sweep '{MULTI_SWEEP_NAME}' (id={multi_sweep_id})")
+
+            multi_linked = 0
+            for pos, run in enumerate(multi_runs):
+                existing_link = (
+                    session.query(GroupLink)
+                    .filter_by(
+                        parent_group_id=multi_sweep_id,
+                        child_group_id=run.id,
+                        link_type="contains",
+                    )
+                    .first()
+                )
+                if not existing_link:
+                    provenance.link_run_to_clustering_sweep(multi_sweep_id, run.id, position=pos)
+                    multi_linked += 1
+
+            if multi_linked:
+                print(f"Linked {multi_linked} local_gpu_multi run(s) to sweep.")
+            else:
+                print(f"All {len(multi_runs)} local_gpu_multi run(s) already linked.")
 
     print(f"\nDone. Created {created} run group(s), skipped {skipped}.")
 

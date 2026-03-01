@@ -37,138 +37,174 @@ def create_embeddings_ui() -> pn.viewable.Viewable:
     embeddings_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=400)
     embedding_vectors_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=300)
 
-    def update_embeddings():
-        """Update embeddings display."""
+    _cache: dict = {"calls": [], "vectors": {}}
+
+    def _load_from_db():
+        """Fetch all embedding data from DB into _cache (plain dicts survive session close)."""
         try:
             db = get_db_connection()
             with db.session_scope() as session:
-                from study_query_llm.db.models_v2 import RawCall, EmbeddingVector
-                import pandas as pd
+                from study_query_llm.db.models_v2 import EmbeddingVector
                 repository = RawCallRepository(session)
 
-                filters = {'modality': 'embedding'}
-                if status_filter.value != "All":
-                    filters['status'] = status_filter.value
+                all_calls = repository.query_raw_calls(modality='embedding', limit=500)
 
-                embedding_calls = repository.query_raw_calls(**filters, limit=500)
+                calls_data = []
+                for c in all_calls:
+                    calls_data.append({
+                        'id': c.id, 'model': c.model, 'provider': c.provider,
+                        'status': c.status, 'latency_ms': c.latency_ms,
+                        'request_json': c.request_json,
+                        'metadata_json': c.metadata_json,
+                        'created_at': c.created_at,
+                    })
 
-                deployments = set()
-                for call in embedding_calls:
-                    if call.model:
-                        deployments.add(call.model)
-                deployment_options = ["All"] + sorted(list(deployments))
-                if deployment_filter.options != deployment_options:
-                    deployment_filter.options = deployment_options
-
-                if deployment_filter.value != "All":
-                    embedding_calls = [c for c in embedding_calls if c.model == deployment_filter.value]
-
-                total_embeddings = len(embedding_calls)
-                successful = len([c for c in embedding_calls if c.status == 'success'])
-                failed = len([c for c in embedding_calls if c.status == 'failed'])
-
-                cache_hits = 0
-                cache_misses = 0
-                total_latency = 0
-                latency_count = 0
-                dimensions = set()
-
-                for call in embedding_calls:
-                    if call.latency_ms:
-                        total_latency += call.latency_ms
-                        latency_count += 1
-
-                    if call.metadata_json and isinstance(call.metadata_json, dict):
-                        if call.metadata_json.get('cached'):
-                            cache_hits += 1
-                        else:
-                            cache_misses += 1
-
-                call_ids = [c.id for c in embedding_calls if c.status == 'success']
-                vectors = []
-                vector_by_call_id: dict = {}
-                if call_ids:
+                success_ids = [cd['id'] for cd in calls_data if cd['status'] == 'success']
+                vectors_data: dict = {}
+                if success_ids:
                     vectors = session.query(EmbeddingVector).filter(
-                        EmbeddingVector.call_id.in_(call_ids)
+                        EmbeddingVector.call_id.in_(success_ids)
                     ).all()
-                    vector_by_call_id = {v.call_id: v for v in vectors}
-                    dimensions = {v.dimension for v in vectors}
-                    avg_dimension = sum(dimensions) / len(dimensions) if dimensions else 0
-                else:
-                    avg_dimension = 0
+                    vectors_data = {
+                        v.call_id: {
+                            'dimension': v.dimension, 'norm': v.norm,
+                            'has_vector': bool(v.vector),
+                        }
+                        for v in vectors
+                    }
 
-                avg_latency = total_latency / latency_count if latency_count > 0 else 0
-                cache_hit_rate = cache_hits / (cache_hits + cache_misses) * 100 if (cache_hits + cache_misses) > 0 else 0
+            _cache['calls'] = calls_data
+            _cache['vectors'] = vectors_data
 
-                summary_text = f"""
+            deployments = sorted({cd['model'] for cd in calls_data if cd['model']})
+            deployment_options = ["All"] + deployments
+            if deployment_filter.options != deployment_options:
+                deployment_filter.options = deployment_options
+
+        except Exception as e:
+            logger.error(f"Failed to load embeddings from DB: {str(e)}", exc_info=True)
+            _cache['calls'] = []
+            _cache['vectors'] = {}
+
+    def _refresh_display():
+        """Apply current filter values to cached data and update display widgets."""
+        import pandas as pd
+        try:
+            calls = list(_cache['calls'])
+            vector_by_call_id = _cache['vectors']
+
+            if status_filter.value != "All":
+                calls = [c for c in calls if c['status'] == status_filter.value]
+            if deployment_filter.value != "All":
+                calls = [c for c in calls if c['model'] == deployment_filter.value]
+
+            total_embeddings = len(calls)
+            successful = len([c for c in calls if c['status'] == 'success'])
+            failed = len([c for c in calls if c['status'] == 'failed'])
+
+            cache_hits = 0
+            cache_misses = 0
+            total_latency = 0
+            latency_count = 0
+
+            for cd in calls:
+                if cd['latency_ms']:
+                    total_latency += cd['latency_ms']
+                    latency_count += 1
+                meta = cd['metadata_json']
+                if meta and isinstance(meta, dict):
+                    if meta.get('cached'):
+                        cache_hits += 1
+                    else:
+                        cache_misses += 1
+
+            success_ids = {c['id'] for c in calls if c['status'] == 'success'}
+            filtered_vectors = {
+                cid: v for cid, v in vector_by_call_id.items()
+                if cid in success_ids
+            }
+            dimensions = {v['dimension'] for v in filtered_vectors.values()}
+            avg_dimension = sum(dimensions) / len(dimensions) if dimensions else 0
+
+            avg_latency = total_latency / latency_count if latency_count > 0 else 0
+            cache_hit_rate = (
+                cache_hits / (cache_hits + cache_misses) * 100
+                if (cache_hits + cache_misses) > 0 else 0
+            )
+            unique_deployments = len({c['model'] for c in calls if c['model']})
+
+            summary_text = f"""
 **Total Embeddings:** {total_embeddings}  
 **Successful:** {successful}  
 **Failed:** {failed}  
 **Cache Hit Rate:** {cache_hit_rate:.1f}% ({cache_hits} hits, {cache_misses} misses)  
 **Average Latency:** {avg_latency:.2f} ms  
 **Average Dimension:** {avg_dimension:.0f}  
-**Unique Deployments:** {len(deployments)}  
+**Unique Deployments:** {unique_deployments}  
 **Unique Dimensions:** {len(dimensions)} ({', '.join(map(str, sorted(dimensions))) if dimensions else 'N/A'})
 """
-                summary_output.object = summary_text
+            summary_output.object = summary_text
 
-                if embedding_calls:
-                    embeddings_data = []
-                    for call in embedding_calls[:100]:
-                        request = call.request_json or {}
-                        input_text = ''
-                        if isinstance(request, dict):
-                            input_text = request.get('input', '') or request.get('text', '') or ''
+            if calls:
+                embeddings_data = []
+                for cd in calls[:100]:
+                    request = cd['request_json'] or {}
+                    input_text = ''
+                    if isinstance(request, dict):
+                        input_text = request.get('input', '') or request.get('text', '') or ''
 
-                        vector = vector_by_call_id.get(call.id)
+                    vec = vector_by_call_id.get(cd['id'])
 
-                        cached = False
-                        if call.metadata_json and isinstance(call.metadata_json, dict):
-                            cached = call.metadata_json.get('cached', False)
+                    cached = False
+                    meta = cd['metadata_json']
+                    if meta and isinstance(meta, dict):
+                        cached = meta.get('cached', False)
 
-                        embeddings_data.append({
-                            'id': call.id,
-                            'deployment': call.model or 'N/A',
-                            'provider': call.provider,
-                            'input': input_text[:50] + '...' if len(input_text) > 50 else input_text,
-                            'dimension': vector.dimension if vector else 'N/A',
-                            'norm': f"{vector.norm:.4f}" if vector and vector.norm else 'N/A',
-                            'cached': 'Yes' if cached else 'No',
-                            'status': call.status,
-                            'latency_ms': f"{call.latency_ms:.2f}" if call.latency_ms else 'N/A',
-                            'created_at': call.created_at.isoformat() if call.created_at else '',
-                        })
+                    embeddings_data.append({
+                        'id': cd['id'],
+                        'deployment': cd['model'] or 'N/A',
+                        'provider': cd['provider'],
+                        'input': input_text[:50] + '...' if len(input_text) > 50 else input_text,
+                        'dimension': vec['dimension'] if vec else 'N/A',
+                        'norm': f"{vec['norm']:.4f}" if vec and vec['norm'] else 'N/A',
+                        'cached': 'Yes' if cached else 'No',
+                        'status': cd['status'],
+                        'latency_ms': f"{cd['latency_ms']:.2f}" if cd['latency_ms'] else 'N/A',
+                        'created_at': cd['created_at'].isoformat() if cd['created_at'] else '',
+                    })
+                embeddings_table.object = pd.DataFrame(embeddings_data)
+            else:
+                embeddings_table.object = None
 
-                    embeddings_df = pd.DataFrame(embeddings_data)
-                    embeddings_table.object = embeddings_df
-                else:
-                    embeddings_table.object = None
-
-                if vectors:
-                    call_by_id = {c.id: c for c in embedding_calls}
-                    vectors_data = []
-                    for vector in vectors[:50]:
-                        call = call_by_id.get(vector.call_id)
-                        vectors_data.append({
-                            'call_id': vector.call_id,
-                            'deployment': call.model if call else 'N/A',
-                            'dimension': vector.dimension,
-                            'norm': f"{vector.norm:.4f}" if vector.norm else 'N/A',
-                            'has_vector': 'Yes' if vector.vector else 'No',
-                        })
-                    embedding_vectors_table.object = pd.DataFrame(vectors_data)
-                else:
-                    embedding_vectors_table.object = None
+            if filtered_vectors:
+                call_by_id = {c['id']: c for c in calls}
+                vectors_rows = []
+                for call_id, vec in list(filtered_vectors.items())[:50]:
+                    cd = call_by_id.get(call_id)
+                    vectors_rows.append({
+                        'call_id': call_id,
+                        'deployment': cd['model'] if cd else 'N/A',
+                        'dimension': vec['dimension'],
+                        'norm': f"{vec['norm']:.4f}" if vec['norm'] else 'N/A',
+                        'has_vector': 'Yes' if vec['has_vector'] else 'No',
+                    })
+                embedding_vectors_table.object = pd.DataFrame(vectors_rows)
+            else:
+                embedding_vectors_table.object = None
 
         except Exception as e:
-            error_msg = f"Error loading embeddings: {str(e)}"
-            logger.error(f"Failed to update embeddings: {str(e)}", exc_info=True)
-            summary_output.object = error_msg
+            logger.error(f"Failed to refresh embeddings display: {str(e)}", exc_info=True)
+            summary_output.object = f"Error loading embeddings: {str(e)}"
             embeddings_table.object = None
             embedding_vectors_table.object = None
 
+    def update_embeddings():
+        """Full refresh: reload from DB then update display."""
+        _load_from_db()
+        _refresh_display()
+
     def on_filter_change(event):
-        update_embeddings()
+        _refresh_display()
 
     deployment_filter.param.watch(on_filter_change, 'value')
     status_filter.param.watch(on_filter_change, 'value')

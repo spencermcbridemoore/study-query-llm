@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 PCA KLLMeans Sweep - Full Data Source Support
 
@@ -40,10 +40,8 @@ from study_query_llm.algorithms import SweepConfig, run_sweep
 
 from study_query_llm.utils.text_utils import flatten_prompt_dict, clean_texts, is_prompt_key
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
-from scripts.common.sweep_utils import (
-    create_paraphraser_for_llm,
-    save_batch_sweep_results as save_results,
-)
+from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
+from study_query_llm.experiments.sweep_io import save_batch_sweep_results as save_results
 
 # Try to apply nest_asyncio for Jupyter compatibility
 try:

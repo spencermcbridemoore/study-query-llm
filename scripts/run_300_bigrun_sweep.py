@@ -1,4 +1,4 @@
-﻿"""
+"""
 300-sample bigrun sweep: 3 datasets × 3 embeddings × 5 summarizers, 50 restarts each.
 
 Datasets  : dbpedia (14 cats), yahoo_answers (10 cats), estela (no GT labels)
@@ -32,12 +32,11 @@ from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig
 
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
-from scripts.common.sweep_utils import (
-    create_paraphraser_for_llm,
-    save_single_sweep_result as save_pkl,
-    ingest_result_to_db,
-    OUTPUT_DIR,
-)
+from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
+from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_pkl, get_output_dir
+from study_query_llm.experiments.ingestion import ingest_result_to_db
+
+OUTPUT_DIR = get_output_dir()
 from study_query_llm.utils.estela_loader import load_estela_dict
 from study_query_llm.utils.text_utils import flatten_prompt_dict
 from scripts.run_experimental_sweep import (

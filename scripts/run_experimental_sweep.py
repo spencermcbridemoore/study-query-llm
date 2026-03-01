@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Experimental PCA KLLMeans Sweep - Nested Parameter Exploration
 
@@ -43,12 +43,11 @@ from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
 
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
-from scripts.common.sweep_utils import (
-    create_paraphraser_for_llm,
-    ollama_vram_scope,
-    save_single_sweep_result as save_results,
-    OUTPUT_DIR,
-)
+from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
+from study_query_llm.providers.managers.ollama import ollama_vram_scope
+from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_results, get_output_dir
+
+OUTPUT_DIR = get_output_dir()
 
 # Optional file cache for 30k seed-42 runs (no errors if missing)
 EMBEDDING_CACHE_DIR = os.environ.get("EMBEDDING_CACHE_DIR") or str(Path(__file__).parent.parent / "data" / "embedding_cache")

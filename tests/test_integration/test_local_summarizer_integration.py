@@ -109,7 +109,7 @@ def test_create_paraphraser_local_llm_sync(ollama_mgr):
 
     This exercises the tricky event-loop threading used inside sweep scripts.
     """
-    from scripts.common.sweep_utils import create_paraphraser_for_llm
+    from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 
     db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
     db.init_db()

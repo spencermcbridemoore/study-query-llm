@@ -1,4 +1,4 @@
-﻿"""
+"""
 No-PCA 50-runs sweep: 1000 samples, k=2-20, 50 restarts per (dataset, summarizer[, engine]).
 
 Default: embed-v-4-0, dbpedia + yahoo_answers, None + gpt-5-chat (4 runs).
@@ -24,11 +24,10 @@ from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYME
 from study_query_llm.algorithms import SweepConfig
 
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
-from scripts.common.sweep_utils import (
-    create_paraphraser_for_llm,
-    save_single_sweep_result as save_results,
-    OUTPUT_DIR,
-)
+from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
+from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_results, get_output_dir
+
+OUTPUT_DIR = get_output_dir()
 from scripts.run_experimental_sweep import (
     load_dbpedia_full,
     load_yahoo_answers_full,

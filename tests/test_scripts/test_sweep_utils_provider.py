@@ -15,7 +15,7 @@ def db():
 
 def test_create_paraphraser_none_returns_none(db):
     """Passing None for llm_deployment returns None (backward compat)."""
-    from scripts.common.sweep_utils import create_paraphraser_for_llm
+    from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 
     result = create_paraphraser_for_llm(None, db)
     assert result is None
@@ -23,7 +23,7 @@ def test_create_paraphraser_none_returns_none(db):
 
 def test_create_paraphraser_none_returns_none_with_provider(db):
     """None deployment returns None regardless of provider."""
-    from scripts.common.sweep_utils import create_paraphraser_for_llm
+    from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 
     result = create_paraphraser_for_llm(None, db, provider="local_llm")
     assert result is None
@@ -31,7 +31,7 @@ def test_create_paraphraser_none_returns_none_with_provider(db):
 
 def test_create_paraphraser_returns_callable(db):
     """Non-None deployment returns a callable paraphraser."""
-    from scripts.common.sweep_utils import create_paraphraser_for_llm
+    from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 
     result = create_paraphraser_for_llm("llama3.1:8b", db, provider="local_llm")
     assert result is not None
@@ -40,10 +40,10 @@ def test_create_paraphraser_returns_callable(db):
 
 def test_create_paraphraser_provider_flows_to_request(db):
     """The provider kwarg is forwarded into the SummarizationRequest."""
-    from scripts.common.sweep_utils import create_paraphraser_for_llm
+    from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 
     with patch(
-        "scripts.common.sweep_utils.SummarizationService"
+        "study_query_llm.services.paraphraser_factory.SummarizationService"
     ) as MockSvc:
         mock_service = MagicMock()
         mock_result = MagicMock()

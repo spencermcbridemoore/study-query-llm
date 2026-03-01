@@ -22,6 +22,7 @@ Prerequisites:
 - Model already pulled (``ollama pull <tag>``)
 """
 
+import contextlib
 import json
 import logging
 import threading
@@ -211,3 +212,30 @@ class OllamaModelManager:
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         self.stop()
+
+
+# ---------------------------------------------------------------------------
+# VRAM lifecycle convenience helper
+# ---------------------------------------------------------------------------
+
+_LOCAL_LLM_PROVIDERS = {"local_llm", "ollama"}
+
+
+@contextlib.contextmanager
+def ollama_vram_scope(model: Optional[str], provider: str):
+    """Context manager that loads/unloads an Ollama model when *provider* is local.
+
+    For non-local providers (e.g. ``"azure"``) this is a transparent no-op.
+
+    Usage in sweep loops::
+
+        for llm_deployment, llm_provider in LLM_SUMMARIZERS:
+            with ollama_vram_scope(llm_deployment, llm_provider):
+                result = await run_single_sweep(...)
+    """
+    if model is None or provider not in _LOCAL_LLM_PROVIDERS:
+        yield
+        return
+
+    with OllamaModelManager(model) as _mgr:
+        yield

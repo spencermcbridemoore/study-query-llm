@@ -8,7 +8,7 @@ manage GPU/container lifecycle for embedding and LLM inference backends.
 from .protocol import ModelManager
 from .aci_tei import ACITEIManager, manager_from_env
 from .local_docker_tei import LocalDockerTEIManager
-from .ollama import OllamaModelManager
+from .ollama import OllamaModelManager, ollama_vram_scope
 
 __all__ = [
     "ModelManager",
@@ -16,4 +16,5 @@ __all__ = [
     "manager_from_env",
     "LocalDockerTEIManager",
     "OllamaModelManager",
+    "ollama_vram_scope",
 ]

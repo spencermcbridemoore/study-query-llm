@@ -1,4 +1,4 @@
-﻿"""
+"""
 Custom Sweep: Full Categories, Variable K and Entry Count
 
 Configuration:
@@ -30,11 +30,10 @@ from study_query_llm.algorithms import SweepConfig
 
 # Shared script utilities
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
-from scripts.common.sweep_utils import (
-    create_paraphraser_for_llm,
-    save_single_sweep_result as save_results,
-    OUTPUT_DIR,
-)
+from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
+from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_results, get_output_dir
+
+OUTPUT_DIR = get_output_dir()
 from scripts.run_experimental_sweep import (
     load_dbpedia_full,
     load_yahoo_answers_full,

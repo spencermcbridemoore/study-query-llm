@@ -26,38 +26,54 @@ def create_groups_ui() -> pn.viewable.Viewable:
         try:
             db = get_db_connection()
             with db.session_scope() as session:
+                from sqlalchemy import func
                 from study_query_llm.db.models_v2 import Group, GroupMember, RawCall
                 import pandas as pd
 
                 groups = session.query(Group).order_by(Group.created_at.desc()).limit(50).all()
 
                 if groups:
+                    group_ids = [g.id for g in groups]
+                    member_counts = dict(
+                        session.query(GroupMember.group_id, func.count(GroupMember.id))
+                        .filter(GroupMember.group_id.in_(group_ids))
+                        .group_by(GroupMember.group_id)
+                        .all()
+                    )
+
                     groups_data = []
                     for group in groups:
-                        member_count = session.query(GroupMember).filter_by(group_id=group.id).count()
-
                         groups_data.append({
                             'id': group.id,
                             'group_type': group.group_type,
                             'name': group.name,
                             'description': group.description or '',
-                            'member_count': member_count,
+                            'member_count': member_counts.get(group.id, 0),
                             'created_at': group.created_at.isoformat() if group.created_at else '',
                         })
 
-                    groups_df = pd.DataFrame(groups_data)
-                    groups_table.object = groups_df
+                    groups_table.object = pd.DataFrame(groups_data)
                 else:
                     groups_table.object = None
 
                 members = session.query(GroupMember).order_by(GroupMember.added_at.desc()).limit(100).all()
 
                 if members:
+                    related_group_ids = {m.group_id for m in members}
+                    related_call_ids = {m.call_id for m in members}
+                    groups_map = {
+                        g.id: g for g in
+                        session.query(Group).filter(Group.id.in_(related_group_ids)).all()
+                    }
+                    calls_map = {
+                        c.id: c for c in
+                        session.query(RawCall).filter(RawCall.id.in_(related_call_ids)).all()
+                    }
+
                     members_data = []
                     for member in members:
-                        group = session.query(Group).filter_by(id=member.group_id).first()
-                        call = session.query(RawCall).filter_by(id=member.call_id).first()
-
+                        group = groups_map.get(member.group_id)
+                        call = calls_map.get(member.call_id)
                         members_data.append({
                             'group_id': member.group_id,
                             'group_name': group.name if group else 'N/A',
@@ -69,13 +85,11 @@ def create_groups_ui() -> pn.viewable.Viewable:
                             'added_at': member.added_at.isoformat() if member.added_at else '',
                         })
 
-                    members_df = pd.DataFrame(members_data)
-                    group_members_table.object = members_df
+                    group_members_table.object = pd.DataFrame(members_data)
                 else:
                     group_members_table.object = None
 
         except Exception as e:
-            error_msg = f"Error loading groups: {str(e)}"
             logger.error(f"Failed to update groups: {str(e)}", exc_info=True)
             groups_table.object = None
             group_members_table.object = None

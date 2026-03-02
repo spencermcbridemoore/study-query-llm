@@ -290,13 +290,60 @@ DIM_ROLES = ["Free", "Filter", "Grid rows", "Grid cols", "Color"]
 # Exclusive roles — only one dimension may hold each at a time
 EXCLUSIVE_ROLES = {"Grid rows", "Grid cols", "Color"}
 
-# Default role for each categorical dimension
+# Roles that show a value filter MultiSelect
+ROLES_WITH_VALUE_FILTER = {"Filter", "Grid rows", "Grid cols", "Color"}
+
+# Derived n_samples bin dimension name
+BIN_DIM = "n_samples_bin"
+
+# All dimensions available in the role UI (categorical + derived bin)
+ALL_DIMS = CATEGORICAL_DIMS + [BIN_DIM]
+
+# Default role for each dimension
 DIM_DEFAULT_ROLES = {
     "dataset": "Grid cols",
     "engine": "Color",
     "summarizer": "Grid rows",
     "data_type": "Filter",
+    BIN_DIM: "Free",
 }
+
+
+# ===========================================================================
+# n_samples binning helpers
+# ===========================================================================
+
+def parse_bin_edges(text: str) -> list[int]:
+    """Parse comma-separated bin edges into a sorted, deduplicated list of ints."""
+    if not text or not text.strip():
+        return []
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    edges: list[int] = []
+    for p in parts:
+        try:
+            edges.append(int(p))
+        except ValueError:
+            continue
+    return sorted(set(edges))
+
+
+def assign_n_samples_bin(series: pd.Series, edges: list[int]) -> pd.Series:
+    """Assign each value in *series* to a human-readable bin label.
+
+    Given edges ``[100, 280, 400]`` the bins are:
+    ``"\u2264100"``, ``"101\u2013280"``, ``"281\u2013400"``, ``"401+"``.
+    """
+    if not edges:
+        return pd.Series("\u2014", index=series.index)
+
+    def _label(val: int) -> str:
+        for i, edge in enumerate(edges):
+            if val <= edge:
+                lo = (edges[i - 1] + 1) if i > 0 else None
+                return f"\u2264{edge}" if lo is None else f"{lo}\u2013{edge}"
+        return f"{edges[-1] + 1}+"
+
+    return series.apply(_label).astype(str)
 
 
 # ===========================================================================
@@ -383,15 +430,25 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         width=300,
     )
 
+    # --- Widgets: sample size binning ---
+    bin_edges_input = pn.widgets.TextInput(
+        name="Bin edges (comma-separated)",
+        value="",
+        placeholder="e.g. 100, 280, 400",
+        width=300,
+    )
+
     # --- Per-dimension role widgets ---
     # role_sels[dim]   = Select widget for the role
-    # val_filters[dim] = MultiSelect for value filtering (visible only when role == "Filter")
+    # val_filters[dim] = MultiSelect for value filtering (visible when role affects the plot)
     # dim_blocks[dim]  = Column containing both widgets (rendered in the layout)
     role_sels: dict[str, pn.widgets.Select] = {}
     val_filters: dict[str, pn.widgets.MultiSelect] = {}
     dim_blocks: dict[str, pn.Column] = {}
 
-    for dim in CATEGORICAL_DIMS:
+    _DIM_LABELS = {BIN_DIM: "sample size bin"}
+
+    for dim in ALL_DIMS:
         default_role = DIM_DEFAULT_ROLES.get(dim, "Free")
         role_sel = pn.widgets.Select(
             name=f"{dim} role",
@@ -405,12 +462,13 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             value=[],
             height=100,
             width=175,
-            visible=(default_role == "Filter"),
+            visible=(default_role in ROLES_WITH_VALUE_FILTER),
         )
         role_sels[dim] = role_sel
         val_filters[dim] = val_filter
+        label = _DIM_LABELS.get(dim, dim)
         dim_blocks[dim] = pn.Column(
-            pn.pane.Markdown(f"**{dim}**"),
+            pn.pane.Markdown(f"**{label}**"),
             role_sel,
             val_filter,
             width=190,
@@ -428,7 +486,7 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     def _check_role_conflicts() -> str | None:
         """Return a warning string if any exclusive role is assigned to 2+ dims."""
         role_counts: dict[str, list[str]] = {}
-        for dim in CATEGORICAL_DIMS:
+        for dim in ALL_DIMS:
             role = role_sels[dim].value
             if role in EXCLUSIVE_ROLES:
                 role_counts.setdefault(role, []).append(dim)
@@ -445,19 +503,30 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         if df.empty:
             return
 
+        # Compute n_samples_bin if bin edges are provided
+        edges = parse_bin_edges(bin_edges_input.value)
+        if edges and "n_samples" in df.columns:
+            df = df.copy()
+            df[BIN_DIM] = assign_n_samples_bin(df["n_samples"], edges)
+        else:
+            df = df.copy()
+            if BIN_DIM in df.columns:
+                df = df.drop(columns=[BIN_DIM])
+
         # Conflict guard
         conflict = _check_role_conflicts()
         if conflict:
             load_status.object = f"**Role conflict** — {conflict}. Assign each role to at most one dimension."
             return
 
-        # Read roles
-        roles = {dim: role_sels[dim].value for dim in CATEGORICAL_DIMS}
+        # Read roles (only for dims present in the data)
+        active_dims = [d for d in ALL_DIMS if d in df.columns]
+        roles = {dim: role_sels[dim].value for dim in active_dims}
 
-        # 1. Apply value filters for dims with role == "Filter"
-        filtered = df.copy()
+        # 1. Apply value filters for dims with a filterable role
+        filtered = df
         for dim, role in roles.items():
-            if role == "Filter":
+            if role in ROLES_WITH_VALUE_FILTER:
                 selected = val_filters[dim].value
                 if selected:
                     filtered = filtered[filtered[dim].isin(selected)]
@@ -498,11 +567,17 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         def on_role_change(event):
             new_role = event.new
             vf = val_filters[dim]
-            vf.visible = (new_role == "Filter")
-            # Populate filter options from loaded data if switching to Filter and empty
-            if new_role == "Filter" and not vf.options:
+            vf.visible = (new_role in ROLES_WITH_VALUE_FILTER)
+            if new_role in ROLES_WITH_VALUE_FILTER and not vf.options:
                 df = _state.get("df", pd.DataFrame())
-                if not df.empty and dim in df.columns:
+                if dim == BIN_DIM:
+                    edges = parse_bin_edges(bin_edges_input.value)
+                    if edges and not df.empty and "n_samples" in df.columns:
+                        bins = assign_n_samples_bin(df["n_samples"], edges)
+                        opts = sorted(bins.unique().tolist())
+                        vf.options = opts
+                        vf.value = opts
+                elif not df.empty and dim in df.columns:
                     opts = sorted(df[dim].unique().tolist())
                     vf.options = opts
                     vf.value = opts
@@ -565,8 +640,17 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                 if dim in df.columns:
                     opts = sorted(df[dim].unique().tolist())
                     val_filters[dim].options = opts
-                    if role_sels[dim].value == "Filter":
+                    if role_sels[dim].value in ROLES_WITH_VALUE_FILTER:
                         val_filters[dim].value = opts
+
+            # Update n_samples_bin options if bin edges are set
+            edges = parse_bin_edges(bin_edges_input.value)
+            if edges and "n_samples" in df.columns:
+                bins = assign_n_samples_bin(df["n_samples"], edges)
+                bin_opts = sorted(bins.unique().tolist())
+                val_filters[BIN_DIM].options = bin_opts
+                if role_sels[BIN_DIM].value in ROLES_WITH_VALUE_FILTER:
+                    val_filters[BIN_DIM].value = bin_opts
 
             k_slider.start = k_min
             k_slider.end = k_max
@@ -607,12 +691,34 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             df = svc.get_sweep_metrics_df(clustering_sweep_id=clustering_sweep_id)
         return df
 
+    # --- Bin edges change callback ---
+    def _update_bin_dim_options(event=None):
+        """Recompute n_samples_bin filter options when bin edges change."""
+        df = _state.get("df", pd.DataFrame())
+        if df.empty:
+            refresh_plot()
+            return
+        edges = parse_bin_edges(bin_edges_input.value)
+        vf = val_filters[BIN_DIM]
+        if edges and "n_samples" in df.columns:
+            bins = assign_n_samples_bin(df["n_samples"], edges)
+            opts = sorted(bins.unique().tolist())
+            vf.options = opts
+            if role_sels[BIN_DIM].value in ROLES_WITH_VALUE_FILTER:
+                vf.value = opts
+        else:
+            vf.options = []
+            vf.value = []
+        refresh_plot()
+
     # --- Wire callbacks ---
     load_button.on_click(load_data)
 
-    for dim in CATEGORICAL_DIMS:
+    for dim in ALL_DIMS:
         role_sels[dim].param.watch(make_role_callback(dim), "value")
         val_filters[dim].param.watch(refresh_plot, "value")
+
+    bin_edges_input.param.watch(_update_bin_dim_options, "value")
 
     for widget in [y_axis_sel, x_axis_sel, agg_radio]:
         widget.param.watch(refresh_plot, "value")
@@ -620,7 +726,7 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         widget.param.watch(refresh_plot, "value_throttled")
 
     # --- Layout ---
-    dim_roles_row = pn.Row(*[dim_blocks[dim] for dim in CATEGORICAL_DIMS])
+    dim_roles_row = pn.Row(*[dim_blocks[dim] for dim in ALL_DIMS])
 
     controls = pn.Column(
         pn.pane.Markdown("### Data Source"),
@@ -632,9 +738,17 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         pn.Row(y_axis_sel, x_axis_sel),
         pn.layout.Divider(),
         pn.pane.Markdown(
+            "### Sample Size Binning\n"
+            "_Optional. Define bin edges to group runs by sample size "
+            "(e.g. for ESTELA \u2264280). The derived dimension appears in the role selectors below._"
+        ),
+        bin_edges_input,
+        pn.layout.Divider(),
+        pn.pane.Markdown(
             "### Dimension Roles\n"
             "_Each dimension can be: **Free** (pass-through), **Filter** (include/exclude values), "
-            "**Grid rows**, **Grid cols**, or **Color**. Each exclusive role may only be assigned to one dimension._"
+            "**Grid rows**, **Grid cols**, or **Color**. Each exclusive role may only be assigned to one dimension. "
+            "Dimensions with a plot role also show a value selector to include/exclude specific groups._"
         ),
         dim_roles_row,
         pn.layout.Divider(),

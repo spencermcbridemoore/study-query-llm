@@ -140,7 +140,7 @@ class LocalDockerTEIManager:
 
     def _wait_for_healthy(self) -> None:
         """Poll GET /health until TEI returns 200 (model loaded)."""
-        health_url = f"{self.endpoint_url}/health"
+        health_url = f"http://localhost:{self.port}/health"
         deadline = time.time() + self.health_check_timeout
         while time.time() < deadline:
             try:

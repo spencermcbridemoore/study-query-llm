@@ -1,0 +1,23 @@
+# Caddy reverse proxy for Study Query LLM Panel app.
+#
+# Setup on Jetstream VM:
+#   1. Install Caddy:  https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+#   2. Generate password hash:  caddy hash-password --plaintext 'YourPassword'
+#   3. Replace REPLACE_WITH_BCRYPT_HASH below with the output.
+#   4. Replace YOUR_DOMAIN with the Jetstream DNS hostname, e.g.
+#        myinstance.tra000000.projects.jetstream-cloud.org
+#   5. Copy to /etc/caddy/Caddyfile and reload:
+#        sudo systemctl reload caddy
+#
+# Caddy auto-provisions a Let's Encrypt TLS certificate for the domain.
+
+YOUR_DOMAIN {
+
+    # --- Password gate (HTTP Basic Auth) ---
+    basicauth * {
+        admin REPLACE_WITH_BCRYPT_HASH
+    }
+
+    # --- Reverse proxy to Panel app (websocket-safe) ---
+    reverse_proxy localhost:5006
+}

@@ -1,0 +1,205 @@
+# Operations Runbook — Jetstream2 Panel Deployment
+
+## Service Architecture
+
+```
+Internet --> Caddy (443/TLS + basic auth) --> Panel app (localhost:5006) --> Postgres (container)
+```
+
+---
+
+## Health Checks
+
+### Quick status
+
+```bash
+# Compose stack status
+docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream ps
+
+# Panel health endpoint (from VM)
+curl -fsS http://127.0.0.1:5006/health
+
+# Caddy status
+sudo systemctl status caddy
+
+# systemd unit status
+sudo systemctl status study-query-llm
+```
+
+### Full external check
+
+```bash
+# From any machine (should prompt for basic auth)
+curl -u admin:YourPassword https://YOUR_DOMAIN/health
+```
+
+---
+
+## Common Issues
+
+### Panel app unhealthy / container restarting
+
+1. Check logs:
+   ```bash
+   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream logs app --tail 100
+   ```
+2. Common causes:
+   - Missing or invalid `DATABASE_URL` in `.env.jetstream`.
+   - Postgres container not yet healthy (app starts before DB is ready — the
+     `depends_on` condition should handle this, but check DB logs too).
+   - Missing provider API keys (app may start but fail on first request).
+
+### Caddy TLS certificate not provisioning
+
+1. Verify the domain resolves to the VM floating IP:
+   ```bash
+   dig +short YOUR_DOMAIN
+   ```
+2. Check that ports 80 and 443 are open in both the security group and UFW:
+   ```bash
+   sudo ufw status
+   ```
+3. Check Caddy logs:
+   ```bash
+   sudo journalctl -u caddy --no-pager -n 50
+   ```
+4. If DNS is new, it may take up to a few hours to propagate. Caddy will retry
+   automatically.
+
+### WebSocket connection refused / Panel UI loads but widgets don't work
+
+The Panel app requires WebSocket connections. If the browser console shows
+WebSocket errors:
+
+1. Check that `PANEL_ALLOW_WS_ORIGINS` in `.env.jetstream` includes the exact
+   public hostname (e.g. `sqllm-panel.xxx000000.projects.jetstream-cloud.org`).
+2. Restart the app container after changing the env value:
+   ```bash
+   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream up -d app
+   ```
+
+### SSH access lost
+
+1. Use Exosphere Web Shell (port 49528) as emergency console access.
+2. If UFW is blocking SSH, use the Web Shell to run:
+   ```bash
+   sudo ufw allow ssh
+   ```
+
+---
+
+## Backup and Restore
+
+### Postgres backup (manual)
+
+```bash
+docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream \
+    exec db pg_dump -U sqllm study_query_jetstream \
+    | gzip > ~/backups/sqllm-$(date -u +%Y%m%d-%H%M%S).sql.gz
+```
+
+### Scheduled backup (cron)
+
+Add to `exouser` crontab (`crontab -e`):
+
+```
+0 4 * * * cd /home/exouser/app/deploy/jetstream && \
+    docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream \
+    exec -T db pg_dump -U sqllm study_query_jetstream \
+    | gzip > /home/exouser/backups/sqllm-$(date -u +\%Y\%m\%d).sql.gz
+```
+
+Create the backups directory first: `mkdir -p ~/backups`
+
+### Restore from backup
+
+```bash
+gunzip -c ~/backups/sqllm-YYYYMMDD.sql.gz | \
+    docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream \
+    exec -T db psql -U sqllm study_query_jetstream
+```
+
+---
+
+## Deployment / Update
+
+### Deploy a new image version
+
+1. On your build machine (local or CI):
+   ```bash
+   cd /path/to/study-query-llm
+   ./deploy/jetstream/build-and-push.sh --push
+   ```
+2. Note the `IMAGE_REF` printed at the end.
+3. SSH into the Jetstream VM:
+   ```bash
+   cd ~/app/deploy/jetstream
+   # Edit .env.jetstream — update IMAGE_REF to the new value
+   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream pull app
+   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream up -d app
+   ```
+4. Verify health:
+   ```bash
+   curl -fsS http://127.0.0.1:5006/health
+   ```
+
+### Rollback to previous image
+
+1. Edit `.env.jetstream` — set `IMAGE_REF` back to the previous tag/digest.
+2. Pull and restart:
+   ```bash
+   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream pull app
+   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream up -d app
+   ```
+
+---
+
+## Allocation Monitoring
+
+Jetstream2 policies to be aware of:
+
+- **Overdraw**: If your allocation is overdrawn, instances are shelved at
+  10 days and **deleted at 30 days**.
+- **Expiration**: Same timeline applies when the allocation expires without
+  renewal.
+- **Shelved instance retention**: Instances shelved for over 1 year may be
+  deleted by admins.
+- **Floating IP retention**: IPs on shelved instances for 90+ days can be
+  reclaimed.
+
+Monitor your credit balance in the
+[ACCESS Allocations Portal](https://allocations.access-ci.org/).
+
+### SU burn rates (for reference)
+
+| Flavor   | SU/hr | Daily | Monthly (~30d) | Annual  |
+|----------|-------|-------|----------------|---------|
+| m3.tiny  | 1     | 24    | 720            | 8,760   |
+| m3.small | 2     | 48    | 1,440          | 17,520  |
+
+---
+
+## Emergency Procedures
+
+### Full stack restart
+
+```bash
+sudo systemctl restart study-query-llm
+sudo systemctl restart caddy
+```
+
+### Nuclear reset (destroy and recreate containers)
+
+```bash
+cd ~/app/deploy/jetstream
+docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream down
+docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream up -d
+```
+
+Postgres data survives because it is on a named volume (`pg_data`).
+
+### VM snapshot for disaster recovery
+
+Take a snapshot from Exosphere before any risky operation:
+
+Exosphere > Instance details > Actions > **Image**

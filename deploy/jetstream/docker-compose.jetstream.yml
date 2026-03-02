@@ -1,0 +1,63 @@
+# Jetstream2 production compose stack.
+#
+# Runs the Panel app from a pre-built, pinned image (IMAGE_REF) behind
+# Caddy (installed natively on the host).  Postgres provides the database.
+#
+# Usage:
+#   docker compose -f docker-compose.jetstream.yml \
+#       --env-file .env.jetstream \
+#       -p sqllm-jetstream \
+#       up -d
+
+services:
+  app:
+    image: ${IMAGE_REF:?IMAGE_REF must be set in .env.jetstream}
+    container_name: sqllm-app
+    restart: unless-stopped
+    ports:
+      # Bind to localhost only — Caddy handles public traffic.
+      - "127.0.0.1:${PANEL_PORT:-5006}:5006"
+    env_file:
+      - .env.jetstream
+    environment:
+      PANEL_ADDRESS: "0.0.0.0"
+      PANEL_PORT: "5006"
+      DATABASE_URL: ${DATABASE_URL}
+      PANEL_ALLOW_WS_ORIGINS: ${PANEL_ALLOW_WS_ORIGINS:-localhost:5006}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5006/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    volumes:
+      - app_data:/data
+    labels:
+      - "com.sqllm.env=jetstream"
+
+  db:
+    image: postgres:17
+    container_name: sqllm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sqllm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-study_query_jetstream}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-sqllm} -d ${POSTGRES_DB:-study_query_jetstream}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  app_data:
+  pg_data:

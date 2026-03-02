@@ -1,0 +1,35 @@
+[Unit]
+Description=Study Query LLM Panel App (Docker Compose)
+Documentation=https://github.com/yourorg/study-query-llm
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/exouser/app/deploy/jetstream
+EnvironmentFile=/home/exouser/app/deploy/jetstream/.env.jetstream
+
+ExecStart=/usr/bin/docker compose \
+    -f docker-compose.jetstream.yml \
+    --env-file .env.jetstream \
+    -p sqllm-jetstream \
+    up -d --remove-orphans
+
+ExecStop=/usr/bin/docker compose \
+    -f docker-compose.jetstream.yml \
+    -p sqllm-jetstream \
+    down
+
+ExecReload=/usr/bin/docker compose \
+    -f docker-compose.jetstream.yml \
+    --env-file .env.jetstream \
+    -p sqllm-jetstream \
+    up -d --remove-orphans
+
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -6,6 +6,9 @@ Provides a web interface for running LLM inferences and analyzing results.
 
 import argparse
 import os
+import signal
+import socket
+import threading
 import panel as pn
 import time
 from typing import Optional, Sequence, Set
@@ -22,6 +25,10 @@ from panel_app.views.sweep_explorer import create_sweep_explorer_ui
 # Setup logging
 setup_logging()
 logger = get_logger(__name__)
+
+# Module-level state for graceful shutdown coordination
+_active_server = None
+_shutdown_flag = False
 
 NOTEBOOK_THEME_RESET = """
 body {
@@ -42,6 +49,46 @@ pn.extension(
     sizing_mode='stretch_width',
     raw_css=_extra_css,
 )
+
+
+def _check_port_available(address: str, port: int) -> None:
+    """Fail fast if *port* is already occupied by another process."""
+    bind_addr = "127.0.0.1" if address == "localhost" else address
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((bind_addr, port))
+    except OSError:
+        logger.error(
+            "Port %d is already in use on %s. "
+            "Another Panel server may be running. "
+            "Stop the existing process or use --port to choose a different port.",
+            port,
+            address,
+        )
+        raise SystemExit(1)
+    finally:
+        sock.close()
+
+
+def _request_shutdown() -> None:
+    """Gracefully stop the active server, falling back to SIGTERM."""
+    global _shutdown_flag
+    if _shutdown_flag:
+        return
+    _shutdown_flag = True
+
+    server = _active_server
+    if server is not None:
+        io_loop = getattr(server, "io_loop", None)
+        if io_loop is not None:
+            logger.info("Requesting graceful IO-loop shutdown (PID %s).", os.getpid())
+            io_loop.add_callback(io_loop.stop)
+            return
+
+    logger.info(
+        "No server handle available; sending SIGTERM to self (PID %s).", os.getpid()
+    )
+    os.kill(os.getpid(), signal.SIGTERM)
 
 
 def create_dashboard() -> pn.viewable.Viewable:
@@ -78,10 +125,12 @@ def create_app() -> pn.template.FastListTemplate:
     )
 
     def _shutdown(event):
-        logger.info("Exit button clicked — shutting down Panel server.")
-        import threading, os, signal
-        # Give the response a moment to reach the browser before killing
-        threading.Timer(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+        logger.info(
+            "Exit button clicked — shutting down Panel server (PID %s).", os.getpid()
+        )
+        exit_button.disabled = True
+        exit_button.name = "Shutting down…"
+        threading.Timer(0.5, _request_shutdown).start()
 
     exit_button.on_click(_shutdown)
 
@@ -159,6 +208,11 @@ def _add_health_route(server) -> None:
 
 def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None) -> None:
     """Start the Panel server using CLI/environment configuration."""
+    global _active_server, _shutdown_flag
+    _shutdown_flag = False
+
+    _check_port_available(address, port)
+
     allowed_ws: Set[str] = {
         f"{address}:{port}",
         f"localhost:{port}",
@@ -175,9 +229,10 @@ def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None
         allowed_ws.update(extra_origins)
 
     logger.info(
-        "Starting Panel server on %s:%s with allowed origins %s",
+        "Starting Panel server on %s:%s (PID %s) with allowed origins %s",
         address,
         port,
+        os.getpid(),
         ", ".join(sorted(allowed_ws)),
     )
     server, url = serve_app(
@@ -189,8 +244,9 @@ def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None
         allow_websocket_origin=sorted(allowed_ws),
     )
     _add_health_route(server)
+    _active_server = server
     server.start()
-    logger.info("Panel application available at %s", url)
+    logger.info("Panel application available at %s (PID %s)", url, os.getpid())
 
     try:
         if hasattr(server, "io_loop"):
@@ -206,6 +262,7 @@ def run_server(address: str, port: int, extra_origins: Optional[Set[str]] = None
     finally:
         if hasattr(server, "stop"):
             server.stop()
+        _active_server = None
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:

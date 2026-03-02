@@ -8,10 +8,18 @@ import argparse
 import os
 import signal
 import socket
+import sys
 import threading
 import panel as pn
 import time
+from pathlib import Path
 from typing import Optional, Sequence, Set
+
+# Ensure the project root is on sys.path so `panel serve panel_app/app.py`
+# can resolve package imports without a manual PYTHONPATH override.
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 

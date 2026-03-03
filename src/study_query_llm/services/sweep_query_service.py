@@ -87,6 +87,7 @@ class SweepQueryService:
         engine: Optional[str] = None,
         summarizer: Optional[str] = None,
         clustering_sweep_id: Optional[int] = None,
+        exclude_pre_fix: bool = False,
     ) -> pd.DataFrame:
         """
         Query run groups and their step children, expand metric arrays
@@ -95,6 +96,9 @@ class SweepQueryService:
         Optional filters narrow the result set before expansion.
         When ``clustering_sweep_id`` is provided only the clustering_run groups
         that are children of that sweep (via a "contains" GroupLink) are returned.
+
+        When ``exclude_pre_fix`` is True, runs with
+        ``metadata_json->>'centroid_fix_era' = 'pre_fix'`` are excluded.
         """
         session = self.repository.session
 
@@ -132,6 +136,13 @@ class SweepQueryService:
             query = query.filter(
                 sa_text("metadata_json->>'summarizer' = :summ"),
             ).params(summ=summarizer)
+        if exclude_pre_fix:
+            query = query.filter(
+                sa_text(
+                    "(metadata_json->>'centroid_fix_era' IS NULL "
+                    "OR metadata_json->>'centroid_fix_era' != 'pre_fix')"
+                ),
+            )
 
         runs = query.all()
         if not runs:

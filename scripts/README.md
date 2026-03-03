@@ -58,6 +58,25 @@ Scripts that are currently maintained, tested, and actively used:
   - Marks PCA KLLMeans sweep runs as defective
   - Status: Active (maintenance tool)
 
+- **`label_pre_fix_runs.py`** - Label pre-centroid-fix clustering runs
+  - Sets `metadata_json["centroid_fix_era"] = "pre_fix"` on all existing clustering_run groups
+  - Allows downstream tools (check scripts, Panel UI) to exclude pre-fix data
+  - Supports `--dry-run`
+  - Prereqs: `DATABASE_URL`
+  - Status: Active (maintenance tool)
+
+- **`archive_pre_fix_runs.py`** - Archive pre-fix clustering runs to local DB
+  - Copies clustering_run + clustering_step groups and GroupLinks to local backup DB, then deletes from Neon
+  - Run `label_pre_fix_runs.py` first to mark runs
+  - Supports `--dry-run`
+  - Prereqs: `DATABASE_URL`, `LOCAL_DATABASE_URL`, local DB initialized via `init_local_db.py`
+  - Status: Active (maintenance tool)
+
+- **`check_summarizer_results_differ.py`** - Summarizer vs None validation
+  - Checks that LLM summarizer runs produce different results from None runs
+  - Excludes pre-fix runs (those with `centroid_fix_era = "pre_fix"`)
+  - Status: Active (validation tool)
+
 ### ⚠️ Needs Verification
 Scripts that may still work but need testing:
 
@@ -110,8 +129,9 @@ DATABASE_URL=postgresql://... python scripts/check_all_data.py
 1. **Deployment/Testing**: `docker_smoke.py`, `azure_embeddings_smoke.py`
 2. **Analysis**: `run_pca_kllmeans_sweep.py`, `pca_kllmeans_sweep.py`
 3. **Database Utilities**: `check_*.py` scripts
-4. **Data Maintenance**: `mark_kllmeans_runs_defective.py`
-5. **Archive**: See `archive/` directory for deprecated scripts
+4. **Data Maintenance**: `mark_kllmeans_runs_defective.py`, `label_pre_fix_runs.py`, `archive_pre_fix_runs.py`
+5. **Validation**: `check_summarizer_results_differ.py`
+6. **Archive**: See `archive/` directory for deprecated scripts
 
 ## Adding New Scripts
 

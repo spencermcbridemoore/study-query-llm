@@ -16,6 +16,7 @@ from sqlalchemy import text as sa_text, func
 
 from ..db.models_v2 import Group, GroupLink
 from ..db.raw_call_repository import RawCallRepository
+from ..services.sweep_request_service import SweepRequestService
 from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -80,6 +81,41 @@ class SweepQueryService:
                 "parameter_axes": meta.get("parameter_axes", {}),
             })
         return result
+
+    def list_clustering_sweep_requests(
+        self,
+        status_filter: Optional[str] = None,
+        include_fulfilled: bool = True,
+    ) -> List[dict]:
+        """
+        Return clustering_sweep_request groups as list of summary dicts.
+
+        Each dict has: id, name, request_status, expected_count, created_at.
+        """
+        svc = SweepRequestService(self.repository)
+        return svc.list_requests(
+            status=status_filter,
+            include_fulfilled=include_fulfilled,
+        )
+
+    def get_request_progress_summary(self, request_id: int) -> Optional[dict]:
+        """
+        Return progress summary for a sweep request.
+
+        Returns dict with expected_count, completed_count, missing_count,
+        completed_run_keys, missing_run_keys (first 10), or None if not found.
+        """
+        svc = SweepRequestService(self.repository)
+        req = svc.get_request(request_id)
+        if not req:
+            return None
+        progress = svc.compute_progress(request_id)
+        progress["request_name"] = req.get("name", "?")
+        progress["request_status"] = req.get("request_status", "?")
+        # Truncate long lists for summary
+        if len(progress.get("missing_run_keys", [])) > 10:
+            progress["missing_run_keys_preview"] = progress["missing_run_keys"][:10]
+        return progress
 
     def get_sweep_metrics_df(
         self,

@@ -34,6 +34,7 @@ from .summarization_service import (
 )
 from .artifact_service import ArtifactService
 from .data_quality_service import DataQualityService
+from .sweep_request_service import SweepRequestService
 
 __all__ = [
     "InferenceService",
@@ -53,4 +54,5 @@ __all__ = [
     "SummarizationResponse",
     "ArtifactService",
     "DataQualityService",
+    "SweepRequestService",
 ]

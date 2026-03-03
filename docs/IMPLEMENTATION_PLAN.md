@@ -846,6 +846,36 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 
 ---
 
+### Step 7.13: Clustering Sweep Request Lifecycle ✅
+
+**Goal:** Add `clustering_sweep_request` lifecycle: order/request → delivery → fulfilled sweep. Tracks requested sweep combinations, computes missing runs from existing `clustering_run` data, and materializes fulfilled requests into `clustering_sweep` groups.
+
+**Dependencies:**
+- Phase 7.8 (Provenance via Groups)
+- Phase 7.11 (GroupLink schema)
+
+**Files created:**
+- `src/study_query_llm/experiments/sweep_request_types.py` (RunTarget, expand_parameter_axes, build_run_key)
+- `src/study_query_llm/services/sweep_request_service.py` (create_request, compute_progress, record_delivery, finalize_if_fulfilled)
+- `scripts/check_sweep_requests.py` (CLI for pending request visibility)
+- `src/study_query_llm/db/migrations/add_sweep_request_indexes.py` (PostgreSQL indexes for run_key, request_status)
+
+**Files updated:**
+- `scripts/run_300_bigrun_sweep.py` (--create-request, --request-id, --request-name flags; request-driven execution)
+- `src/study_query_llm/services/sweep_query_service.py` (list_clustering_sweep_requests, get_request_progress_summary)
+
+**Design:**
+- `clustering_sweep_request` group type tracks what should run
+- Delivery computed from existing `clustering_run` records (run_key-based)
+- `clustering_sweep` unchanged as completed/consumable artifact
+- Idempotent record_delivery; fulfillment creates sweep when missing_count == 0
+
+**Test strategy:**
+- `tests/test_services/test_sweep_request_service.py`: create_request, compute_progress, idempotent record_delivery, fulfillment
+- `tests/test_scripts/test_run_300_bigrun_sweep_request_mode.py`: --create-request CLI, request flags
+
+---
+
 ## Summary: Implementation Checklist
 
 ### Phase 1: Provider Layer
@@ -896,6 +926,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - [x] Step 7.10: Analysis Artifacts
 - [x] Step 7.11: Group-of-Groups / RunStep Schema
 - [x] Step 7.12: Embedding Provider Abstraction
+- [x] Step 7.13: Clustering Sweep Request Lifecycle
 
 ---
 

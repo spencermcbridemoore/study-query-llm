@@ -103,6 +103,8 @@ class Group(BaseV2):
     - `embedding_batch`: Batch of embeddings created together
     - `run`: Complete algorithm execution (e.g., PCA+KLLMeans sweep)
     - `step`: Individual step within a run (e.g., "pca_projection", "clustering_k=5")
+    - `clustering_sweep`: Parameter-grid execution of clustering (completed/consumable)
+    - `clustering_sweep_request`: Order/request for sweep runs (pending delivery)
     - `metrics`: Computed metrics/analysis results
     - `summarization_batch`: Batch of LLM summarization calls
     - `batch`: Generic batch (legacy, use specific types above when possible)

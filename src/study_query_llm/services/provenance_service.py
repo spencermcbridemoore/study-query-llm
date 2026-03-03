@@ -48,6 +48,7 @@ GROUP_TYPE_SUMMARIZATION_BATCH = "summarization_batch"
 GROUP_TYPE_CLUSTERING_RUN = "clustering_run"
 GROUP_TYPE_CLUSTERING_STEP = "clustering_step"
 GROUP_TYPE_CLUSTERING_SWEEP = "clustering_sweep"
+GROUP_TYPE_CLUSTERING_SWEEP_REQUEST = "clustering_sweep_request"
 
 # Backward-compat aliases (these will be removed once all callers are updated)
 GROUP_TYPE_RUN = GROUP_TYPE_CLUSTERING_RUN

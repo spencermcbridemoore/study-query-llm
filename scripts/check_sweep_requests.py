@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Check sweep request status and pending deliveries.
+
+Prints request id/name/status, expected/completed/missing counts,
+and first N missing run keys.
+
+Usage:
+  python scripts/check_sweep_requests.py
+  python scripts/check_sweep_requests.py --request-id 123
+  python scripts/check_sweep_requests.py --pending-only
+"""
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.services.sweep_query_service import SweepQueryService
+
+
+def main():
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        print("ERROR: DATABASE_URL environment variable not set", file=sys.stderr)
+        sys.exit(1)
+
+    import argparse
+    parser = argparse.ArgumentParser(description="Check sweep request status")
+    parser.add_argument(
+        "--request-id",
+        type=int,
+        default=None,
+        help="Show progress for a specific request ID",
+    )
+    parser.add_argument(
+        "--pending-only",
+        action="store_true",
+        help="List only non-fulfilled requests",
+    )
+    parser.add_argument(
+        "--missing-limit",
+        type=int,
+        default=10,
+        help="Max missing run keys to print per request (default 10)",
+    )
+    args = parser.parse_args()
+
+    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db.init_db()
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepQueryService(repo)
+
+        if args.request_id is not None:
+            summary = svc.get_request_progress_summary(args.request_id)
+            if not summary:
+                print(f"Request {args.request_id} not found.")
+                sys.exit(1)
+            print(f"Request: {summary.get('request_name', '?')} (id={args.request_id})")
+            print(f"  Status: {summary.get('request_status', '?')}")
+            print(f"  Expected: {summary.get('expected_count', 0)}")
+            print(f"  Completed: {summary.get('completed_count', 0)}")
+            print(f"  Missing: {summary.get('missing_count', 0)}")
+            missing = summary.get("missing_run_keys", [])
+            preview = summary.get("missing_run_keys_preview", missing[: args.missing_limit])
+            if preview:
+                print(f"  First {len(preview)} missing run_keys:")
+                for rk in preview:
+                    print(f"    - {rk}")
+            elif missing:
+                print(f"  Missing run_keys (first {args.missing_limit}):")
+                for rk in missing[: args.missing_limit]:
+                    print(f"    - {rk}")
+            return
+
+        requests = svc.list_clustering_sweep_requests(include_fulfilled=not args.pending_only)
+        if not requests:
+            print("No sweep requests found.")
+            return
+
+        print(f"Found {len(requests)} sweep request(s):\n")
+        for r in requests:
+            rid = r["id"]
+            progress = svc.get_request_progress_summary(rid)
+            if not progress:
+                continue
+            status = progress.get("request_status", "?")
+            exp = progress.get("expected_count", 0)
+            done = progress.get("completed_count", 0)
+            miss = progress.get("missing_count", 0)
+            print(f"  [{rid}] {r.get('name', '?')}")
+            print(f"      status={status}  expected={exp}  completed={done}  missing={miss}")
+            if miss > 0:
+                missing = progress.get("missing_run_keys", [])[: args.missing_limit]
+                for rk in missing:
+                    print(f"        - {rk}")
+                if miss > args.missing_limit:
+                    print(f"        ... and {miss - args.missing_limit} more")
+            print()
+
+
+if __name__ == "__main__":
+    main()

@@ -20,6 +20,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -27,8 +28,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import numpy as np
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYMENT_MAX_TOKENS
 from study_query_llm.services.provenance_service import ProvenanceService
+from study_query_llm.services.sweep_request_service import SweepRequestService
 from study_query_llm.algorithms import SweepConfig
 
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
@@ -170,7 +173,48 @@ async def _run_sweep(texts, embeddings, llm_deployment, db, embedding_engine):
 # Main
 # ---------------------------------------------------------------------------
 
-async def main(force: bool = False):
+async def main(
+    force: bool = False,
+    request_id: Optional[int] = None,
+    create_request: bool = False,
+    request_name: Optional[str] = None,
+):
+    db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
+    db.init_db()
+
+    # ------------------------------------------------------------------
+    # --create-request: create request metadata and exit
+    # ------------------------------------------------------------------
+    if create_request:
+        name = request_name or f"{OUT_PREFIX}_request_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            svc = SweepRequestService(repo)
+            rid = svc.create_request(
+                request_name=name,
+                algorithm="cosine_kllmeans_no_pca",
+                fixed_config={
+                    "n_samples": ENTRY_MAX,
+                    "n_restarts": N_RESTARTS,
+                    "k_min": K_MIN,
+                    "k_max": K_MAX,
+                    "skip_pca": True,
+                    "distance_metric": "cosine",
+                    "normalize_vectors": True,
+                    "llm_interval": 20,
+                },
+                parameter_axes={
+                    "datasets": [d["name"] for d in DATASETS],
+                    "embedding_engines": EMBEDDING_ENGINES,
+                    "summarizers": [str(s) if s is not None else "None" for s in SUMMARIZERS],
+                },
+                entry_max=ENTRY_MAX,
+                n_restarts_suffix="50runs",
+                description=f"{OUT_PREFIX} sweep request: 3 datasets x 3 embeddings x 5 summarizers",
+            )
+        print(f"[OK] Created sweep request: id={rid}, name={name}")
+        return
+
     total = len(DATASETS) * len(EMBEDDING_ENGINES) * len(SUMMARIZERS)
 
     print("=" * 80)
@@ -183,9 +227,9 @@ async def main(force: bool = False):
     print(f"  embeddings  : {EMBEDDING_ENGINES}")
     print(f"  summarizers : {SUMMARIZERS}")
     print(f"  mode        : skip_pca=True, cosine, normalize")
+    if request_id:
+        print(f"  request_id  : {request_id} (missing-only mode)")
 
-    db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
-    db.init_db()
     print("\n[OK] Database initialised")
 
     # ------------------------------------------------------------------
@@ -234,133 +278,187 @@ async def main(force: bool = False):
         print(f"  {len(texts)} texts, {len(set(labels))} unique labels")
 
     # ------------------------------------------------------------------
-    # Main sweep loop: dataset → embedding → summarizer
+    # Build task list: all combos (legacy) or missing-only (request mode)
+    # ------------------------------------------------------------------
+    tasks_to_run: list[tuple[str, str, str]] = []  # (dataset, engine, summarizer)
+    if request_id:
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            svc = SweepRequestService(repo)
+            progress = svc.compute_progress(request_id)
+            missing = progress.get("missing_run_keys") or []
+            run_key_to_target = (svc.get_request(request_id) or {}).get("run_key_to_target") or {}
+        for rk in missing:
+            t = run_key_to_target.get(rk)
+            if t:
+                tasks_to_run.append((
+                    t["dataset"],
+                    t["embedding_engine"],
+                    t["summarizer"],
+                ))
+        if not tasks_to_run:
+            print(f"\n[OK] Request {request_id} already fulfilled. Nothing to run.")
+            return
+        total_to_run = len(tasks_to_run)
+        print(f"\n[REQUEST] {total_to_run} missing runs to execute (of {progress['expected_count']} total)")
+    else:
+        for dataset_name in loaded:
+            for embedding_engine in EMBEDDING_ENGINES:
+                for llm in SUMMARIZERS:
+                    summarizer_name = "None" if llm is None else str(llm)
+                    tasks_to_run.append((dataset_name, embedding_engine, summarizer_name))
+        total_to_run = len(tasks_to_run)
+
+    # ------------------------------------------------------------------
+    # Main sweep loop over tasks
     # ------------------------------------------------------------------
     run_ids_ingested: list[int] = []
     run_count = 0
-    for dataset_name, info in loaded.items():
+    current_dataset = None
+    current_engine = None
+    embeddings_cache = None
+
+    for dataset_name, embedding_engine, summarizer_name in tasks_to_run:
+        run_count += 1
+        engine_safe = _safe_name(embedding_engine)
+        sum_safe = _safe_name(summarizer_name)
+        llm = None if summarizer_name == "None" else summarizer_name
+
+        if dataset_name not in loaded:
+            print(f"  [{run_count}/{total_to_run}] {dataset_name} (SKIP – not loaded)")
+            continue
+
+        info = loaded[dataset_name]
         texts = info["texts"]
         labels = info["labels"]
         label_max = info["label_max"]
         has_gt = info["has_gt"]
         gt_labels = labels if has_gt else None
 
-        print(f"\n{'='*80}")
-        print(f"DATASET: {dataset_name}")
-        print("=" * 80)
-
-        for embedding_engine in EMBEDDING_ENGINES:
-            engine_safe = _safe_name(embedding_engine)
-
-            # Token-length filter for this engine
-            max_tokens = DEPLOYMENT_MAX_TOKENS.get(embedding_engine)
-            if max_tokens:
-                valid_idx = []
-                for i, t in enumerate(texts):
-                    try:
-                        if estimate_tokens(t, embedding_engine) <= max_tokens:
-                            valid_idx.append(i)
-                    except Exception:
+        # Token-length filter for this engine
+        max_tokens = DEPLOYMENT_MAX_TOKENS.get(embedding_engine)
+        if max_tokens:
+            valid_idx = []
+            for i, t in enumerate(texts):
+                try:
+                    if estimate_tokens(t, embedding_engine) <= max_tokens:
                         valid_idx.append(i)
-                texts_eng = [texts[i] for i in valid_idx]
-                labels_eng = labels[valid_idx] if has_gt else labels[valid_idx]
-                gt_eng = labels_eng if has_gt else None
-            else:
-                texts_eng = texts
-                gt_eng = gt_labels
+                except Exception:
+                    valid_idx.append(i)
+            texts_eng = [texts[i] for i in valid_idx]
+            labels_eng = labels[valid_idx] if has_gt else labels[valid_idx]
+            gt_eng = labels_eng if has_gt else None
+        else:
+            texts_eng = texts
+            gt_eng = gt_labels
 
-            print(f"\n  EMBEDDING: {embedding_engine} ({len(texts_eng)} texts after token filter)")
+        run_key = f"{dataset_name}_{engine_safe}_{sum_safe}_{ENTRY_MAX}_50runs"
+        out_name = (
+            f"{OUT_PREFIX}_entry{ENTRY_MAX}_{dataset_name}"
+            f"_{engine_safe}_{sum_safe}_"
+        )
 
+        # Skip if pkl backup already on disk AND not forcing
+        if not force and list(OUTPUT_DIR.glob(out_name + "*.pkl")):
+            print(f"  [{run_count}/{total_to_run}] {summarizer_name} (SKIP – pkl exists)")
+            continue
+
+        print(f"\n  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} / {summarizer_name}")
+
+        # Fetch embeddings (reuse if same dataset+engine as previous)
+        if (current_dataset, current_engine) != (dataset_name, embedding_engine):
             try:
-                embeddings = await fetch_embeddings_async(texts_eng, embedding_engine, db)
+                embeddings_cache = await fetch_embeddings_async(texts_eng, embedding_engine, db)
+                current_dataset, current_engine = dataset_name, embedding_engine
             except Exception as exc:
                 print(f"  [ERROR] Embedding fetch failed: {exc}")
                 continue
+        embeddings = embeddings_cache
 
-            for llm in SUMMARIZERS:
-                run_count += 1
-                summarizer_name = "None" if llm is None else llm
-                sum_safe = _safe_name(summarizer_name)
+        try:
+            result = await asyncio.wait_for(
+                _run_sweep(texts_eng, embeddings, llm, db, embedding_engine),
+                timeout=7200.0,
+            )
+        except asyncio.TimeoutError:
+            print(f"  [ERROR] Timed out after 2 h – skipping")
+            continue
+        except Exception as exc:
+            import traceback
+            print(f"  [ERROR] Sweep failed: {exc}")
+            traceback.print_exc()
+            continue
 
-                run_key = f"{dataset_name}_{engine_safe}_{sum_safe}_{ENTRY_MAX}_50runs"
-                out_name = (
-                    f"{OUT_PREFIX}_entry{ENTRY_MAX}_{dataset_name}"
-                    f"_{engine_safe}_{sum_safe}_"
-                )
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = OUTPUT_DIR / f"{out_name}{ts}.pkl"
 
-                # Skip if pkl backup already on disk AND not forcing
-                if not force and list(OUTPUT_DIR.glob(out_name + "*.pkl")):
-                    print(f"  [{run_count}/{total}] {summarizer_name} (SKIP – pkl exists)")
-                    continue
+        metadata = {
+            "entry_max": ENTRY_MAX,
+            "label_max": label_max,
+            "actual_entry_count": len(texts_eng),
+            "actual_label_count": len(set(gt_eng)) if gt_eng is not None else 0,
+            "benchmark_source": dataset_name,
+            "summarizer": summarizer_name,
+            "embedding_engine": embedding_engine,
+            "n_restarts": N_RESTARTS,
+            "sweep_config": {
+                "skip_pca": True,
+                "k_min": K_MIN,
+                "k_max": K_MAX,
+                "n_restarts": N_RESTARTS,
+                "compute_stability": True,
+            },
+            "note": "300-sample bigrun sweep: 3 datasets × 3 embeddings × 5 summarizers",
+        }
 
-                print(f"\n  [{run_count}/{total}] {dataset_name} / {embedding_engine} / {summarizer_name}")
+        # 1. Save pkl first (compute is safe on disk)
+        save_pkl(
+            result,
+            str(out_path),
+            ground_truth_labels=gt_eng,
+            dataset_name=dataset_name,
+            metadata=metadata,
+        )
+        print(f"  [PKL] {out_path.name}")
 
-                try:
-                    result = await asyncio.wait_for(
-                        _run_sweep(texts_eng, embeddings, llm, db, embedding_engine),
-                        timeout=7200.0,
-                    )
-                except asyncio.TimeoutError:
-                    print(f"  [ERROR] Timed out after 2 h – skipping")
-                    continue
-                except Exception as exc:
-                    import traceback
-                    print(f"  [ERROR] Sweep failed: {exc}")
-                    traceback.print_exc()
-                    continue
-
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                out_path = OUTPUT_DIR / f"{out_name}{ts}.pkl"
-
-                metadata = {
-                    "entry_max": ENTRY_MAX,
-                    "label_max": label_max,
-                    "actual_entry_count": len(texts_eng),
-                    "actual_label_count": len(set(gt_eng)) if gt_eng is not None else 0,
-                    "benchmark_source": dataset_name,
-                    "summarizer": summarizer_name,
-                    "embedding_engine": embedding_engine,
-                    "n_restarts": N_RESTARTS,
-                    "sweep_config": {
-                        "skip_pca": True,
-                        "k_min": K_MIN,
-                        "k_max": K_MAX,
-                        "n_restarts": N_RESTARTS,
-                        "compute_stability": True,
-                    },
-                    "note": "300-sample bigrun sweep: 3 datasets × 3 embeddings × 5 summarizers",
-                }
-
-                # 1. Save pkl first (compute is safe on disk)
-                save_pkl(
-                    result,
-                    str(out_path),
-                    ground_truth_labels=gt_eng,
-                    dataset_name=dataset_name,
-                    metadata=metadata,
-                )
-                print(f"  [PKL] {out_path.name}")
-
-                # 2. Ingest to NeonDB after pkl is confirmed written
-                run_id = ingest_result_to_db(result, metadata, gt_eng, db, run_key)
-                if run_id is not None:
-                    run_ids_ingested.append(run_id)
+        # 2. Ingest to NeonDB after pkl is confirmed written
+        run_id = ingest_result_to_db(result, metadata, gt_eng, db, run_key)
+        if run_id is not None:
+            run_ids_ingested.append(run_id)
+            if request_id:
+                with db.session_scope() as session:
+                    repo = RawCallRepository(session)
+                    svc = SweepRequestService(repo)
+                    svc.record_delivery(request_id, run_id, run_key)
 
     print(f"\n{'='*80}")
     print("[OK] All runs complete.")
-    print(f"  Total sweeps executed: {run_count}/{total}")
+    print(f"  Total sweeps executed: {run_count}/{total_to_run}")
     print("=" * 80)
 
     # ------------------------------------------------------------------
-    # Register all newly ingested runs under a clustering_sweep group
+    # Request mode: finalize if fulfilled
     # ------------------------------------------------------------------
-    if run_ids_ingested:
+    if request_id and run_ids_ingested:
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            svc = SweepRequestService(repo)
+            sweep_id = svc.finalize_if_fulfilled(
+                request_id,
+                sweep_name=f"{OUT_PREFIX}_sweep_{datetime.now().strftime('%Y%m%d')}",
+            )
+            if sweep_id:
+                print(f"  [REQUEST] Fulfilled -> clustering_sweep id={sweep_id}")
+
+    # ------------------------------------------------------------------
+    # Legacy mode: Register all newly ingested runs under a clustering_sweep group
+    # ------------------------------------------------------------------
+    if run_ids_ingested and not request_id:
         ts = datetime.now().strftime("%Y%m%d")
         sweep_name = f"{OUT_PREFIX}_sweep_{ts}"
         try:
             with db.session_scope() as session:
                 from study_query_llm.db.models_v2 import Group, GroupLink
-                from study_query_llm.db.raw_call_repository import RawCallRepository
                 provenance = ProvenanceService(RawCallRepository(session))
 
                 existing = (
@@ -383,7 +481,7 @@ async def main(force: bool = False):
                             "n_restarts": N_RESTARTS,
                             "k_min": K_MIN,
                             "k_max": K_MAX,
-                            **SWEEP_CONFIG.__dict__ if hasattr(SWEEP_CONFIG, "__dict__") else {},
+                            **(SWEEP_CONFIG.__dict__ if hasattr(SWEEP_CONFIG, "__dict__") else {}),
                         },
                         parameter_axes={
                             "datasets": list(loaded.keys()),
@@ -428,5 +526,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Re-run even if pkl backup already exists on disk",
     )
+    parser.add_argument(
+        "--request-id",
+        type=int,
+        default=None,
+        help="Execute only missing runs for this sweep request ID",
+    )
+    parser.add_argument(
+        "--create-request",
+        action="store_true",
+        help="Create sweep request metadata and exit (no runs)",
+    )
+    parser.add_argument(
+        "--request-name",
+        type=str,
+        default=None,
+        help="Name for new request when using --create-request",
+    )
     args = parser.parse_args()
-    asyncio.run(main(force=args.force))
+    asyncio.run(main(
+        force=args.force,
+        request_id=args.request_id,
+        create_request=args.create_request,
+        request_name=args.request_name,
+    ))

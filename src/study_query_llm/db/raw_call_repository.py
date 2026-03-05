@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_, or_, cast, Float, String, text
+from sqlalchemy.exc import IntegrityError
 from .models_v2 import RawCall, Group, GroupMember, CallArtifact, EmbeddingVector, GroupLink
 from ..utils.logging_config import get_logger
 
@@ -740,7 +741,7 @@ class RawCallRepository:
         Returns:
             GroupLink ID
         """
-        # Check if link already exists
+        # Fast-path: check if link already exists
         existing = self.session.query(GroupLink).filter_by(
             parent_group_id=parent_group_id,
             child_group_id=child_group_id,
@@ -762,9 +763,29 @@ class RawCallRepository:
             metadata_json=metadata_json or {},
         )
 
-        self.session.add(link)
-        self.session.flush()
-        self.session.refresh(link)
+        try:
+            # Nested transaction lets us recover from uniqueness conflicts
+            # without rolling back the outer unit of work.
+            with self.session.begin_nested():
+                self.session.add(link)
+                self.session.flush()
+                self.session.refresh(link)
+        except IntegrityError:
+            existing = self.session.query(GroupLink).filter_by(
+                parent_group_id=parent_group_id,
+                child_group_id=child_group_id,
+                link_type=link_type,
+            ).first()
+            if existing:
+                logger.debug(
+                    "Recovered concurrent create_group_link collision for "
+                    "parent=%s child=%s type=%s",
+                    parent_group_id,
+                    child_group_id,
+                    link_type,
+                )
+                return existing.id
+            raise
 
         logger.debug(
             f"Created group link: id={link.id}, parent={parent_group_id}, "

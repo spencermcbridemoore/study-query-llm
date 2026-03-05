@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.exc import IntegrityError
 
 from study_query_llm.experiments.sweep_request_types import (
     REQUEST_SCHEMA_VERSION,
@@ -302,6 +303,28 @@ class SweepRequestService:
         Returns:
             Sweep group ID if fulfilled, None if not yet fulfilled or request invalid.
         """
+        # Re-read under a lock when supported to avoid concurrent finalize races.
+        session = self.repository.session
+        req_group = self.repository.get_group_by_id(request_id)
+        if not req_group or req_group.group_type != GROUP_TYPE_CLUSTERING_SWEEP_REQUEST:
+            return None
+        if session.get_bind().dialect.name != "sqlite":
+            req_group = (
+                session.query(type(req_group))
+                .filter(type(req_group).id == request_id)
+                .with_for_update()
+                .first()
+            )
+            if not req_group:
+                return None
+
+        meta = req_group.metadata_json or {}
+        if meta.get("request_status") == REQUEST_STATUS_FULFILLED and meta.get(
+            "linked_sweep_id"
+        ):
+            # Idempotent fast-path: already fulfilled.
+            return int(meta["linked_sweep_id"])
+
         progress = self.compute_progress(request_id)
         if progress["missing_count"] > 0:
             logger.debug(
@@ -310,11 +333,13 @@ class SweepRequestService:
             )
             return None
 
-        req_group = self.repository.get_group_by_id(request_id)
-        if not req_group or req_group.group_type != GROUP_TYPE_CLUSTERING_SWEEP_REQUEST:
-            return None
-
+        # Re-check after progress computation in case another worker finalized first.
         meta = req_group.metadata_json or {}
+        if meta.get("request_status") == REQUEST_STATUS_FULFILLED and meta.get(
+            "linked_sweep_id"
+        ):
+            return int(meta["linked_sweep_id"])
+
         algorithm = meta.get("algorithm", "cosine_kllmeans_no_pca")
         fixed_config = meta.get("fixed_config", {})
         parameter_axes = meta.get("parameter_axes", {})
@@ -329,13 +354,29 @@ class SweepRequestService:
             f"{len(completed_run_ids)} runs"
         )
 
-        sweep_id = self.provenance.create_clustering_sweep_group(
-            sweep_name=default_sweep_name,
-            algorithm=algorithm,
-            fixed_config=fixed_config,
-            parameter_axes=parameter_axes,
-            description=description,
-        )
+        try:
+            sweep_id = self.provenance.create_clustering_sweep_group(
+                sweep_name=default_sweep_name,
+                algorithm=algorithm,
+                fixed_config=fixed_config,
+                parameter_axes=parameter_axes,
+                description=description,
+            )
+        except IntegrityError:
+            # If another worker created the same sweep name, reuse it.
+            from study_query_llm.db.models_v2 import Group
+
+            existing = (
+                session.query(Group)
+                .filter(
+                    Group.group_type == GROUP_TYPE_CLUSTERING_SWEEP,
+                    Group.name == default_sweep_name,
+                )
+                .first()
+            )
+            if not existing:
+                raise
+            sweep_id = existing.id
 
         for pos, run_id in enumerate(completed_run_ids):
             self.provenance.link_run_to_clustering_sweep(

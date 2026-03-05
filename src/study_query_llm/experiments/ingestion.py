@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 from sqlalchemy import text as sa_text
+from sqlalchemy.exc import IntegrityError
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
@@ -85,12 +86,27 @@ def ingest_result_to_db(
                 **{k: v for k, v in metadata.items() if k not in ("sweep_config",)},
             }
 
-            run_id = provenance.create_run_group(
-                algorithm="cosine_kllmeans_no_pca",
-                config=run_metadata,
-                name=f"sweep_{dataset}_{engine}_{data_type}",
-                description=f"{dataset}/{engine}/{summarizer} ({n_restarts} restarts)",
-            )
+            try:
+                run_id = provenance.create_run_group(
+                    algorithm="cosine_kllmeans_no_pca",
+                    config=run_metadata,
+                    name=f"sweep_{dataset}_{engine}_{data_type}",
+                    description=f"{dataset}/{engine}/{summarizer} ({n_restarts} restarts)",
+                )
+            except IntegrityError:
+                # Concurrent writer created this run_key after our existence check.
+                session.rollback()
+                existing = session.query(Group).filter(
+                    Group.group_type == "clustering_run",
+                    sa_text("metadata_json->>'run_key' = :rk"),
+                ).params(rk=run_key).first()
+                if existing:
+                    print(
+                        f"      [SKIP] Concurrently created run_key={run_key} "
+                        f"(group {existing.id})"
+                    )
+                    return existing.id
+                raise
 
             run_group = repo.get_group_by_id(run_id)
             run_group.metadata_json = run_metadata

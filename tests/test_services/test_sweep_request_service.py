@@ -285,6 +285,41 @@ def test_finalize_if_fulfilled_preserves_sweep_semantics(db_connection):
         assert generates is not None
 
 
+def test_finalize_if_fulfilled_is_idempotent(db_connection):
+    """Repeated finalize calls return same sweep and avoid duplicate sweeps."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        from study_query_llm.db.models_v2 import Group
+
+        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"], "summarizers": ["s1"]}
+        req_id = svc.create_request(
+            request_name="idempotent_finalize",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={},
+            parameter_axes=axes,
+            entry_max=300,
+        )
+
+        repo.create_group(
+            group_type=GROUP_TYPE_CLUSTERING_RUN,
+            name="run1",
+            metadata_json={"run_key": "dbpedia_e1_s1_300_50runs"},
+        )
+
+        sweep_id_1 = svc.finalize_if_fulfilled(req_id, sweep_name="idempotent_sweep")
+        sweep_id_2 = svc.finalize_if_fulfilled(req_id, sweep_name="idempotent_sweep")
+
+        assert sweep_id_1 is not None
+        assert sweep_id_2 == sweep_id_1
+
+        sweeps = session.query(Group).filter(
+            Group.group_type == GROUP_TYPE_CLUSTERING_SWEEP,
+            Group.name == "idempotent_sweep",
+        ).all()
+        assert len(sweeps) == 1
+
+
 def test_finalize_if_fulfilled_returns_none_when_missing(db_connection):
     """finalize_if_fulfilled returns None when runs are still missing."""
     with db_connection.session_scope() as session:

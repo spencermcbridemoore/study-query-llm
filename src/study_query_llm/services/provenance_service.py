@@ -40,6 +40,7 @@ logger = get_logger(__name__)
 
 # Standard group types
 GROUP_TYPE_DATASET = "dataset"
+GROUP_TYPE_DATASET_SNAPSHOT = "dataset_snapshot"
 GROUP_TYPE_EMBEDDING_BATCH = "embedding_batch"
 GROUP_TYPE_METRICS = "metrics"
 GROUP_TYPE_SUMMARIZATION_BATCH = "summarization_batch"
@@ -54,6 +55,10 @@ GROUP_TYPE_CLUSTERING_SWEEP_REQUEST = "clustering_sweep_request"
 GROUP_TYPE_RUN = GROUP_TYPE_CLUSTERING_RUN
 GROUP_TYPE_STEP = GROUP_TYPE_CLUSTERING_STEP
 
+# Dataset snapshot conventions
+LABEL_MODE_LABELED = "labeled"
+LABEL_MODE_UNLABELED = "unlabeled"
+
 
 class ProvenanceService:
     """
@@ -65,6 +70,7 @@ class ProvenanceService:
 
     Standard Group Types:
     - `dataset`: Input data collection (links to embedding RawCalls)
+    - `dataset_snapshot`: Immutable sampled dataset manifest (labeled/unlabeled)
     - `embedding_batch`: Batch of embeddings created together
     - `clustering_run`: Complete clustering algorithm execution
     - `clustering_step`: Individual k-value step within a clustering run
@@ -347,6 +353,61 @@ class ProvenanceService:
         )
 
         logger.info(f"Created dataset group: id={group_id}, name={name}")
+        return group_id
+
+    def create_dataset_snapshot_group(
+        self,
+        snapshot_name: str,
+        source_dataset: str,
+        sample_size: int,
+        label_mode: str,
+        sampling_method: str,
+        sampling_seed: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        description: Optional[str] = None,
+    ) -> int:
+        """
+        Create a dataset_snapshot group describing a frozen sampled dataset.
+
+        Required metadata contract:
+        - snapshot_name
+        - source_dataset
+        - sample_size
+        - label_mode ("labeled" | "unlabeled")
+        - sampling_method
+        - sampling_seed (optional)
+        """
+        if label_mode not in (LABEL_MODE_LABELED, LABEL_MODE_UNLABELED):
+            raise ValueError(
+                f"label_mode must be one of: {LABEL_MODE_LABELED}, {LABEL_MODE_UNLABELED}"
+            )
+
+        metadata_json: Dict[str, Any] = {
+            "snapshot_name": snapshot_name,
+            "source_dataset": source_dataset,
+            "sample_size": int(sample_size),
+            "label_mode": label_mode,
+            "sampling_method": sampling_method,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if sampling_seed is not None:
+            metadata_json["sampling_seed"] = int(sampling_seed)
+        if metadata:
+            metadata_json.update(metadata)
+
+        group_id = self.repository.create_group(
+            group_type=GROUP_TYPE_DATASET_SNAPSHOT,
+            name=snapshot_name,
+            description=description or f"Dataset snapshot: {snapshot_name}",
+            metadata_json=metadata_json,
+        )
+        logger.info(
+            "Created dataset snapshot group: id=%s, name=%s, source=%s, sample_size=%s",
+            group_id,
+            snapshot_name,
+            source_dataset,
+            sample_size,
+        )
         return group_id
 
     def create_embedding_batch_group(

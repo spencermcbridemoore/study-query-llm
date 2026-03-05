@@ -319,6 +319,79 @@ class GroupLink(BaseV2):
         }
 
 
+class SweepRunClaim(BaseV2):
+    """
+    Worker-claim table for request-driven sweep execution.
+
+    One row represents ownership/processing state for a specific (request, run_key)
+    target, enabling safe multi-worker rollout with leases and heartbeats.
+    """
+
+    __tablename__ = "sweep_run_claims"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_key = Column(String(300), nullable=False, index=True)
+    claim_status = Column(String(20), nullable=False, default="claimed", index=True)
+    claimed_by = Column(String(120), nullable=True)
+    claimed_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    run_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    metadata_json = Column(JSON, nullable=True)
+
+    request_group = relationship("Group", foreign_keys=[request_group_id])
+    run_group = relationship("Group", foreign_keys=[run_group_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            "claim_status IN ('claimed', 'completed', 'failed', 'released')",
+            name="check_sweep_run_claim_status",
+        ),
+        Index(
+            "idx_sweep_run_claim_request_status",
+            "request_group_id",
+            "claim_status",
+        ),
+        Index(
+            "idx_sweep_run_claim_request_run_key",
+            "request_group_id",
+            "run_key",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "request_group_id": self.request_group_id,
+            "run_key": self.run_key,
+            "claim_status": self.claim_status,
+            "claimed_by": self.claimed_by,
+            "claimed_at": self.claimed_at.isoformat() if self.claimed_at else None,
+            "lease_expires_at": (
+                self.lease_expires_at.isoformat() if self.lease_expires_at else None
+            ),
+            "heartbeat_at": self.heartbeat_at.isoformat() if self.heartbeat_at else None,
+            "run_group_id": self.run_group_id,
+            "metadata_json": self.metadata_json,
+        }
+
+
 class EmbeddingVector(BaseV2):
     """
     Table for storing embedding vectors.

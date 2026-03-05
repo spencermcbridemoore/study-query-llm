@@ -1,9 +1,13 @@
 """
 Migration script to add indexes for sweep request and run_key lookups.
 
-Adds expression indexes on groups.metadata_json for:
+Adds non-unique expression indexes on groups.metadata_json for:
 - run_key lookup (clustering_run)
 - request_status lookup (clustering_sweep_request)
+
+For uniqueness/idempotency safety (unique run_key, unique group links, worker
+claim table), run:
+    python -m study_query_llm.db.migrations.add_sweep_worker_safety
 
 Usage:
     python -m study_query_llm.db.migrations.add_sweep_request_indexes

@@ -65,6 +65,11 @@ Scripts that are currently maintained, tested, and actively used:
   - Stores exact sample manifests as `dataset_snapshot_manifest` artifacts
   - Status: Active utility
 
+- **`validate_and_backfill_run_snapshots.py`** - Snapshot linkage validator/backfill
+  - Validates `clustering_run` snapshot linkage and optionally backfills missing links
+  - Writes `dataset_snapshot_ids` metadata and `depends_on` links with `--apply`
+  - Status: Active utility
+
 - **`azure_embeddings_smoke.py`** - Azure OpenAI embedding deployment smoke test
   - Tests embedding deployments from .env configuration
   - Status: Active

@@ -57,6 +57,18 @@ Success condition:
 
 ## 5) Controlled worker rollout
 
+Single worker first:
+
+```bash
+python scripts/run_300_bigrun_sweep.py --request-id <REQUEST_ID> --worker-id worker-1 --claim-lease-seconds 3600
+```
+
+Scale out only after stability:
+
+```bash
+python scripts/run_300_bigrun_sweep.py --request-id <REQUEST_ID> --worker-id worker-2 --claim-lease-seconds 3600
+```
+
 Start with one worker and monitor:
 - duplicate run_key errors (should be none)
 - duplicate link errors (should be none)

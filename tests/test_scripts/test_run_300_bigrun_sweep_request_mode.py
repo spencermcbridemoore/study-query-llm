@@ -71,7 +71,7 @@ def test_create_request_cli_exits_success(temp_db_path):
 
 
 def test_script_has_request_flags():
-    """Script defines --request-id, --create-request, --request-name."""
+    """Script defines request and worker-claim CLI flags."""
     result = subprocess.run(
         [
             sys.executable,
@@ -90,3 +90,5 @@ def test_script_has_request_flags():
     assert "--request-id" in out
     assert "--create-request" in out
     assert "--request-name" in out
+    assert "--worker-id" in out
+    assert "--claim-lease-seconds" in out

@@ -18,7 +18,7 @@ import os
 import asyncio
 import argparse
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -29,6 +29,7 @@ import numpy as np
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.models_v2 import SweepRunClaim
 from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYMENT_MAX_TOKENS
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.sweep_request_service import SweepRequestService
@@ -87,6 +88,136 @@ SWEEP_CONFIG = SweepConfig(
     distance_metric="cosine",
     normalize_vectors=True,
 )
+
+
+# ---------------------------------------------------------------------------
+# Worker claim helpers (request mode)
+# ---------------------------------------------------------------------------
+
+def _now_utc():
+    return datetime.now(timezone.utc)
+
+
+def _claim_run_target(
+    db: DatabaseConnectionV2,
+    request_id: int,
+    run_key: str,
+    worker_id: str,
+    lease_seconds: int,
+) -> bool:
+    """Try to claim a run target for this worker.
+
+    Returns True if this worker should execute the run, False otherwise.
+    """
+    now = _now_utc()
+    lease_expires = now + timedelta(seconds=lease_seconds)
+
+    with db.session_scope() as session:
+        claim = (
+            session.query(SweepRunClaim)
+            .filter(
+                SweepRunClaim.request_group_id == request_id,
+                SweepRunClaim.run_key == run_key,
+            )
+            .first()
+        )
+
+        if claim is None:
+            claim = SweepRunClaim(
+                request_group_id=request_id,
+                run_key=run_key,
+                claim_status="claimed",
+                claimed_by=worker_id,
+                claimed_at=now,
+                lease_expires_at=lease_expires,
+                heartbeat_at=now,
+            )
+            session.add(claim)
+            session.flush()
+            return True
+
+        if claim.claim_status == "completed":
+            return False
+
+        if (
+            claim.claim_status == "claimed"
+            and claim.lease_expires_at is not None
+            and claim.lease_expires_at > now
+            and claim.claimed_by != worker_id
+        ):
+            return False
+
+        # Take over expired or failed/released claims.
+        claim.claim_status = "claimed"
+        claim.claimed_by = worker_id
+        claim.claimed_at = now
+        claim.lease_expires_at = lease_expires
+        claim.heartbeat_at = now
+        session.flush()
+        return True
+
+
+def _complete_run_claim(
+    db: DatabaseConnectionV2,
+    request_id: int,
+    run_key: str,
+    run_id: int,
+    worker_id: str,
+) -> None:
+    with db.session_scope() as session:
+        claim = (
+            session.query(SweepRunClaim)
+            .filter(
+                SweepRunClaim.request_group_id == request_id,
+                SweepRunClaim.run_key == run_key,
+            )
+            .first()
+        )
+        if not claim:
+            claim = SweepRunClaim(
+                request_group_id=request_id,
+                run_key=run_key,
+            )
+            session.add(claim)
+        claim.claim_status = "completed"
+        claim.claimed_by = worker_id
+        claim.run_group_id = run_id
+        claim.heartbeat_at = _now_utc()
+        claim.lease_expires_at = None
+        session.flush()
+
+
+def _fail_run_claim(
+    db: DatabaseConnectionV2,
+    request_id: int,
+    run_key: str,
+    worker_id: str,
+    error_message: str,
+) -> None:
+    with db.session_scope() as session:
+        claim = (
+            session.query(SweepRunClaim)
+            .filter(
+                SweepRunClaim.request_group_id == request_id,
+                SweepRunClaim.run_key == run_key,
+            )
+            .first()
+        )
+        if not claim:
+            claim = SweepRunClaim(
+                request_group_id=request_id,
+                run_key=run_key,
+            )
+            session.add(claim)
+        metadata = dict(claim.metadata_json or {})
+        metadata["last_error"] = error_message[:500]
+        metadata["failed_at"] = _now_utc().isoformat()
+        claim.metadata_json = metadata
+        claim.claim_status = "failed"
+        claim.claimed_by = worker_id
+        claim.heartbeat_at = _now_utc()
+        claim.lease_expires_at = None
+        session.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +309,11 @@ async def main(
     request_id: Optional[int] = None,
     create_request: bool = False,
     request_name: Optional[str] = None,
+    worker_id: Optional[str] = None,
+    claim_lease_seconds: int = 3600,
 ):
+    worker_id = worker_id or f"{os.environ.get('COMPUTERNAME', 'worker')}-{os.getpid()}"
+
     db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
     db.init_db()
 
@@ -229,6 +364,8 @@ async def main(
     print(f"  mode        : skip_pca=True, cosine, normalize")
     if request_id:
         print(f"  request_id  : {request_id} (missing-only mode)")
+        print(f"  worker_id   : {worker_id}")
+        print(f"  claim_lease : {claim_lease_seconds}s")
 
     print("\n[OK] Database initialised")
 
@@ -363,6 +500,21 @@ async def main(
             print(f"  [{run_count}/{total_to_run}] {summarizer_name} (SKIP – pkl exists)")
             continue
 
+        if request_id:
+            claimed = _claim_run_target(
+                db=db,
+                request_id=request_id,
+                run_key=run_key,
+                worker_id=worker_id,
+                lease_seconds=claim_lease_seconds,
+            )
+            if not claimed:
+                print(
+                    f"  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} / "
+                    f"{summarizer_name} (SKIP – claimed by another worker or already completed)"
+                )
+                continue
+
         print(f"\n  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} / {summarizer_name}")
 
         # Fetch embeddings (reuse if same dataset+engine as previous)
@@ -372,6 +524,8 @@ async def main(
                 current_dataset, current_engine = dataset_name, embedding_engine
             except Exception as exc:
                 print(f"  [ERROR] Embedding fetch failed: {exc}")
+                if request_id:
+                    _fail_run_claim(db, request_id, run_key, worker_id, str(exc))
                 continue
         embeddings = embeddings_cache
 
@@ -382,11 +536,15 @@ async def main(
             )
         except asyncio.TimeoutError:
             print(f"  [ERROR] Timed out after 2 h – skipping")
+            if request_id:
+                _fail_run_claim(db, request_id, run_key, worker_id, "timeout after 2h")
             continue
         except Exception as exc:
             import traceback
             print(f"  [ERROR] Sweep failed: {exc}")
             traceback.print_exc()
+            if request_id:
+                _fail_run_claim(db, request_id, run_key, worker_id, str(exc))
             continue
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -430,6 +588,7 @@ async def main(
                     repo = RawCallRepository(session)
                     svc = SweepRequestService(repo)
                     svc.record_delivery(request_id, run_id, run_key)
+                _complete_run_claim(db, request_id, run_key, run_id, worker_id)
 
     print(f"\n{'='*80}")
     print("[OK] All runs complete.")
@@ -543,10 +702,24 @@ if __name__ == "__main__":
         default=None,
         help="Name for new request when using --create-request",
     )
+    parser.add_argument(
+        "--worker-id",
+        type=str,
+        default=None,
+        help="Worker identifier for claim/lease tracking in request mode",
+    )
+    parser.add_argument(
+        "--claim-lease-seconds",
+        type=int,
+        default=3600,
+        help="Lease duration in seconds for request-mode run claims (default 3600)",
+    )
     args = parser.parse_args()
     asyncio.run(main(
         force=args.force,
         request_id=args.request_id,
         create_request=args.create_request,
         request_name=args.request_name,
+        worker_id=args.worker_id,
+        claim_lease_seconds=args.claim_lease_seconds,
     ))

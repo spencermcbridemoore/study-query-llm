@@ -55,6 +55,11 @@ Scripts that are currently maintained, tested, and actively used:
   - Selects newest partial request candidate for targeted migration
   - Status: Active utility
 
+- **`reconcile_last_partial_sweep.py`** - Single-request reconciliation/finalize
+  - Targets one partial `clustering_sweep_request`, backfills request->run links
+  - Optionally ingests PKL artifacts, then finalizes if request is fulfilled
+  - Status: Active utility
+
 - **`azure_embeddings_smoke.py`** - Azure OpenAI embedding deployment smoke test
   - Tests embedding deployments from .env configuration
   - Status: Active

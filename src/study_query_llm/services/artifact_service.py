@@ -25,6 +25,7 @@ Usage:
 """
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
 import numpy as np
@@ -221,6 +222,70 @@ class ArtifactService:
             f"run_id={run_id}, uri={uri}"
         )
 
+        return artifact_id
+
+    def store_dataset_snapshot_manifest(
+        self,
+        snapshot_group_id: int,
+        snapshot_name: str,
+        entries: List[Dict[str, Any]],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Save a dataset snapshot manifest (JSON) and link it to a snapshot group.
+
+        Args:
+            snapshot_group_id: Group ID of dataset snapshot
+            snapshot_name: Snapshot identifier (e.g., "dbpedia_286_seed42_labeled")
+            entries: Manifest entries. Convention:
+                [{"position": int, "source_id": str|int, "text": str, "label": int|None}, ...]
+            metadata: Optional additional metadata
+
+        Returns:
+            CallArtifact ID
+        """
+        payload = {
+            "snapshot_name": snapshot_name,
+            "entries": entries,
+        }
+        payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        manifest_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+
+        uri = self._generate_uri(
+            snapshot_group_id,
+            "snapshot_manifest",
+            "dataset_snapshot_manifest",
+            "json",
+        )
+        artifact_path = self._ensure_directory(uri)
+        with open(artifact_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+
+        byte_size = artifact_path.stat().st_size
+        artifact_metadata = {
+            "snapshot_name": snapshot_name,
+            "artifact_format": "json",
+            "manifest_hash": manifest_hash,
+            "entry_count": len(entries),
+        }
+        if metadata:
+            artifact_metadata.update(metadata)
+
+        artifact_id = self._link_artifact_to_group(
+            group_id=snapshot_group_id,
+            artifact_type="dataset_snapshot_manifest",
+            uri=str(uri),
+            content_type="application/json",
+            byte_size=byte_size,
+            metadata_json=artifact_metadata,
+        )
+
+        logger.info(
+            "Stored dataset snapshot manifest: artifact_id=%s, snapshot_group_id=%s, entries=%s",
+            artifact_id,
+            snapshot_group_id,
+            len(entries),
+        )
         return artifact_id
 
     def store_cluster_labels(
@@ -459,7 +524,7 @@ class ArtifactService:
         if not artifact_path.exists():
             raise FileNotFoundError(f"Artifact not found: {uri}")
 
-        if artifact_type in ("sweep_results", "metrics"):
+        if artifact_type in ("sweep_results", "metrics", "dataset_snapshot_manifest"):
             # Load JSON
             with open(artifact_path, "r", encoding="utf-8") as f:
                 return json.load(f)

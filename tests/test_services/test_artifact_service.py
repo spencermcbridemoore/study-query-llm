@@ -118,6 +118,46 @@ def test_store_cluster_labels(db_connection, temp_artifact_dir):
         np.testing.assert_array_equal(loaded, labels)
 
 
+def test_store_dataset_snapshot_manifest(db_connection, temp_artifact_dir):
+    """Test storing dataset snapshot manifest as JSON artifact."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
+
+        snapshot_group_id = repo.create_group(
+            group_type="dataset_snapshot",
+            name="dbpedia_286_seed42_labeled",
+            description="Test snapshot",
+        )
+
+        entries = [
+            {"position": 0, "source_id": 123, "text": "Alpha", "label": 1},
+            {"position": 1, "source_id": 456, "text": "Beta", "label": 0},
+        ]
+        artifact_id = service.store_dataset_snapshot_manifest(
+            snapshot_group_id=snapshot_group_id,
+            snapshot_name="dbpedia_286_seed42_labeled",
+            entries=entries,
+            metadata={"label_mode": "labeled"},
+        )
+
+        assert artifact_id > 0
+
+        from study_query_llm.db.models_v2 import CallArtifact
+
+        artifact = session.query(CallArtifact).filter_by(id=artifact_id).first()
+        assert artifact is not None
+        assert artifact.artifact_type == "dataset_snapshot_manifest"
+        assert artifact.metadata_json["group_id"] == snapshot_group_id
+        assert artifact.metadata_json["entry_count"] == 2
+        assert artifact.metadata_json["label_mode"] == "labeled"
+        assert "manifest_hash" in artifact.metadata_json
+
+        loaded = service.load_artifact(artifact.uri, "dataset_snapshot_manifest")
+        assert loaded["snapshot_name"] == "dbpedia_286_seed42_labeled"
+        assert len(loaded["entries"]) == 2
+
+
 def test_store_pca_components(db_connection, temp_artifact_dir):
     """Test storing PCA components as NPY artifact."""
     with db_connection.session_scope() as session:

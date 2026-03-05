@@ -60,6 +60,11 @@ Scripts that are currently maintained, tested, and actively used:
   - Optionally ingests PKL artifacts, then finalizes if request is fulfilled
   - Status: Active utility
 
+- **`create_dataset_snapshots_286.py`** - Create frozen 286-entry dataset snapshots
+  - Creates/reuses `dataset_snapshot` groups for dbpedia (labeled) and estela (unlabeled)
+  - Stores exact sample manifests as `dataset_snapshot_manifest` artifacts
+  - Status: Active utility
+
 - **`azure_embeddings_smoke.py`** - Azure OpenAI embedding deployment smoke test
   - Tests embedding deployments from .env configuration
   - Status: Active

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check sweep request status and pending deliveries.
+"""Check sweep request status, pending deliveries, and migration candidate.
 
 Prints request id/name/status, expected/completed/missing counts,
 and first N missing run keys.
@@ -8,6 +8,7 @@ Usage:
   python scripts/check_sweep_requests.py
   python scripts/check_sweep_requests.py --request-id 123
   python scripts/check_sweep_requests.py --pending-only
+  python scripts/check_sweep_requests.py --select-last-partial
 """
 
 import os
@@ -47,6 +48,32 @@ def main():
         default=10,
         help="Max missing run keys to print per request (default 10)",
     )
+    parser.add_argument(
+        "--select-last-partial",
+        action="store_true",
+        help=(
+            "Select the newest request matching expected_count >= expected_min "
+            "and completed_count in [completed_min, completed_max]"
+        ),
+    )
+    parser.add_argument(
+        "--expected-min",
+        type=int,
+        default=100,
+        help="Minimum expected_count for --select-last-partial (default 100)",
+    )
+    parser.add_argument(
+        "--completed-min",
+        type=int,
+        default=1,
+        help="Minimum completed_count for --select-last-partial (default 1)",
+    )
+    parser.add_argument(
+        "--completed-max",
+        type=int,
+        default=25,
+        help="Maximum completed_count for --select-last-partial (default 25)",
+    )
     args = parser.parse_args()
 
     db = DatabaseConnectionV2(db_url, enable_pgvector=False)
@@ -76,6 +103,47 @@ def main():
                 print(f"  Missing run_keys (first {args.missing_limit}):")
                 for rk in missing[: args.missing_limit]:
                     print(f"    - {rk}")
+            return
+
+        if args.select_last_partial:
+            candidates = []
+            requests = svc.list_clustering_sweep_requests(include_fulfilled=False)
+            for r in requests:
+                rid = r["id"]
+                progress = svc.get_request_progress_summary(rid)
+                if not progress:
+                    continue
+                expected = progress.get("expected_count", 0)
+                completed = progress.get("completed_count", 0)
+                if (
+                    expected >= args.expected_min
+                    and args.completed_min <= completed <= args.completed_max
+                ):
+                    candidates.append(
+                        {
+                            "id": rid,
+                            "name": r.get("name", "?"),
+                            "created_at": r.get("created_at"),
+                            "expected": expected,
+                            "completed": completed,
+                            "missing": progress.get("missing_count", 0),
+                        }
+                    )
+
+            if not candidates:
+                print("No matching partial request found.")
+                return
+
+            candidates.sort(key=lambda x: x["created_at"], reverse=True)
+            chosen = candidates[0]
+            print("Selected request candidate:")
+            print(f"  id={chosen['id']}")
+            print(f"  name={chosen['name']}")
+            print(f"  expected={chosen['expected']}")
+            print(f"  completed={chosen['completed']}")
+            print(f"  missing={chosen['missing']}")
+            if len(candidates) > 1:
+                print(f"  (Matched {len(candidates)} candidates; selected newest by created_at)")
             return
 
         requests = svc.list_clustering_sweep_requests(include_fulfilled=not args.pending_only)

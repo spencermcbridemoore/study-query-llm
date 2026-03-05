@@ -47,7 +47,12 @@ Scripts that are currently maintained, tested, and actively used:
   - Status: Active utility
 
 - **`check_run_groups.py`** - Run groups inspection
-  - Lists run groups in database
+  - Lists run groups in database and summarizes run_key quality (missing/duplicates)
+  - Status: Active utility
+
+- **`audit_last_partial_sweep.py`** - Last partial sweep migration audit
+  - Read-only audit: duplicate `run_key`, missing `run_key`, duplicate group links
+  - Selects newest partial request candidate for targeted migration
   - Status: Active utility
 
 - **`azure_embeddings_smoke.py`** - Azure OpenAI embedding deployment smoke test

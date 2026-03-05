@@ -552,3 +552,24 @@ class ProvenanceService:
         )
         logger.debug(f"Linked clustering_run {run_id} → clustering_sweep {sweep_id} (link {link_id})")
         return link_id
+
+    def link_run_to_dataset_snapshot(
+        self,
+        run_id: int,
+        snapshot_group_id: int,
+    ) -> int:
+        """
+        Link a clustering_run group to a dataset_snapshot group via depends_on.
+        """
+        link_id = self.repository.create_group_link(
+            parent_group_id=run_id,
+            child_group_id=snapshot_group_id,
+            link_type="depends_on",
+        )
+        logger.debug(
+            "Linked clustering_run %s -> dataset_snapshot %s (depends_on, link %s)",
+            run_id,
+            snapshot_group_id,
+            link_id,
+        )
+        return link_id

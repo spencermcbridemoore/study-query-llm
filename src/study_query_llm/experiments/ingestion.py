@@ -55,6 +55,20 @@ def ingest_result_to_db(
     n_samples = metadata.get("actual_entry_count", 0)
     data_type = "50runs"
 
+    # Optional snapshot provenance linkage for reproducibility.
+    raw_snapshot_ids = metadata.get("dataset_snapshot_ids")
+    if raw_snapshot_ids is None and metadata.get("dataset_snapshot_id") is not None:
+        raw_snapshot_ids = [metadata.get("dataset_snapshot_id")]
+    snapshot_ids: list[int] = []
+    if raw_snapshot_ids is not None:
+        if not isinstance(raw_snapshot_ids, (list, tuple)):
+            raw_snapshot_ids = [raw_snapshot_ids]
+        for sid in raw_snapshot_ids:
+            try:
+                snapshot_ids.append(int(sid))
+            except (TypeError, ValueError):
+                continue
+
     try:
         with db.session_scope() as session:
             repo = RawCallRepository(session)
@@ -85,6 +99,8 @@ def ingest_result_to_db(
                 "ingested_at": datetime.utcnow().isoformat(),
                 **{k: v for k, v in metadata.items() if k not in ("sweep_config",)},
             }
+            if snapshot_ids:
+                run_metadata["dataset_snapshot_ids"] = snapshot_ids
 
             try:
                 run_id = provenance.create_run_group(
@@ -111,6 +127,14 @@ def ingest_result_to_db(
             run_group = repo.get_group_by_id(run_id)
             run_group.metadata_json = run_metadata
             session.flush()
+
+            # Optional explicit run -> snapshot linkage.
+            for snapshot_id in snapshot_ids:
+                try:
+                    provenance.link_run_to_dataset_snapshot(run_id, snapshot_id)
+                except Exception:
+                    # Keep run ingestion robust even when snapshot linkage is missing/invalid.
+                    pass
 
             by_k = _extract_by_k_metrics(result_dict, ground_truth_labels)
             for k in sorted(by_k.keys()):

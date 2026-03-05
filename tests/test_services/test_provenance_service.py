@@ -10,6 +10,7 @@ from study_query_llm.services.provenance_service import (
     GROUP_TYPE_CLUSTERING_RUN,
     GROUP_TYPE_CLUSTERING_STEP,
     GROUP_TYPE_DATASET,
+    GROUP_TYPE_DATASET_SNAPSHOT,
     GROUP_TYPE_EMBEDDING_BATCH,
     GROUP_TYPE_SUMMARIZATION_BATCH,
 )
@@ -238,6 +239,38 @@ def test_create_dataset_group(db_connection):
         assert group.group_type == GROUP_TYPE_DATASET
         assert group.name == "test_dataset"
         assert group.metadata_json["source"] == "file.csv"
+
+
+def test_link_run_to_dataset_snapshot(db_connection):
+    """Test linking clustering run to dataset snapshot via depends_on."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        provenance = ProvenanceService(repo)
+
+        run_id = provenance.create_run_group(algorithm="test_algorithm")
+        snapshot_id = provenance.create_dataset_snapshot_group(
+            snapshot_name="dbpedia_286_seed42_labeled",
+            source_dataset="dbpedia",
+            sample_size=286,
+            label_mode="labeled",
+            sampling_method="seeded_random_filtered_10_1000_chars",
+            sampling_seed=42,
+        )
+
+        link_id = provenance.link_run_to_dataset_snapshot(run_id, snapshot_id)
+        assert link_id > 0
+
+        from study_query_llm.db.models_v2 import GroupLink
+
+        link = session.query(GroupLink).filter_by(id=link_id).first()
+        assert link is not None
+        assert link.parent_group_id == run_id
+        assert link.child_group_id == snapshot_id
+        assert link.link_type == "depends_on"
+
+        snapshot = repo.get_group_by_id(snapshot_id)
+        assert snapshot is not None
+        assert snapshot.group_type == GROUP_TYPE_DATASET_SNAPSHOT
 
 
 def test_create_embedding_batch_group(db_connection):

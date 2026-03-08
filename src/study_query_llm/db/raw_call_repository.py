@@ -5,12 +5,23 @@ This repository handles all database interactions for storing and querying
 raw calls in the v2 schema. Uses the Repository pattern to abstract database details.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_, or_, cast, Float, String, text
 from sqlalchemy.exc import IntegrityError
-from .models_v2 import RawCall, Group, GroupMember, CallArtifact, EmbeddingVector, GroupLink
+from .models_v2 import (
+    RawCall,
+    Group,
+    GroupMember,
+    CallArtifact,
+    EmbeddingVector,
+    EmbeddingCacheEntry,
+    EmbeddingCacheLease,
+    GroupLink,
+    OrchestrationJob,
+    OrchestrationJobDependency,
+)
 from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -718,6 +729,168 @@ class RawCallRepository:
                 )
                 return {}
 
+    # ========== EMBEDDING L2 CACHE + SINGLE-FLIGHT LEASES ==========
+
+    def get_embedding_cache_entry(self, cache_key: str) -> Optional[EmbeddingCacheEntry]:
+        """Return L2 embedding cache entry for exact cache_key if present."""
+        return (
+            self.session.query(EmbeddingCacheEntry)
+            .filter(EmbeddingCacheEntry.cache_key == cache_key)
+            .first()
+        )
+
+    def get_embedding_cache_vectors_by_keys(
+        self, cache_keys: List[str]
+    ) -> Dict[str, Tuple[list, Optional[int]]]:
+        """Batch lookup vectors by L2 cache keys."""
+        if not cache_keys:
+            return {}
+        rows = (
+            self.session.query(
+                EmbeddingCacheEntry.cache_key,
+                EmbeddingCacheEntry.vector,
+                EmbeddingCacheEntry.source_raw_call_id,
+            )
+            .filter(EmbeddingCacheEntry.cache_key.in_(cache_keys))
+            .all()
+        )
+        return {str(k): (v, rcid) for k, v, rcid in rows}
+
+    def upsert_embedding_cache_entry(
+        self,
+        *,
+        cache_key: str,
+        key_version: str,
+        provider: str,
+        deployment: str,
+        dimensions: Optional[int],
+        encoding_format: str,
+        input_text_raw: str,
+        input_text_sha256_raw: str,
+        vector: list,
+        dimension: int,
+        norm: Optional[float],
+        source_raw_call_id: Optional[int],
+    ) -> int:
+        """
+        Insert or update an L2 cache row keyed by cache_key.
+
+        Returns:
+            EmbeddingCacheEntry.id
+        """
+        now = datetime.now(timezone.utc)
+        existing = (
+            self.session.query(EmbeddingCacheEntry)
+            .filter(EmbeddingCacheEntry.cache_key == cache_key)
+            .first()
+        )
+        if existing:
+            existing.vector = vector
+            existing.dimension = int(dimension)
+            existing.norm = norm
+            existing.source_raw_call_id = source_raw_call_id
+            existing.updated_at = now
+            self.session.flush()
+            return int(existing.id)
+
+        row = EmbeddingCacheEntry(
+            cache_key=cache_key,
+            key_version=key_version,
+            provider=provider,
+            deployment=deployment,
+            dimensions=dimensions,
+            encoding_format=encoding_format,
+            input_text_raw=input_text_raw,
+            input_text_sha256_raw=input_text_sha256_raw,
+            vector=vector,
+            dimension=int(dimension),
+            norm=norm,
+            source_raw_call_id=source_raw_call_id,
+            hit_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+        self.session.add(row)
+        self.session.flush()
+        return int(row.id)
+
+    def touch_embedding_cache_hit(self, cache_key: str) -> None:
+        """Best-effort hit counter update for L2 cache rows."""
+        now = datetime.now(timezone.utc)
+        row = (
+            self.session.query(EmbeddingCacheEntry)
+            .filter(EmbeddingCacheEntry.cache_key == cache_key)
+            .first()
+        )
+        if not row:
+            return
+        row.hit_count = int(row.hit_count or 0) + 1
+        row.last_hit_at = now
+        row.updated_at = now
+        self.session.flush()
+
+    def try_acquire_embedding_cache_lease(
+        self,
+        *,
+        cache_key: str,
+        owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        """
+        Acquire/steal lease for cache_key when expired.
+
+        Returns True if acquired by owner, False otherwise.
+        """
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(seconds=max(1, int(lease_seconds)))
+        lease = (
+            self.session.query(EmbeddingCacheLease)
+            .filter(EmbeddingCacheLease.cache_key == cache_key)
+            .first()
+        )
+        if lease is None:
+            lease = EmbeddingCacheLease(
+                cache_key=cache_key,
+                lease_owner=owner,
+                lease_expires_at=expires,
+                created_at=now,
+                updated_at=now,
+            )
+            self.session.add(lease)
+            self.session.flush()
+            return True
+
+        if lease.lease_owner == owner or lease.lease_expires_at <= now:
+            lease.lease_owner = owner
+            lease.lease_expires_at = expires
+            lease.updated_at = now
+            self.session.flush()
+            return True
+        return False
+
+    def release_embedding_cache_lease(self, *, cache_key: str, owner: str) -> None:
+        """Release lease row only when owned by owner."""
+        lease = (
+            self.session.query(EmbeddingCacheLease)
+            .filter(
+                EmbeddingCacheLease.cache_key == cache_key,
+                EmbeddingCacheLease.lease_owner == owner,
+            )
+            .first()
+        )
+        if not lease:
+            return
+        self.session.delete(lease)
+        self.session.flush()
+
+    def get_embedding_cache_lease(self, cache_key: str) -> Optional[EmbeddingCacheLease]:
+        """Return current lease row if present."""
+        return (
+            self.session.query(EmbeddingCacheLease)
+            .filter(EmbeddingCacheLease.cache_key == cache_key)
+            .first()
+        )
+
     # ========== GROUP LINK OPERATIONS ==========
 
     def create_group_link(
@@ -879,3 +1052,306 @@ class RawCallRepository:
 
         # Return in link order
         return [group_dict[step_id] for step_id in step_ids if step_id in group_dict]
+
+    # ========== ORCHESTRATION JOB OPERATIONS ==========
+
+    def enqueue_orchestration_job(
+        self,
+        *,
+        request_group_id: int,
+        job_type: str,
+        job_key: str,
+        base_run_key: Optional[str] = None,
+        payload_json: Optional[Dict[str, Any]] = None,
+        priority: int = 100,
+        max_attempts: int = 3,
+        seed_value: Optional[int] = None,
+        parent_job_id: Optional[int] = None,
+        depends_on_job_ids: Optional[List[int]] = None,
+    ) -> int:
+        """Idempotently create (or return existing) orchestration job."""
+        existing = self.session.query(OrchestrationJob).filter_by(job_key=job_key).first()
+        if existing:
+            return existing.id
+
+        now = datetime.now(timezone.utc)
+        initial_status = "pending" if depends_on_job_ids else "ready"
+        job = OrchestrationJob(
+            request_group_id=request_group_id,
+            parent_job_id=parent_job_id,
+            job_type=job_type,
+            job_key=job_key,
+            base_run_key=base_run_key,
+            status=initial_status,
+            priority=priority,
+            payload_json=payload_json or {},
+            seed_value=seed_value,
+            attempt_count=0,
+            max_attempts=max_attempts,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            with self.session.begin_nested():
+                self.session.add(job)
+                self.session.flush()
+                self.session.refresh(job)
+        except IntegrityError:
+            existing = self.session.query(OrchestrationJob).filter_by(job_key=job_key).first()
+            if existing:
+                return existing.id
+            raise
+
+        for dep_id in depends_on_job_ids or []:
+            dep = OrchestrationJobDependency(job_id=job.id, depends_on_job_id=dep_id)
+            try:
+                with self.session.begin_nested():
+                    self.session.add(dep)
+                    self.session.flush()
+            except IntegrityError:
+                # Idempotent edge insert
+                pass
+
+        return job.id
+
+    def claim_next_orchestration_job(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: int,
+        job_types: Optional[List[str]] = None,
+        request_group_id: Optional[int] = None,
+        base_run_key: Optional[str] = None,
+        filter_payload: Optional[Dict[str, Any]] = None,
+    ) -> Optional[OrchestrationJob]:
+        """Claim the highest-priority ready job that matches filters."""
+        now = datetime.now(timezone.utc)
+        q = self.session.query(OrchestrationJob).filter(
+            OrchestrationJob.status.in_(["ready", "claimed"]),
+        )
+        if job_types:
+            q = q.filter(OrchestrationJob.job_type.in_(job_types))
+        if request_group_id is not None:
+            q = q.filter(OrchestrationJob.request_group_id == request_group_id)
+        if base_run_key is not None:
+            q = q.filter(OrchestrationJob.base_run_key == base_run_key)
+
+        candidates = q.order_by(
+            OrchestrationJob.priority.asc(),
+            OrchestrationJob.created_at.asc(),
+        ).all()
+
+        for job in candidates:
+            if job.status == "claimed" and job.lease_expires_at and job.lease_expires_at > now:
+                continue
+            if filter_payload:
+                payload = job.payload_json or {}
+                if any(payload.get(k) != v for k, v in filter_payload.items()):
+                    continue
+            # Dependency gate
+            if not self.is_orchestration_job_ready(job.id):
+                continue
+            job.status = "claimed"
+            job.claimed_by = worker_id
+            job.claimed_at = now
+            job.heartbeat_at = now
+            job.lease_expires_at = now + timedelta(seconds=lease_seconds)
+            job.attempt_count = int(job.attempt_count or 0) + 1
+            job.updated_at = now
+            self.session.flush()
+            return job
+        return None
+
+    def claim_orchestration_job_batch(
+        self,
+        request_group_id: int,
+        job_types: List[str],
+        claim_owner: str,
+        lease_seconds: int,
+        limit: int,
+        filter_payload: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Claim up to limit ready jobs matching filters; return detached snapshots."""
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(seconds=max(1, int(lease_seconds)))
+        q = self.session.query(OrchestrationJob).filter(
+            OrchestrationJob.request_group_id == request_group_id,
+            OrchestrationJob.job_type.in_(job_types),
+            or_(
+                OrchestrationJob.status == "ready",
+                and_(
+                    OrchestrationJob.status == "claimed",
+                    or_(
+                        OrchestrationJob.lease_expires_at.is_(None),
+                        OrchestrationJob.lease_expires_at <= now,
+                    ),
+                ),
+            ),
+        )
+        candidates = q.order_by(
+            OrchestrationJob.priority.asc(),
+            OrchestrationJob.created_at.asc(),
+        ).all()
+
+        result: List[Dict[str, Any]] = []
+        for job in candidates:
+            if len(result) >= limit:
+                break
+            if filter_payload:
+                payload = job.payload_json or {}
+                if any(payload.get(k) != v for k, v in filter_payload.items()):
+                    continue
+            if not self.is_orchestration_job_ready(job.id):
+                continue
+            job.status = "claimed"
+            job.claimed_by = claim_owner
+            job.claimed_at = now
+            job.heartbeat_at = now
+            job.lease_expires_at = expires
+            job.attempt_count = int(job.attempt_count or 0) + 1
+            job.updated_at = now
+            self.session.flush()
+            snapshot = {
+                "id": int(job.id),
+                "job_type": str(job.job_type),
+                "payload_json": dict(job.payload_json or {}),
+                "seed_value": job.seed_value,
+                "job_key": str(job.job_key),
+                "base_run_key": job.base_run_key,
+            }
+            result.append(snapshot)
+        return result
+
+    def heartbeat_orchestration_job(self, job_id: int, lease_seconds: int) -> bool:
+        now = datetime.now(timezone.utc)
+        job = self.session.query(OrchestrationJob).filter_by(id=job_id).first()
+        if not job or job.status != "claimed":
+            return False
+        job.heartbeat_at = now
+        job.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        job.updated_at = now
+        self.session.flush()
+        return True
+
+    def complete_orchestration_job(self, job_id: int, result_ref: Optional[str] = None) -> bool:
+        now = datetime.now(timezone.utc)
+        job = self.session.query(OrchestrationJob).filter_by(id=job_id).first()
+        if not job:
+            return False
+        job.status = "completed"
+        job.result_ref = result_ref
+        job.lease_expires_at = None
+        job.heartbeat_at = now
+        job.updated_at = now
+        self.session.flush()
+        self.promote_ready_orchestration_jobs(request_group_id=job.request_group_id)
+        return True
+
+    def complete_orchestration_jobs_batch(
+        self, items: List[Tuple[int, Optional[str]]]
+    ) -> None:
+        """Complete multiple jobs; promote once per distinct request_group_id at end."""
+        if not items:
+            return
+        now = datetime.now(timezone.utc)
+        request_group_ids: set = set()
+        for job_id, result_ref in items:
+            job = self.session.query(OrchestrationJob).filter_by(id=job_id).first()
+            if job:
+                job.status = "completed"
+                job.result_ref = result_ref
+                job.lease_expires_at = None
+                job.heartbeat_at = now
+                job.updated_at = now
+                request_group_ids.add(job.request_group_id)
+            self.session.flush()
+        for rgid in request_group_ids:
+            self.promote_ready_orchestration_jobs(request_group_id=rgid)
+
+    def fail_orchestration_job(self, job_id: int, error_json: Optional[Dict[str, Any]] = None) -> bool:
+        now = datetime.now(timezone.utc)
+        job = self.session.query(OrchestrationJob).filter_by(id=job_id).first()
+        if not job:
+            return False
+        if int(job.attempt_count or 0) >= int(job.max_attempts or 1):
+            job.status = "failed"
+        else:
+            job.status = "ready"
+        job.error_json = error_json or {}
+        job.lease_expires_at = None
+        job.updated_at = now
+        self.session.flush()
+        return True
+
+    def release_orchestration_job(self, job_id: int) -> bool:
+        now = datetime.now(timezone.utc)
+        job = self.session.query(OrchestrationJob).filter_by(id=job_id).first()
+        if not job:
+            return False
+        if job.status == "claimed":
+            job.status = "ready"
+            job.lease_expires_at = None
+            job.updated_at = now
+            self.session.flush()
+        return True
+
+    def add_orchestration_job_dependency(self, job_id: int, depends_on_job_id: int) -> int:
+        dep = (
+            self.session.query(OrchestrationJobDependency)
+            .filter_by(job_id=job_id, depends_on_job_id=depends_on_job_id)
+            .first()
+        )
+        if dep:
+            return dep.id
+        dep = OrchestrationJobDependency(job_id=job_id, depends_on_job_id=depends_on_job_id)
+        self.session.add(dep)
+        self.session.flush()
+        self.session.refresh(dep)
+        return dep.id
+
+    def is_orchestration_job_ready(self, job_id: int) -> bool:
+        deps = self.session.query(OrchestrationJobDependency).filter_by(job_id=job_id).all()
+        if not deps:
+            return True
+        dep_ids = [d.depends_on_job_id for d in deps]
+        statuses = self.session.query(OrchestrationJob.id, OrchestrationJob.status).filter(
+            OrchestrationJob.id.in_(dep_ids)
+        ).all()
+        status_map = {s.id: s.status for s in statuses}
+        return all(status_map.get(dep_id) == "completed" for dep_id in dep_ids)
+
+    def promote_ready_orchestration_jobs(self, request_group_id: Optional[int] = None) -> int:
+        """Move pending jobs to ready when all dependencies are complete."""
+        q = self.session.query(OrchestrationJob).filter(OrchestrationJob.status == "pending")
+        if request_group_id is not None:
+            q = q.filter(OrchestrationJob.request_group_id == request_group_id)
+        jobs = q.all()
+        now = datetime.now(timezone.utc)
+        promoted = 0
+        for job in jobs:
+            if self.is_orchestration_job_ready(job.id):
+                job.status = "ready"
+                job.updated_at = now
+                promoted += 1
+        if promoted:
+            self.session.flush()
+        return promoted
+
+    def list_orchestration_jobs(
+        self,
+        *,
+        request_group_id: Optional[int] = None,
+        base_run_key: Optional[str] = None,
+        job_type: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[OrchestrationJob]:
+        q = self.session.query(OrchestrationJob)
+        if request_group_id is not None:
+            q = q.filter(OrchestrationJob.request_group_id == request_group_id)
+        if base_run_key is not None:
+            q = q.filter(OrchestrationJob.base_run_key == base_run_key)
+        if job_type is not None:
+            q = q.filter(OrchestrationJob.job_type == job_type)
+        if status is not None:
+            q = q.filter(OrchestrationJob.status == status)
+        return q.order_by(OrchestrationJob.created_at.asc()).all()

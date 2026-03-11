@@ -10,7 +10,7 @@ Designed for PostgreSQL with optional pgvector support.
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from sqlalchemy import (
-    Column, Integer, String, DateTime, JSON, Float, Text, ForeignKey,
+    Column, Integer, String, DateTime, JSON, Float, Text, ForeignKey, Boolean,
     Index, CheckConstraint
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -392,6 +392,294 @@ class SweepRunClaim(BaseV2):
         }
 
 
+class OrchestrationJob(BaseV2):
+    """
+    Generic orchestration job for sharded and non-sharded execution.
+
+    Supports durable leasing/retries for any job type:
+    - run_k_try (leaf execution)
+    - reduce_k (per-K reducer)
+    - finalize_run (run-level reducer)
+    """
+
+    __tablename__ = "orchestration_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    parent_job_id = Column(
+        Integer,
+        ForeignKey("orchestration_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    job_type = Column(String(50), nullable=False, index=True)
+    job_key = Column(String(500), nullable=False, index=True)
+    base_run_key = Column(String(300), nullable=True, index=True)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    priority = Column(Integer, nullable=False, default=100, index=True)
+    payload_json = Column(JSON, nullable=False, default=dict)
+    seed_value = Column(Integer, nullable=True)
+
+    claimed_by = Column(String(120), nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    result_ref = Column(String(200), nullable=True)
+    error_json = Column(JSON, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    request_group = relationship("Group", foreign_keys=[request_group_id])
+    parent_job = relationship("OrchestrationJob", remote_side=[id], uselist=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'ready', 'claimed', 'completed', 'failed', 'cancelled')",
+            name="check_orchestration_job_status",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND max_attempts >= 1",
+            name="check_orchestration_job_attempt_bounds",
+        ),
+        Index("uq_orchestration_jobs_job_key", "job_key", unique=True),
+        Index(
+            "idx_orchestration_jobs_claim_ready",
+            "request_group_id",
+            "job_type",
+            "status",
+            "priority",
+            "lease_expires_at",
+        ),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "request_group_id": self.request_group_id,
+            "parent_job_id": self.parent_job_id,
+            "job_type": self.job_type,
+            "job_key": self.job_key,
+            "base_run_key": self.base_run_key,
+            "status": self.status,
+            "priority": self.priority,
+            "payload_json": self.payload_json,
+            "seed_value": self.seed_value,
+            "claimed_by": self.claimed_by,
+            "claimed_at": self.claimed_at.isoformat() if self.claimed_at else None,
+            "lease_expires_at": self.lease_expires_at.isoformat() if self.lease_expires_at else None,
+            "heartbeat_at": self.heartbeat_at.isoformat() if self.heartbeat_at else None,
+            "attempt_count": self.attempt_count,
+            "max_attempts": self.max_attempts,
+            "result_ref": self.result_ref,
+            "error_json": self.error_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class OrchestrationJobDependency(BaseV2):
+    """Many-to-many dependency edges between orchestration jobs."""
+
+    __tablename__ = "orchestration_job_dependencies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(
+        Integer,
+        ForeignKey("orchestration_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    depends_on_job_id = Column(
+        Integer,
+        ForeignKey("orchestration_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint("job_id != depends_on_job_id", name="check_orchestration_job_dependency_no_self"),
+        Index(
+            "uq_orchestration_job_dependency_pair",
+            "job_id",
+            "depends_on_job_id",
+            unique=True,
+        ),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "job_id": self.job_id,
+            "depends_on_job_id": self.depends_on_job_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class MethodDefinition(BaseV2):
+    """
+    Table for versioned analysis method definitions.
+
+    Tracks which code/version produced analysis results. Use is_active to
+    designate the default version when querying by name only.
+
+    Attributes:
+        id: Primary key
+        name: Method name (e.g., "extract_correct_answers")
+        version: Version string (e.g., "2.1")
+        is_active: True for the current default version
+        description: Optional description
+        code_ref: Path to code (e.g., "scripts/parse_quiz.py")
+        code_commit: Git SHA of the code
+        input_schema: JSON describing expected input
+        output_schema: JSON describing output shape
+        parameters_schema: JSON describing configurable knobs
+        parent_version_id: FK to previous version (nullable for v1)
+        created_at: Timestamp when definition was created
+    """
+    __tablename__ = "method_definitions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False, index=True)
+    version = Column(String(50), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    description = Column(Text, nullable=True)
+    code_ref = Column(String(500), nullable=True)
+    code_commit = Column(String(64), nullable=True)
+    input_schema = Column(JSON, nullable=True)
+    output_schema = Column(JSON, nullable=True)
+    parameters_schema = Column(JSON, nullable=True)
+    parent_version_id = Column(
+        Integer,
+        ForeignKey("method_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    parent_version = relationship("MethodDefinition", remote_side=[id])
+    analysis_results = relationship("AnalysisResult", back_populates="method_definition")
+
+    __table_args__ = (
+        Index("uq_method_definitions_name_version", "name", "version", unique=True),
+        Index("idx_method_definitions_name_active", "name", "is_active"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "version": self.version,
+            "is_active": self.is_active,
+            "description": self.description,
+            "code_ref": self.code_ref,
+            "code_commit": self.code_commit,
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
+            "parameters_schema": self.parameters_schema,
+            "parent_version_id": self.parent_version_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AnalysisResult(BaseV2):
+    """
+    Table for structured analysis results with method provenance.
+
+    Links a numeric/JSON result to the method that produced it and the
+    source data group. Use result_value for scalar metrics, result_json
+    for structured data.
+
+    Attributes:
+        id: Primary key
+        method_definition_id: FK to MethodDefinition
+        source_group_id: FK to Group (the data analyzed)
+        analysis_group_id: FK to Group (optional analysis_run group)
+        result_key: Metric name (e.g., "chi_square", "ari")
+        result_value: Numeric scalar (nullable)
+        result_json: Structured data (nullable)
+        created_at: Timestamp when result was recorded
+    """
+    __tablename__ = "analysis_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    method_definition_id = Column(
+        Integer,
+        ForeignKey("method_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    analysis_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    result_key = Column(String(200), nullable=False)
+    result_value = Column(Float, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    method_definition = relationship("MethodDefinition", back_populates="analysis_results")
+
+    __table_args__ = (
+        Index("idx_analysis_results_method_source", "method_definition_id", "source_group_id"),
+        Index("idx_analysis_results_source_key", "source_group_id", "result_key"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "method_definition_id": self.method_definition_id,
+            "source_group_id": self.source_group_id,
+            "analysis_group_id": self.analysis_group_id,
+            "result_key": self.result_key,
+            "result_value": self.result_value,
+            "result_json": self.result_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class EmbeddingVector(BaseV2):
     """
     Table for storing embedding vectors.
@@ -442,4 +730,85 @@ class EmbeddingVector(BaseV2):
             'dimension': self.dimension,
             'norm': self.norm,
             'metadata_json': self.metadata_json,
+        }
+
+
+class EmbeddingCacheEntry(BaseV2):
+    """Canonical L2 cache entry for deterministic embedding requests."""
+
+    __tablename__ = "embedding_cache_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cache_key = Column(String(64), nullable=False, index=True)
+    key_version = Column(String(20), nullable=False, default="raw_v1", index=True)
+    provider = Column(String(100), nullable=False, index=True)
+    deployment = Column(String(100), nullable=False, index=True)
+    dimensions = Column(Integer, nullable=True)
+    encoding_format = Column(String(20), nullable=False, default="float")
+    input_text_raw = Column(Text, nullable=False)
+    input_text_sha256_raw = Column(String(64), nullable=False, index=True)
+    vector = Column(JSON, nullable=False)
+    dimension = Column(Integer, nullable=False)
+    norm = Column(Float, nullable=True)
+    source_raw_call_id = Column(
+        Integer, ForeignKey("raw_calls.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    hit_count = Column(Integer, nullable=False, default=0)
+    last_hit_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+    __table_args__ = (
+        Index("uq_embedding_cache_key", "cache_key", unique=True),
+        Index(
+            "idx_embedding_cache_lookup",
+            "provider",
+            "deployment",
+            "key_version",
+            "input_text_sha256_raw",
+        ),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "cache_key": self.cache_key,
+            "key_version": self.key_version,
+            "provider": self.provider,
+            "deployment": self.deployment,
+            "dimensions": self.dimensions,
+            "encoding_format": self.encoding_format,
+            "input_text_sha256_raw": self.input_text_sha256_raw,
+            "dimension": self.dimension,
+            "source_raw_call_id": self.source_raw_call_id,
+            "hit_count": self.hit_count,
+            "last_hit_at": self.last_hit_at.isoformat() if self.last_hit_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class EmbeddingCacheLease(BaseV2):
+    """Short-lived lease row used for cross-worker single-flight coordination."""
+
+    __tablename__ = "embedding_cache_leases"
+
+    cache_key = Column(String(64), primary_key=True)
+    lease_owner = Column(String(120), nullable=False, index=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+    __table_args__ = (
+        Index("idx_embedding_cache_leases_owner", "lease_owner"),
+        Index("idx_embedding_cache_leases_expiry", "lease_expires_at"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "cache_key": self.cache_key,
+            "lease_owner": self.lease_owner,
+            "lease_expires_at": self.lease_expires_at.isoformat() if self.lease_expires_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

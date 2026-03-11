@@ -179,6 +179,24 @@ Monitor your credit balance in the
 
 ---
 
+## Running the Cached-Job Supervisor (one-engine benchmarks)
+
+For high-worker-count, single-engine runs (e.g. scaling benchmarks), use the cached-job supervisor instead of the engine supervisor. It uses a single DB client for claim/complete and distributes work via in-process queues.
+
+```bash
+# From project root, with DATABASE_URL set
+python scripts/run_cached_job_supervisor.py \
+  --request-id N \
+  --worker-count 32 \
+  --engine "Qwen/Qwen3-Embedding-0.6B" \
+  --provider-label local_docker_tei_shared \
+  --tei-endpoint http://localhost:8080/v1
+```
+
+Workers use the DB only for read-only embedding cache (L3/L2). Ensure TEI is running and reachable at `--tei-endpoint` before starting.
+
+---
+
 ## Emergency Procedures
 
 ### Full stack restart

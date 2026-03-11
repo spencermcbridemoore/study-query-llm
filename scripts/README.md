@@ -70,6 +70,32 @@ Scripts that are currently maintained, tested, and actively used:
   - Writes `dataset_snapshot_ids` metadata and `depends_on` links with `--apply`
   - Status: Active utility
 
+- **`run_local_300_2datasets_worker.py`** - Request worker for local 2-dataset sweep
+  - Supports legacy self-managed TEI mode and shared-endpoint mode
+  - Shared mode flags: `--embedding-engine`, `--tei-endpoint`, `--idle-exit-seconds`
+  - Job mode flags: `--job-mode standalone|sharded` for run-key claims vs job-table claims
+  - Status: Active runner
+
+- **`run_local_300_2datasets_engine_supervisor.py`** - One-container-per-engine supervisor
+  - Starts one TEI container per embedding engine and launches worker pool
+  - Advances to next engine only when current engine `missing_run_keys` reaches zero
+  - Includes guardrails: TEI health polling, bounded worker/container restarts, backoff
+  - Supports `--job-mode sharded` to track per-engine progress from orchestration jobs
+  - Status: Active runner
+
+- **`run_cached_job_supervisor.py`** - Cached-job supervisor (single DB client, queue workers)
+  - For one (request_id, engine): fetches batches of run_k_try jobs, distributes via multiprocessing queues to N workers, batch-completes (repository performs promote), runs reduce_k/finalize_run in-process.
+  - **When to use:** High worker count (e.g. 32–64), single engine per run. Reduces DB contention vs sharded workers that each claim/complete.
+  - **Required env vars:** `DATABASE_URL` (and provider-specific vars if using `--embedding-provider`).
+  - **Example:** `python scripts/run_cached_job_supervisor.py --request-id N --worker-count 32 --engine "Qwen/Qwen3-Embedding-0.6B" --provider-label local_docker_tei_shared --tei-endpoint http://localhost:8080/v1`
+  - Workers use DB only for read-only L3/L2 embedding cache; claim/complete/promote are done by the supervisor.
+  - Status: Active runner
+
+- **`check_orchestration_jobs.py`** - Job-table inspection utility
+  - Summarizes orchestration jobs by type/status for a request
+  - Useful for sharded execution diagnostics (`run_k_try`, `reduce_k`, `finalize_run`)
+  - Status: Active utility
+
 - **`azure_embeddings_smoke.py`** - Azure OpenAI embedding deployment smoke test
   - Tests embedding deployments from .env configuration
   - Status: Active

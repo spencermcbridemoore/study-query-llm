@@ -22,5 +22,8 @@ ipykernel
 azure-mgmt-containerinstance>=10.0
 azure-identity>=1.15
 
+# Azure Blob Storage (artifact storage backend)
+azure-storage-blob>=12.0
+
 # Local Docker TEI management
 docker>=7.0

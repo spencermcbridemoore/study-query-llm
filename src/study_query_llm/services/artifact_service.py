@@ -24,6 +24,8 @@ Usage:
         )
 """
 
+import csv
+import io
 import json
 import hashlib
 from pathlib import Path
@@ -34,6 +36,7 @@ from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
     from ..db.raw_call_repository import RawCallRepository
+    from ..storage.protocol import StorageBackend
 
 logger = get_logger(__name__)
 
@@ -56,6 +59,7 @@ class ArtifactService:
         self,
         repository: Optional["RawCallRepository"] = None,
         artifact_dir: str = DEFAULT_ARTIFACT_DIR,
+        storage_backend: Optional["StorageBackend"] = None,
     ):
         """
         Initialize the artifact service.
@@ -63,18 +67,25 @@ class ArtifactService:
         Args:
             repository: Optional RawCallRepository for DB persistence
             artifact_dir: Base directory for storing artifacts (default: "artifacts")
+            storage_backend: Optional StorageBackend. When None, uses LocalStorageBackend
+                with base_dir=artifact_dir for backward compatibility.
         """
         self.repository = repository
         self.artifact_dir = Path(artifact_dir)
-        self.artifact_dir.mkdir(parents=True, exist_ok=True)
+        if storage_backend is not None:
+            self.storage = storage_backend
+        else:
+            from ..storage.local import LocalStorageBackend
 
-    def _generate_uri(
+            self.storage = LocalStorageBackend(base_dir=artifact_dir)
+
+    def _generate_logical_path(
         self, run_id: int, step_name: str, artifact_type: str, extension: str
     ) -> str:
         """
-        Generate artifact URI following conventions.
+        Generate logical path for artifact (relative to storage base_dir).
 
-        Pattern: artifacts/{run_id}/{step_name}/{artifact_type}.{ext}
+        Pattern: {run_id}/{step_name}/{artifact_type}.{ext}
 
         Args:
             run_id: Run group ID
@@ -83,26 +94,10 @@ class ArtifactService:
             extension: File extension (e.g., "json", "npy", "csv")
 
         Returns:
-            Relative URI path
+            Logical path for storage backend
         """
-        # Sanitize step_name for filesystem
         safe_step_name = step_name.replace("/", "_").replace("\\", "_")
-        uri = f"{self.artifact_dir}/{run_id}/{safe_step_name}/{artifact_type}.{extension}"
-        return uri
-
-    def _ensure_directory(self, uri: str) -> Path:
-        """
-        Ensure directory exists for artifact URI.
-
-        Args:
-            uri: Artifact URI (relative or absolute)
-
-        Returns:
-            Path to the artifact file
-        """
-        artifact_path = Path(uri)
-        artifact_path.parent.mkdir(parents=True, exist_ok=True)
-        return artifact_path
+        return f"{run_id}/{safe_step_name}/{artifact_type}.{extension}"
 
     def _link_artifact_to_group(
         self,
@@ -192,14 +187,14 @@ class ArtifactService:
         Returns:
             CallArtifact ID
         """
-        uri = self._generate_uri(run_id, step_name, "sweep_results", "json")
-        artifact_path = self._ensure_directory(uri)
-
-        # Save as JSON
-        with open(artifact_path, "w", encoding="utf-8") as f:
-            json.dump(sweep_results, f, indent=2, default=str)
-
-        byte_size = artifact_path.stat().st_size
+        logical_path = self._generate_logical_path(
+            run_id, step_name, "sweep_results", "json"
+        )
+        data = json.dumps(sweep_results, indent=2, default=str).encode("utf-8")
+        uri = self.storage.write(
+            logical_path, data, content_type="application/json"
+        )
+        byte_size = len(data)
 
         artifact_metadata = {
             "step_name": step_name,
@@ -211,7 +206,7 @@ class ArtifactService:
         artifact_id = self._link_artifact_to_group(
             group_id=run_id,
             artifact_type="sweep_results",
-            uri=str(uri),
+            uri=uri,
             content_type="application/json",
             byte_size=byte_size,
             metadata_json=artifact_metadata,
@@ -221,7 +216,6 @@ class ArtifactService:
             f"Stored sweep results: artifact_id={artifact_id}, "
             f"run_id={run_id}, uri={uri}"
         )
-
         return artifact_id
 
     def store_dataset_snapshot_manifest(
@@ -251,17 +245,17 @@ class ArtifactService:
         payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         manifest_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
 
-        uri = self._generate_uri(
+        logical_path = self._generate_logical_path(
             snapshot_group_id,
             "snapshot_manifest",
             "dataset_snapshot_manifest",
             "json",
         )
-        artifact_path = self._ensure_directory(uri)
-        with open(artifact_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
-
-        byte_size = artifact_path.stat().st_size
+        data = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+        uri = self.storage.write(
+            logical_path, data, content_type="application/json"
+        )
+        byte_size = len(data)
         artifact_metadata = {
             "snapshot_name": snapshot_name,
             "artifact_format": "json",
@@ -288,6 +282,92 @@ class ArtifactService:
         )
         return artifact_id
 
+    def store_embedding_matrix(
+        self,
+        embedding_batch_group_id: int,
+        matrix: np.ndarray,
+        *,
+        dataset_key: str,
+        embedding_engine: str,
+        provider: str,
+        entry_max: int,
+        key_version: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Persist an embedding matrix artifact and link it to embedding_batch group."""
+        logical_path = self._generate_logical_path(
+            embedding_batch_group_id,
+            "embedding_matrix",
+            "embedding_matrix",
+            "npy",
+        )
+        buf = io.BytesIO()
+        np.save(buf, matrix)
+        data = buf.getvalue()
+        uri = self.storage.write(
+            logical_path, data, content_type="application/octet-stream"
+        )
+        byte_size = len(data)
+        artifact_metadata = {
+            "dataset_key": dataset_key,
+            "embedding_engine": embedding_engine,
+            "provider": provider,
+            "entry_max": int(entry_max),
+            "key_version": key_version,
+            "shape": list(matrix.shape),
+            "dtype": str(matrix.dtype),
+        }
+        if metadata:
+            artifact_metadata.update(metadata)
+        return self._link_artifact_to_group(
+            group_id=embedding_batch_group_id,
+            artifact_type="embedding_matrix",
+            uri=str(uri),
+            content_type="application/octet-stream",
+            byte_size=byte_size,
+            metadata_json=artifact_metadata,
+        )
+
+    def find_embedding_matrix_artifact(
+        self,
+        *,
+        dataset_key: str,
+        embedding_engine: str,
+        provider: str,
+        entry_max: int,
+        key_version: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Find matching embedding_matrix artifact metadata/URI in DB."""
+        if not self.repository:
+            return None
+        from ..db.models_v2 import CallArtifact
+
+        session = self.repository.session
+        artifacts = (
+            session.query(CallArtifact)
+            .filter(CallArtifact.artifact_type == "embedding_matrix")
+            .order_by(CallArtifact.id.desc())
+            .all()
+        )
+        for art in artifacts:
+            md = art.metadata_json or {}
+            if not isinstance(md, dict):
+                continue
+            if (
+                md.get("dataset_key") == dataset_key
+                and md.get("embedding_engine") == embedding_engine
+                and md.get("provider") == provider
+                and int(md.get("entry_max", -1)) == int(entry_max)
+                and md.get("key_version") == key_version
+            ):
+                return {
+                    "artifact_id": int(art.id),
+                    "uri": str(art.uri),
+                    "metadata": md,
+                    "group_id": md.get("group_id"),
+                }
+        return None
+
     def store_cluster_labels(
         self,
         run_id: int,
@@ -309,13 +389,16 @@ class ArtifactService:
         Returns:
             CallArtifact ID
         """
-        uri = self._generate_uri(run_id, step_name, "cluster_labels", "npy")
-        artifact_path = self._ensure_directory(uri)
-
-        # Save as NPY
-        np.save(artifact_path, labels)
-
-        byte_size = artifact_path.stat().st_size
+        logical_path = self._generate_logical_path(
+            run_id, step_name, "cluster_labels", "npy"
+        )
+        buf = io.BytesIO()
+        np.save(buf, labels)
+        data = buf.getvalue()
+        uri = self.storage.write(
+            logical_path, data, content_type="application/octet-stream"
+        )
+        byte_size = len(data)
 
         artifact_metadata = {
             "step_name": step_name,
@@ -363,13 +446,16 @@ class ArtifactService:
         Returns:
             CallArtifact ID
         """
-        uri = self._generate_uri(run_id, step_name, "pca_components", "npy")
-        artifact_path = self._ensure_directory(uri)
-
-        # Save as NPY
-        np.save(artifact_path, components)
-
-        byte_size = artifact_path.stat().st_size
+        logical_path = self._generate_logical_path(
+            run_id, step_name, "pca_components", "npy"
+        )
+        buf = io.BytesIO()
+        np.save(buf, components)
+        data = buf.getvalue()
+        uri = self.storage.write(
+            logical_path, data, content_type="application/octet-stream"
+        )
+        byte_size = len(data)
 
         artifact_metadata = {
             "step_name": step_name,
@@ -415,14 +501,14 @@ class ArtifactService:
         Returns:
             CallArtifact ID
         """
-        uri = self._generate_uri(run_id, step_name, "metrics", "json")
-        artifact_path = self._ensure_directory(uri)
-
-        # Save as JSON
-        with open(artifact_path, "w", encoding="utf-8") as f:
-            json.dump(metrics, f, indent=2, default=str)
-
-        byte_size = artifact_path.stat().st_size
+        logical_path = self._generate_logical_path(
+            run_id, step_name, "metrics", "json"
+        )
+        data = json.dumps(metrics, indent=2, default=str).encode("utf-8")
+        uri = self.storage.write(
+            logical_path, data, content_type="application/json"
+        )
+        byte_size = len(data)
 
         artifact_metadata = {
             "step_name": step_name,
@@ -468,19 +554,19 @@ class ArtifactService:
         Returns:
             CallArtifact ID
         """
-        import csv
-
-        uri = self._generate_uri(run_id, step_name, "representatives", "csv")
-        artifact_path = self._ensure_directory(uri)
-
-        # Save as CSV
-        with open(artifact_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["index", "representative"])
-            for idx, rep in enumerate(representatives):
-                writer.writerow([idx, rep])
-
-        byte_size = artifact_path.stat().st_size
+        logical_path = self._generate_logical_path(
+            run_id, step_name, "representatives", "csv"
+        )
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["index", "representative"])
+        for idx, rep in enumerate(representatives):
+            writer.writerow([idx, rep])
+        data = buf.getvalue().encode("utf-8")
+        uri = self.storage.write(
+            logical_path, data, content_type="text/csv"
+        )
+        byte_size = len(data)
 
         artifact_metadata = {
             "step_name": step_name,
@@ -513,38 +599,30 @@ class ArtifactService:
         Load an artifact from URI.
 
         Args:
-            uri: Artifact URI
+            uri: Artifact URI (from storage.get_uri)
             artifact_type: Type of artifact (determines loading method)
 
         Returns:
             Loaded artifact data (dict for JSON, np.ndarray for NPY, list for CSV)
         """
-        artifact_path = Path(uri)
-
-        if not artifact_path.exists():
+        if not self.storage.exists_from_uri(uri):
             raise FileNotFoundError(f"Artifact not found: {uri}")
 
+        data = self.storage.read_from_uri(uri)
+
         if artifact_type in ("sweep_results", "metrics", "dataset_snapshot_manifest"):
-            # Load JSON
-            with open(artifact_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            return json.loads(data.decode("utf-8"))
 
-        elif artifact_type in ("cluster_labels", "pca_components"):
-            # Load NPY
-            return np.load(artifact_path)
+        if artifact_type in ("cluster_labels", "pca_components", "embedding_matrix"):
+            return np.load(io.BytesIO(data))
 
-        elif artifact_type == "representatives":
-            # Load CSV
-            import csv
-
+        if artifact_type == "representatives":
             representatives = []
-            with open(artifact_path, "r", encoding="utf-8") as f:
-                reader = csv.reader(f)
-                next(reader)  # Skip header
-                for row in reader:
-                    if len(row) >= 2:
-                        representatives.append(row[1])
+            reader = csv.reader(io.StringIO(data.decode("utf-8")))
+            next(reader)  # Skip header
+            for row in reader:
+                if len(row) >= 2:
+                    representatives.append(row[1])
             return representatives
 
-        else:
-            raise ValueError(f"Unknown artifact type: {artifact_type}")
+        raise ValueError(f"Unknown artifact type: {artifact_type}")

@@ -158,6 +158,38 @@ def test_store_dataset_snapshot_manifest(db_connection, temp_artifact_dir):
         assert len(loaded["entries"]) == 2
 
 
+def test_store_and_find_embedding_matrix(db_connection, temp_artifact_dir):
+    """Test storing/reusing embedding_matrix artifact metadata."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
+        embedding_batch_group_id = repo.create_group(
+            group_type="embedding_batch",
+            name="batch_test",
+        )
+        matrix = np.asarray([[0.1, 0.2], [0.3, 0.4]], dtype=np.float64)
+        artifact_id = service.store_embedding_matrix(
+            embedding_batch_group_id,
+            matrix,
+            dataset_key="dbpedia:entry_max=2",
+            embedding_engine="text-embedding-3-small",
+            provider="azure",
+            entry_max=2,
+            key_version="raw_v1",
+        )
+        assert artifact_id > 0
+        hit = service.find_embedding_matrix_artifact(
+            dataset_key="dbpedia:entry_max=2",
+            embedding_engine="text-embedding-3-small",
+            provider="azure",
+            entry_max=2,
+            key_version="raw_v1",
+        )
+        assert hit is not None
+        loaded = service.load_artifact(hit["uri"], "embedding_matrix")
+        np.testing.assert_array_equal(loaded, matrix)
+
+
 def test_store_pca_components(db_connection, temp_artifact_dir):
     """Test storing PCA components as NPY artifact."""
     with db_connection.session_scope() as session:
@@ -262,8 +294,9 @@ def test_artifact_service_without_repository(temp_artifact_dir):
     assert artifact_id == 0  # No persistence
 
     # But file should still exist
-    uri = service._generate_uri(1, "test", "sweep_results", "json")
-    assert Path(uri).exists()
+    logical_path = service._generate_logical_path(1, "test", "sweep_results", "json")
+    uri = service.storage.get_uri(logical_path)
+    assert service.storage.exists(logical_path)
 
 
 def test_load_artifact_nonexistent():

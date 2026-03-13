@@ -30,9 +30,17 @@ class ExecutionBackendFactory:
             from .local_docker import LocalDockerExecution
 
             return LocalDockerExecution(**kwargs)
+        if backend_type == "ssh_docker":
+            from .ssh_docker import SSHDockerExecution
+
+            return SSHDockerExecution(**kwargs)
+        if backend_type == "vastai":
+            from .vastai import VastAIExecution
+
+            return VastAIExecution(**kwargs)
         raise ValueError(f"Unknown backend: {backend_type}")
 
     @staticmethod
     def available_backends() -> list[str]:
         """Return list of supported backend type names."""
-        return ["local_docker"]
+        return ["local_docker", "ssh_docker", "vastai"]

@@ -284,10 +284,10 @@ async def main():
                 print(f"    Stability ARI: {stab['stability_ari']['mean']:.3f} ± {stab['stability_ari']['std']:.3f}")
 
     print("\n[OK] Analysis complete!")
-    return all_results, output_file
+    return all_results
 
 
 if __name__ == "__main__":
     # Run the main function
-    results, output_file = asyncio.run(main())
-    print(f"\n[INFO] Results saved to: {output_file}")
+    results = asyncio.run(main())
+    print(f"\n[INFO] Results ingested to DB. Access via: ingest_sweep_to_db --source-mode call_artifacts")

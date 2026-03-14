@@ -317,3 +317,49 @@ def test_load_artifact_unknown_type(temp_artifact_dir):
 
     with pytest.raises(ValueError, match="Unknown artifact type"):
         service.load_artifact(str(dummy_file), "unknown_type")
+
+
+def test_artifact_service_default_backend_uses_local_when_env_unset(
+    db_connection, temp_artifact_dir
+):
+    """Default backend selection uses local when ARTIFACT_STORAGE_BACKEND is unset."""
+    import os
+
+    orig = os.environ.pop("ARTIFACT_STORAGE_BACKEND", None)
+    try:
+        with db_connection.session_scope() as session:
+            repo = RawCallRepository(session)
+            service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
+            run_id = repo.create_group(group_type="clustering_run", name="test_run")
+            sweep_results = {"by_k": {5: {"labels": [0, 1, 0]}}}
+            artifact_id = service.store_sweep_results(
+                run_id=run_id, sweep_results=sweep_results, step_name="sweep_complete"
+            )
+            assert artifact_id > 0
+            from study_query_llm.db.models_v2 import CallArtifact
+
+            artifact = session.query(CallArtifact).filter_by(id=artifact_id).first()
+            assert artifact is not None
+            # Local backend produces file path, not https URL
+            assert not str(artifact.uri).startswith("https://")
+            assert Path(artifact.uri).exists()
+    finally:
+        if orig is not None:
+            os.environ["ARTIFACT_STORAGE_BACKEND"] = orig
+
+
+def test_artifact_service_explicit_storage_backend_override(temp_artifact_dir):
+    """Explicit storage_backend parameter overrides env-driven default."""
+    from study_query_llm.storage.local import LocalStorageBackend
+
+    backend = LocalStorageBackend(base_dir=temp_artifact_dir)
+    service = ArtifactService(
+        repository=None, artifact_dir=temp_artifact_dir, storage_backend=backend
+    )
+    assert service.storage is backend
+    sweep_results = {"by_k": {5: {"labels": [0, 1, 0]}}}
+    artifact_id = service.store_sweep_results(
+        run_id=1, sweep_results=sweep_results, step_name="test"
+    )
+    assert artifact_id == 0
+    assert service.storage.exists("1/test/sweep_results.json")

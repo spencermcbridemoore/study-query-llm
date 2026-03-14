@@ -39,7 +39,8 @@ from study_query_llm.algorithms import SweepConfig
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.providers.managers.ollama import ollama_vram_scope
-from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_results, get_output_dir
+from study_query_llm.experiments.sweep_io import get_output_dir
+from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 
 OUTPUT_DIR = get_output_dir()
 from scripts.run_experimental_sweep import (
@@ -353,18 +354,10 @@ async def main(force: bool = False):
                 # Check if this run already exists
                 # Normalize embedding engine name for filename (replace special chars)
                 engine_safe = embedding_engine.replace('-', '_').replace('/', '_')
-                existing_files = list(glob.glob(
-                    str(OUTPUT_DIR / (
-                        f"experimental_sweep_"
-                        f"entry{ENTRY_MAX}_"
-                        f"{dataset_name}_"
-                        f"labelmax{label_max}_"
-                        f"{engine_safe}_"
-                        f"{summarizer_name.replace('-', '_')}_*.pkl"
-                    ))
-                ))
-                if existing_files:
-                    print(f"\n      [{run_count}/{total_runs}] {summarizer_name} (SKIP - already exists)")
+                sum_safe = summarizer_name.replace('-', '_')
+                run_key = f"{dataset_name}_{engine_safe}_{sum_safe}_{ENTRY_MAX}_labelmax{label_max}_multi"
+                if run_key_exists_in_db(db, run_key):
+                    print(f"\n      [{run_count}/{total_runs}] {summarizer_name} (SKIP - run_key in DB)")
                     continue
                 
                 print(f"\n      [{run_count}/{total_runs}] Summarizer: {summarizer_name} (provider: {llm_provider})")
@@ -397,19 +390,6 @@ async def main(force: bool = False):
                         traceback.print_exc()
                         continue
                 
-                    # Generate output filename
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    output_file = str(OUTPUT_DIR / (
-                        f"experimental_sweep_"
-                        f"entry{ENTRY_MAX}_"
-                        f"{dataset_name}_"
-                        f"labelmax{label_max}_"
-                        f"{engine_safe}_"
-                        f"{summarizer_name.replace('-', '_')}_"
-                        f"{timestamp}.pkl"
-                    ))
-                
-                    # Save results with metadata
                     metadata = {
                         "entry_max": ENTRY_MAX,
                         "label_max": label_max,
@@ -422,6 +402,8 @@ async def main(force: bool = False):
                         "embedding_engine": embedding_engine,
                         "embedding_provider": embedding_provider,
                         "embedding_dimension": shared_embeddings.shape[1],
+                        "n_restarts": NO_PCA_SWEEP_CONFIG.n_restarts,
+                        "data_type": "sweep",
                         "sweep_config": {
                             "skip_pca": NO_PCA_SWEEP_CONFIG.skip_pca,
                             "k_min": NO_PCA_SWEEP_CONFIG.k_min,
@@ -432,19 +414,15 @@ async def main(force: bool = False):
                         },
                         "note": "No-PCA multi-embedding sweep: full dimensions, extended k range (1-20), single run",
                     }
-                
+
                     try:
-                        saved_file = save_results(
-                            result,
-                            output_file,
-                            ground_truth_labels=filtered_labels,
-                            dataset_name=dataset_name,
-                            metadata=metadata,
+                        run_id = ingest_result_to_db(
+                            result, metadata, filtered_labels, db, run_key
                         )
-                        print(f"      [OK] Saved to: {Path(saved_file).name}")
+                        if run_id is not None:
+                            print(f"      [OK] Ingested run_key={run_key} -> group {run_id}")
                     except Exception as e:
-                        print(f"      [ERROR] Failed to save results file: {e}")
-                        print(f"      [WARN] Results were computed but could not be saved!")
+                        print(f"      [ERROR] Failed to ingest: {e}")
                         import traceback
                         traceback.print_exc()
                 

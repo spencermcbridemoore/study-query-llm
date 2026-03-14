@@ -2,6 +2,7 @@
 
 import os
 import pickle
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -60,6 +61,8 @@ def serialize_sweep_result(result: Any) -> Dict[str, Any]:
             ),
             "objective": k_data.get("objective", {}),
             "objectives": k_data.get("objectives", []),
+            "n_iter": k_data.get("n_iter", 0),
+            "timing": k_data.get("timing", {}),
             "stability": k_data.get("stability"),
         }
 
@@ -73,7 +76,18 @@ def save_single_sweep_result(
     dataset_name: str = "unknown",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Save a single ``SweepResult`` with metadata to a pickle file."""
+    """Save a single ``SweepResult`` with metadata to a pickle file.
+
+    .. deprecated::
+        Use ``ingest_result_to_db`` for artifact-backed persistence (blob-first pipeline).
+        This function is for transitional backfill only.
+    """
+    warnings.warn(
+        "save_single_sweep_result is deprecated; use ingest_result_to_db for "
+        "artifact-backed persistence (blob-first pipeline).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     final = {
         "result": serialize_sweep_result(result),
         "ground_truth_labels": (
@@ -96,7 +110,18 @@ def save_batch_sweep_results(
     dataset_name: str = "unknown",
     output_dir: Optional[str] = None,
 ) -> str:
-    """Save multiple ``SweepResult`` objects keyed by summarizer name."""
+    """Save multiple ``SweepResult`` objects keyed by summarizer name.
+
+    .. deprecated::
+        Use ``ingest_result_to_db`` for each result for artifact-backed persistence.
+        This function is for transitional backfill only.
+    """
+    warnings.warn(
+        "save_batch_sweep_results is deprecated; use ingest_result_to_db for "
+        "each result (artifact-backed persistence).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if output_file is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out = get_output_dir(output_dir)

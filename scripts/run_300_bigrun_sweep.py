@@ -38,7 +38,7 @@ from study_query_llm.algorithms import SweepConfig
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_pkl, get_output_dir
-from study_query_llm.experiments.ingestion import ingest_result_to_db
+from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 
 OUTPUT_DIR = get_output_dir()
 from study_query_llm.utils.estela_loader import load_estela_dict
@@ -306,6 +306,7 @@ async def _run_sweep(texts, embeddings, llm_deployment, db, embedding_engine):
 
 async def main(
     force: bool = False,
+    save_local_pkl: bool = False,
     request_id: Optional[int] = None,
     create_request: bool = False,
     request_name: Optional[str] = None,
@@ -495,9 +496,9 @@ async def main(
             f"_{engine_safe}_{sum_safe}_"
         )
 
-        # Skip if pkl backup already on disk AND not forcing
-        if not force and list(OUTPUT_DIR.glob(out_name + "*.pkl")):
-            print(f"  [{run_count}/{total_to_run}] {summarizer_name} (SKIP – pkl exists)")
+        # Skip if run_key already in DB (idempotency) and not forcing
+        if not force and run_key_exists_in_db(db, run_key):
+            print(f"  [{run_count}/{total_to_run}] {summarizer_name} (SKIP – run_key in DB)")
             continue
 
         if request_id:
@@ -569,18 +570,19 @@ async def main(
             "note": "300-sample bigrun sweep: 3 datasets × 3 embeddings × 5 summarizers",
         }
 
-        # 1. Save pkl first (compute is safe on disk)
-        save_pkl(
-            result,
-            str(out_path),
-            ground_truth_labels=gt_eng,
-            dataset_name=dataset_name,
-            metadata=metadata,
-        )
-        print(f"  [PKL] {out_path.name}")
-
-        # 2. Ingest to NeonDB after pkl is confirmed written
+        # 1. Ingest to DB (artifact persist via ArtifactService is primary)
         run_id = ingest_result_to_db(result, metadata, gt_eng, db, run_key)
+
+        # 2. Optional local pickle backup (off by default)
+        if save_local_pkl and run_id is not None:
+            save_pkl(
+                result,
+                str(out_path),
+                ground_truth_labels=gt_eng,
+                dataset_name=dataset_name,
+                metadata=metadata,
+            )
+            print(f"  [PKL] {out_path.name}")
         if run_id is not None:
             run_ids_ingested.append(run_id)
             if request_id:
@@ -683,7 +685,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-run even if pkl backup already exists on disk",
+        help="Re-run even if run_key already exists in DB",
+    )
+    parser.add_argument(
+        "--save-local-pkl",
+        action="store_true",
+        help="Also write local pickle backup (off by default; blob-first is primary)",
     )
     parser.add_argument(
         "--request-id",
@@ -717,6 +724,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     asyncio.run(main(
         force=args.force,
+        save_local_pkl=args.save_local_pkl,
         request_id=args.request_id,
         create_request=args.create_request,
         request_name=args.request_name,

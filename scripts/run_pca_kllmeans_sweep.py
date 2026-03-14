@@ -36,7 +36,7 @@ from study_query_llm.algorithms import SweepConfig, run_sweep
 from study_query_llm.utils.text_utils import flatten_prompt_dict, clean_texts, is_prompt_key
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
-from study_query_llm.experiments.sweep_io import save_batch_sweep_results as save_results
+from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 
 # Try to apply nest_asyncio for Jupyter compatibility
 try:
@@ -244,15 +244,29 @@ async def main():
     )
     print(f"\nResults structure: all_results[summarizer_name]['by_k'][k_value]")
 
-    # Save results
-    print("\n[INFO] Saving results...")
-    output_file = save_results(all_results)
-    print(f"[OK] Results saved to: {output_file}")
-    print(f"   Includes: representatives, labels, objectives, stability metrics, and distance matrices")
-    print(f"\n   Example access:")
-    print(f"     results = pickle.load(open('{output_file}', 'rb'))")
-    print(f"     results['None']['by_k']['5']['stability']['silhouette']['mean']")
-    print(f"     results['None']['by_k']['5']['representatives']")
+    # Ingest each result to DB (artifact-backed)
+    print("\n[INFO] Ingesting results to DB...")
+    n_texts = len(texts)
+    dataset_name = "estela"
+    for summarizer_name, result in all_results.items():
+        eng_safe = EMBEDDING_DEPLOYMENT.replace("-", "_")
+        sum_safe = summarizer_name.replace("-", "_")
+        run_key = f"{dataset_name}_{eng_safe}_{sum_safe}_{n_texts}_pca"
+        if run_key_exists_in_db(db, run_key):
+            print(f"  [SKIP] {summarizer_name} (run_key in DB)")
+            continue
+        metadata = {
+            "benchmark_source": dataset_name,
+            "embedding_engine": EMBEDDING_DEPLOYMENT,
+            "summarizer": summarizer_name,
+            "n_restarts": SWEEP_CONFIG.n_restarts,
+            "actual_entry_count": n_texts,
+            "data_type": "sweep",
+        }
+        run_id = ingest_result_to_db(result, metadata, None, db, run_key)
+        if run_id is not None:
+            print(f"  [OK] {summarizer_name} -> group {run_id}")
+    print(f"\n   Access via ingest_sweep_to_db --source-mode call_artifacts")
 
     # Display results
     print(f"\n{'=' * 60}")

@@ -92,3 +92,4 @@ def test_script_has_request_flags():
     assert "--request-name" in out
     assert "--worker-id" in out
     assert "--claim-lease-seconds" in out
+    assert "--save-local-pkl" in out

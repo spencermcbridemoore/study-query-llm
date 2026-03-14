@@ -11,12 +11,28 @@ from sqlalchemy.exc import IntegrityError
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.experiments.result_metrics import (
     METRICS as _METRICS,
     extract_by_k_metrics as _extract_by_k_metrics,
 )
 from study_query_llm.experiments.sweep_io import serialize_sweep_result
+
+
+def run_key_exists_in_db(db: DatabaseConnectionV2, run_key: str) -> bool:
+    """Check if a run_key already exists in the database (idempotency check)."""
+    with db.session_scope() as session:
+        existing = (
+            session.query(Group)
+            .filter(
+                Group.group_type == "clustering_run",
+                sa_text("metadata_json->>'run_key' = :rk"),
+            )
+            .params(rk=run_key)
+            .first()
+        )
+        return existing is not None
 
 
 def ingest_result_to_db(
@@ -49,11 +65,11 @@ def ingest_result_to_db(
     """
     result_dict = serialize_sweep_result(result)
     dataset = metadata.get("benchmark_source", "unknown")
-    engine = metadata.get("embedding_engine", "?")
+    engine = metadata.get("embedding_engine") or metadata.get("embedding_deployment", "?")
     summarizer = str(metadata.get("summarizer", "None"))
     n_restarts = metadata.get("n_restarts", 50)
     n_samples = metadata.get("actual_entry_count", 0)
-    data_type = "50runs"
+    data_type = metadata.get("data_type", "50runs")
 
     # Optional snapshot provenance linkage for reproducibility.
     raw_snapshot_ids = metadata.get("dataset_snapshot_ids")
@@ -128,12 +144,52 @@ def ingest_result_to_db(
             run_group.metadata_json = run_metadata
             session.flush()
 
+            # Persist canonical sweep artifact via ArtifactService (blob-first pipeline)
+            artifact_service = ArtifactService(repository=repo)
+            artifact_id = artifact_service.store_sweep_results(
+                run_id=run_id,
+                sweep_results=result_dict,
+                step_name="sweep_complete",
+                metadata={
+                    "run_key": run_key,
+                    "dataset": dataset,
+                    "embedding_engine": engine,
+                    "summarizer": summarizer,
+                    "n_restarts": n_restarts,
+                    "n_samples": n_samples,
+                    "data_type": data_type,
+                },
+            )
+            if artifact_id > 0:
+                from study_query_llm.db.models_v2 import CallArtifact
+
+                artifact = session.query(CallArtifact).filter_by(id=artifact_id).first()
+                if artifact:
+                    run_metadata["artifact_id"] = artifact_id
+                    run_metadata["artifact_uri"] = str(artifact.uri)
+                    run_group.metadata_json = dict(run_metadata)
+            session.flush()
+
             # Optional explicit run -> snapshot linkage.
             for snapshot_id in snapshot_ids:
                 try:
                     provenance.link_run_to_dataset_snapshot(run_id, snapshot_id)
                 except Exception:
                     # Keep run ingestion robust even when snapshot linkage is missing/invalid.
+                    pass
+
+            # Optional explicit run -> embedding_batch linkage and batch -> snapshot chain.
+            embedding_batch_group_id = metadata.get("embedding_batch_group_id")
+            if embedding_batch_group_id is not None:
+                try:
+                    emb_gid = int(embedding_batch_group_id)
+                    provenance.link_run_to_embedding_batch(run_id, emb_gid)
+                    for snapshot_id in snapshot_ids:
+                        try:
+                            provenance.link_embedding_batch_to_dataset_snapshot(emb_gid, snapshot_id)
+                        except Exception:
+                            pass
+                except Exception:
                     pass
 
             by_k = _extract_by_k_metrics(result_dict, ground_truth_labels)

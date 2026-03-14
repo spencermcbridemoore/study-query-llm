@@ -30,12 +30,8 @@ from study_query_llm.algorithms import SweepConfig, run_sweep
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import SweepRunClaim
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.experiments.ingestion import ingest_result_to_db
-from study_query_llm.experiments.sweep_io import (
-    get_output_dir,
-    save_single_sweep_result,
-    serialize_sweep_result,
-)
+from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
+from study_query_llm.experiments.sweep_io import get_output_dir, serialize_sweep_result
 from study_query_llm.providers.managed_tei_embedding_provider import ManagedTEIEmbeddingProvider
 from study_query_llm.providers.managers.local_docker_tei import LocalDockerTEIManager
 from study_query_llm.providers.factory import ProviderFactory
@@ -845,11 +841,8 @@ def run_worker(
                         )
                     )
 
-                sum_safe = _safe_name(str(summarizer_key))
-                engine_safe = _safe_name(current_engine)
-                out_name = f"{OUT_PREFIX}_entry{ENTRY_MAX}_{dataset_name}_{engine_safe}_{sum_safe}_"
-                if (not force) and list(OUTPUT_DIR.glob(out_name + "[0-9]*.pkl")):
-                    print(f"[{worker_id}] {run_key} SKIP (pkl exists)")
+                if (not force) and run_key_exists_in_db(db, run_key):
+                    print(f"[{worker_id}] {run_key} SKIP (run_key in DB)")
                     processed += 1
                     continue
 
@@ -870,8 +863,6 @@ def run_worker(
                     print(f"[{worker_id}] {run_key} ERROR: {exc}")
                     continue
 
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                out_path = OUTPUT_DIR / f"{out_name}{ts}.pkl"
                 metadata = {
                     "embedding_engine": current_engine,
                     "embedding_provider": provider_label,
@@ -890,13 +881,6 @@ def run_worker(
                     "actual_entry_count": len(texts),
                     "sweep_config": {"k_min": K_MIN, "k_max": K_MAX, "n_restarts": N_RESTARTS},
                 }
-                save_single_sweep_result(
-                    result,
-                    str(out_path),
-                    ground_truth_labels=gt,
-                    dataset_name=dataset_name,
-                    metadata=metadata,
-                )
                 run_id = ingest_result_to_db(result, metadata, gt, db, run_key)
                 if run_id is not None:
                     with db.session_scope() as session:

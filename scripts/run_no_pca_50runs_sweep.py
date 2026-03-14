@@ -25,7 +25,8 @@ from study_query_llm.algorithms import SweepConfig
 
 from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
-from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_results, get_output_dir
+from study_query_llm.experiments.sweep_io import get_output_dir
+from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 
 OUTPUT_DIR = get_output_dir()
 from scripts.run_experimental_sweep import (
@@ -109,6 +110,9 @@ async def main(force: bool = False, dbpedia_large_small: bool = False):
     datasets = DATASETS_DBPEDIA_ONLY if dbpedia_large_small else DATASETS_FULL
     total = len(datasets) * len(engines) * len(SUMMARIZERS)
 
+    db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
+    db.init_db()
+
     print("=" * 80)
     if dbpedia_large_small:
         print("No-PCA 50-runs sweep (dbpedia, large/small engines, None + gpt-5-chat)")
@@ -135,9 +139,6 @@ async def main(force: bool = False, dbpedia_large_small: bool = False):
             for p in OUTPUT_DIR.glob(f"{OUT_PREFIX}_entry{ENTRY_MAX}_dbpedia_{es}_*.pkl"):
                 p.unlink()
                 print(f"[INFO] --force: removed {p.name}")
-
-    db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
-    db.init_db()
 
     loaded = {}
     for bench in datasets:
@@ -199,12 +200,9 @@ async def main(force: bool = False, dbpedia_large_small: bool = False):
                 run_count += 1
                 summarizer_name = "None" if llm is None else llm
                 sum_safe = summarizer_name.replace("-", "_")
-                if dbpedia_large_small:
-                    out_name = f"{OUT_PREFIX}_entry{ENTRY_MAX}_{dataset_name}_{engine_safe}_{sum_safe}_"
-                else:
-                    out_name = f"{OUT_PREFIX}_entry{ENTRY_MAX}_{dataset_name}_{sum_safe}_"
-                if not force and list(OUTPUT_DIR.glob(out_name + "*.pkl")):
-                    print(f"  [{run_count}/{total}] {embedding_engine} / {summarizer_name} (SKIP - exists)")
+                run_key = f"{dataset_name}_{engine_safe}_{sum_safe}_{ENTRY_MAX}_50runs"
+                if not force and run_key_exists_in_db(db, run_key):
+                    print(f"  [{run_count}/{total}] {embedding_engine} / {summarizer_name} (SKIP - run_key in DB)")
                     continue
                 print(f"  [{run_count}/{total}] {dataset_name} / {embedding_engine} / {summarizer_name} ...")
                 try:
@@ -217,8 +215,6 @@ async def main(force: bool = False, dbpedia_large_small: bool = False):
                     import traceback
                     traceback.print_exc()
                     continue
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                out_path = OUTPUT_DIR / f"{out_name}{ts}.pkl"
                 metadata = {
                     "entry_max": ENTRY_MAX,
                     "label_max": label_max,
@@ -231,8 +227,9 @@ async def main(force: bool = False, dbpedia_large_small: bool = False):
                     "sweep_config": {"skip_pca": True, "k_min": K_MIN, "k_max": K_MAX, "n_restarts": N_RESTARTS, "compute_stability": True},
                     "note": "No-PCA 50-runs sweep for mean/stdev and box stats",
                 }
-                save_results(result, str(out_path), ground_truth_labels=labels_eng, dataset_name=dataset_name, metadata=metadata)
-                print(f"  Saved {out_path.name}")
+                run_id = ingest_result_to_db(result, metadata, labels_eng, db, run_key)
+                if run_id is not None:
+                    print(f"  [DB] Saved run_key={run_key} -> group {run_id}")
 
     print("\n[OK] Done.")
 

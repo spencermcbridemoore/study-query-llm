@@ -28,6 +28,7 @@ import csv
 import io
 import json
 import hashlib
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
 import numpy as np
@@ -75,9 +76,36 @@ class ArtifactService:
         if storage_backend is not None:
             self.storage = storage_backend
         else:
-            from ..storage.local import LocalStorageBackend
+            self.storage = self._resolve_default_backend(artifact_dir)
 
-            self.storage = LocalStorageBackend(base_dir=artifact_dir)
+    def _resolve_default_backend(self, artifact_dir: str):
+        """
+        Resolve storage backend from ARTIFACT_STORAGE_BACKEND env.
+        Safe fallback to local when unset or when azure_blob cannot be created.
+        """
+        from ..storage.factory import StorageBackendFactory
+
+        backend_type = (os.environ.get("ARTIFACT_STORAGE_BACKEND") or "local").strip().lower()
+        if backend_type == "azure_blob":
+            try:
+                return StorageBackendFactory.create(
+                    "azure_blob",
+                    container_name=os.environ.get("AZURE_STORAGE_CONTAINER") or "artifacts",
+                )
+            except (ValueError, ImportError) as e:
+                logger.warning(
+                    "ARTIFACT_STORAGE_BACKEND=azure_blob requested but backend unavailable: %s. "
+                    "Falling back to local.",
+                    e,
+                )
+                backend_type = "local"
+        if backend_type == "local" or not backend_type:
+            return StorageBackendFactory.create("local", base_dir=artifact_dir)
+        logger.warning(
+            "Unknown ARTIFACT_STORAGE_BACKEND=%r, falling back to local.",
+            backend_type,
+        )
+        return StorageBackendFactory.create("local", base_dir=artifact_dir)
 
     def _generate_logical_path(
         self, run_id: int, step_name: str, artifact_type: str, extension: str

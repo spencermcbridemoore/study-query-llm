@@ -31,7 +31,8 @@ from sqlalchemy import text as sa_text
 from study_query_llm.config import config
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.db.models_v2 import Group, GroupLink
+from study_query_llm.db.models_v2 import CallArtifact, Group, GroupLink
+from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 
@@ -42,6 +43,7 @@ from study_query_llm.experiments.result_metrics import (
     rows_from_50runs as _rows_from_50runs,
     rows_from_sweep as _rows_from_sweep,
     dist_from_result as _dist_from_z,
+    extract_by_k_metrics as _extract_by_k_metrics,
     METRICS,
 )
 
@@ -180,6 +182,32 @@ def load_and_group_pkl(pkl_path: Path, data_type: str) -> dict | None:
     }
 
 
+def _idempotency_check_run_key(session, run_key: str) -> Group | None:
+    """Check if run_key already exists. Returns existing Group or None."""
+    return (
+        session.query(Group)
+        .filter(
+            Group.group_type == "clustering_run",
+            sa_text("metadata_json->>'run_key' = :rk"),
+        )
+        .params(rk=run_key)
+        .first()
+    )
+
+
+def _idempotency_check_source_file(session, source_file: str) -> Group | None:
+    """Check if source_file already ingested (legacy). Returns existing Group or None."""
+    return (
+        session.query(Group)
+        .filter(
+            Group.group_type == "clustering_run",
+            sa_text("metadata_json->>'source_file' = :sf"),
+        )
+        .params(sf=source_file)
+        .first()
+    )
+
+
 def ingest_one_pkl(
     info: dict,
     repository: RawCallRepository,
@@ -187,6 +215,7 @@ def ingest_one_pkl(
     metric_specs: dict,
     ingestion_env: dict,
     dry_run: bool = False,
+    run_key: str | None = None,
 ) -> int | None:
     """Ingest one parsed pkl's data into DB. Returns run group ID or None."""
     pkl_path: Path = info["pkl_path"]
@@ -205,11 +234,13 @@ def ingest_one_pkl(
         print(f"    Would create {n_steps} step groups (one per k)")
         return None
 
-    # Idempotency: check if already ingested
-    existing = repository.session.query(Group).filter(
-        Group.group_type == "clustering_run",
-        sa_text("metadata_json->>'source_file' = :sf"),
-    ).params(sf=source_file).first()
+    # Idempotency: run_key first (blob-first), fallback to source_file (legacy)
+    if run_key:
+        existing = _idempotency_check_run_key(repository.session, run_key)
+        if existing:
+            logger.info("  [SKIP] Already ingested: run_key=%s (run group %d)", run_key, existing.id)
+            return None
+    existing = _idempotency_check_source_file(repository.session, source_file)
     if existing:
         logger.info("  [SKIP] Already ingested: %s (run group %d)", source_file, existing.id)
         return None
@@ -229,6 +260,8 @@ def ingest_one_pkl(
         "metric_specs": metric_specs,
         "ingestion_env": ingestion_env,
     }
+    if run_key:
+        run_metadata["run_key"] = run_key
 
     run_id = provenance.create_run_group(
         algorithm="cosine_kllmeans_no_pca",
@@ -276,12 +309,142 @@ def ingest_one_pkl(
     return run_id
 
 
+def load_and_ingest_from_artifact(
+    artifact: CallArtifact,
+    artifact_service: ArtifactService,
+    repository: RawCallRepository,
+    provenance: ProvenanceService,
+    metric_specs: dict,
+    ingestion_env: dict,
+    dry_run: bool = False,
+) -> int | None:
+    """
+    Load sweep payload from artifact URI and ingest into DB.
+    Uses run_key from artifact metadata for idempotency.
+    """
+    meta = artifact.metadata_json or {}
+    run_key = meta.get("run_key")
+    if not run_key:
+        logger.warning("  [SKIP] Artifact id=%s has no run_key in metadata", artifact.id)
+        return None
+
+    if dry_run:
+        print(f"  [DRY RUN] Would ingest from artifact id={artifact.id}, run_key={run_key}")
+        return None
+
+    try:
+        payload = artifact_service.load_artifact(str(artifact.uri), "sweep_results")
+    except Exception as e:
+        logger.warning("  [SKIP] Failed to load artifact id=%s uri=%s: %s", artifact.id, artifact.uri, e)
+        return None
+
+    if not isinstance(payload, dict) or "by_k" not in payload:
+        logger.warning("  [SKIP] Artifact id=%s payload missing by_k", artifact.id)
+        return None
+
+    dataset = meta.get("dataset", "unknown")
+    engine = meta.get("embedding_engine", "?")
+    summarizer = str(meta.get("summarizer", "None"))
+    n_restarts = int(meta.get("n_restarts", 50))
+    n_samples = int(meta.get("n_samples", 0))
+    data_type = str(meta.get("data_type", "50runs"))
+
+    by_k = _extract_by_k_metrics(payload, None)
+    k_values = sorted(by_k.keys())
+    k_range = [min(k_values), max(k_values)] if k_values else [0, 0]
+    if n_samples == 0 and k_values:
+        by_k_raw = payload.get("by_k") or {}
+        first_k = str(k_values[0])
+        first_entry = by_k_raw.get(first_k) or {}
+        labels_all = first_entry.get("labels_all") or []
+        if labels_all and len(labels_all) > 0:
+            first_labels = labels_all[0]
+            n_samples = len(first_labels) if hasattr(first_labels, "__len__") else 0
+
+    info = {
+        "dataset": dataset,
+        "engine": engine,
+        "summarizer": summarizer,
+        "data_type": data_type,
+        "n_restarts": n_restarts,
+        "n_samples": n_samples,
+        "k_range": k_range,
+        "by_k": by_k,
+        "pkl_path": None,
+    }
+
+    run_metadata = {
+        "algorithm": "cosine_kllmeans_no_pca",
+        "run_key": run_key,
+        "dataset": dataset,
+        "embedding_engine": engine,
+        "summarizer": summarizer,
+        "n_restarts": n_restarts,
+        "n_samples": n_samples,
+        "k_range": k_range,
+        "data_type": data_type,
+        "source": "call_artifacts",
+        "artifact_id": artifact.id,
+        "artifact_uri": str(artifact.uri),
+        "metric_specs": metric_specs,
+        "ingestion_env": ingestion_env,
+    }
+
+    existing = _idempotency_check_run_key(repository.session, run_key)
+    if existing:
+        logger.info("  [SKIP] Already ingested: run_key=%s (run group %d)", run_key, existing.id)
+        return None
+
+    run_id = provenance.create_run_group(
+        algorithm="cosine_kllmeans_no_pca",
+        config=run_metadata,
+        name=f"sweep_{dataset}_{engine}_{data_type}",
+        description=f"Ingested from artifact: {dataset}/{engine}/{summarizer}",
+    )
+
+    run_group = repository.get_group_by_id(run_id)
+    run_group.metadata_json = run_metadata
+    repository.session.flush()
+
+    for k in sorted(info["by_k"].keys()):
+        metrics_for_k = info["by_k"][k]
+        step_metadata = {"k": k, "n_samples": info["n_samples"]}
+        for m in METRICS:
+            vals = metrics_for_k.get(m, [])
+            step_metadata[f"{m}s"] = vals
+
+        step_id = provenance.create_step_group(
+            parent_run_id=run_id,
+            step_name=f"k={k}",
+            step_type="clustering",
+            metadata=step_metadata,
+        )
+        repository.create_group_link(
+            parent_group_id=run_id,
+            child_group_id=step_id,
+            link_type="clustering_step",
+            position=k,
+        )
+
+    logger.info(
+        "  Ingested artifact id=%s run_key=%s -> run group %d (%d steps)",
+        artifact.id, run_key, run_id, len(info["by_k"]),
+    )
+    return run_id
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Ingest pkl sweep results into the database")
+    parser = argparse.ArgumentParser(description="Ingest sweep results into the database")
+    parser.add_argument(
+        "--source-mode",
+        choices=["local_pkl", "call_artifacts"],
+        default="call_artifacts",
+        help="Source: call_artifacts (default, blob-first) or local_pkl (legacy backfill)",
+    )
     parser.add_argument(
         "--data-dir", type=Path,
         default=REPO_ROOT / "experimental_results",
-        help="Directory containing pkl files",
+        help="Directory containing pkl files (local_pkl mode only)",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -290,6 +453,7 @@ def main():
     args = parser.parse_args()
     data_dir = Path(args.data_dir)
 
+    print(f"Source mode: {args.source_mode}")
     print(f"Data dir: {data_dir}")
     print(f"Dry run: {args.dry_run}")
 
@@ -298,59 +462,107 @@ def main():
     print(f"sklearn version: {ingestion_env['sklearn_version']}")
     print(f"numpy version: {ingestion_env['numpy_version']}")
 
-    # Scan pkl files
-    pkl_infos: list[dict] = []
-
-    for p in sorted(data_dir.glob("no_pca_50runs_*.pkl")):
-        info = load_and_group_pkl(p, "50runs")
-        if info:
-            pkl_infos.append(info)
-
-    for p in sorted(data_dir.glob("experimental_sweep_*.pkl")):
-        info = load_and_group_pkl(p, "sweep")
-        if info:
-            pkl_infos.append(info)
-
-    for p in sorted(data_dir.glob("local_gpu_300_*.pkl")):
-        info = load_and_group_pkl(p, "50runs")
-        if info:
-            pkl_infos.append(info)
-
-    for p in sorted(data_dir.glob("local_gpu_multi_*.pkl")):
-        info = load_and_group_pkl(p, "50runs")
-        if info:
-            pkl_infos.append(info)
-
-    if not pkl_infos:
-        print("[ERROR] No valid pkl files found.")
-        sys.exit(1)
-
-    print(f"Found {len(pkl_infos)} pkl file(s) to ingest.")
-
-    if args.dry_run:
-        for info in pkl_infos:
-            ingest_one_pkl(info, None, None, metric_specs, ingestion_env, dry_run=True)
-        print("Dry run complete.")
-        return
-
     db = DatabaseConnectionV2(config.database.connection_string)
     db.init_db()
 
     created = 0
     skipped = 0
-    with db.session_scope() as session:
-        repository = RawCallRepository(session)
-        provenance = ProvenanceService(repository)
 
-        for info in pkl_infos:
-            run_id = ingest_one_pkl(
-                info, repository, provenance,
-                metric_specs, ingestion_env, dry_run=False,
+    if args.source_mode == "call_artifacts":
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            provenance = ProvenanceService(repo)
+            artifact_service = ArtifactService(repository=repo)
+
+            artifacts = (
+                session.query(CallArtifact)
+                .filter(CallArtifact.artifact_type == "sweep_results")
+                .order_by(CallArtifact.id)
+                .all()
             )
-            if run_id is not None:
-                created += 1
-            else:
-                skipped += 1
+
+        if not artifacts:
+            print("[ERROR] No sweep_results CallArtifact rows found.")
+            sys.exit(1)
+
+        print(f"Found {len(artifacts)} sweep_results artifact(s) to ingest.")
+
+        if args.dry_run:
+            for art in artifacts:
+                with db.session_scope() as session:
+                    repo = RawCallRepository(session)
+                    prov = ProvenanceService(repo)
+                    svc = ArtifactService(repository=repo)
+                    load_and_ingest_from_artifact(
+                        art, svc, repo, prov, metric_specs, ingestion_env, dry_run=True
+                    )
+            print("Dry run complete.")
+            return
+
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            provenance = ProvenanceService(repo)
+            artifact_service = ArtifactService(repository=repo)
+
+            for art in artifacts:
+                run_id = load_and_ingest_from_artifact(
+                    art, artifact_service, repo, provenance,
+                    metric_specs, ingestion_env, dry_run=False,
+                )
+                if run_id is not None:
+                    created += 1
+                else:
+                    skipped += 1
+
+    else:
+        # local_pkl (legacy)
+        pkl_infos: list[dict] = []
+
+        for p in sorted(data_dir.glob("no_pca_50runs_*.pkl")):
+            info = load_and_group_pkl(p, "50runs")
+            if info:
+                pkl_infos.append(info)
+
+        for p in sorted(data_dir.glob("experimental_sweep_*.pkl")):
+            info = load_and_group_pkl(p, "sweep")
+            if info:
+                pkl_infos.append(info)
+
+        for p in sorted(data_dir.glob("local_gpu_300_*.pkl")):
+            info = load_and_group_pkl(p, "50runs")
+            if info:
+                pkl_infos.append(info)
+
+        for p in sorted(data_dir.glob("local_gpu_multi_*.pkl")):
+            info = load_and_group_pkl(p, "50runs")
+            if info:
+                pkl_infos.append(info)
+
+        if not pkl_infos:
+            print("[ERROR] No valid pkl files found.")
+            sys.exit(1)
+
+        print(f"Found {len(pkl_infos)} pkl file(s) to ingest.")
+
+        if args.dry_run:
+            for info in pkl_infos:
+                ingest_one_pkl(info, None, None, metric_specs, ingestion_env, dry_run=True)
+            print("Dry run complete.")
+            return
+
+        with db.session_scope() as session:
+            repository = RawCallRepository(session)
+            provenance = ProvenanceService(repository)
+
+            for info in pkl_infos:
+                run_id = ingest_one_pkl(
+                    info, repository, provenance,
+                    metric_specs, ingestion_env, dry_run=False,
+                )
+                if run_id is not None:
+                    created += 1
+                else:
+                    skipped += 1
 
         # Create clustering_sweep and link local_gpu_300 runs
         local_runs = (

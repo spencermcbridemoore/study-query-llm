@@ -29,6 +29,9 @@ import io
 import json
 import hashlib
 import os
+import time
+from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
 import numpy as np
@@ -73,6 +76,7 @@ class ArtifactService:
         """
         self.repository = repository
         self.artifact_dir = Path(artifact_dir)
+        self._operation_counts: dict[str, int] = defaultdict(int)
         if storage_backend is not None:
             self.storage = storage_backend
         else:
@@ -86,13 +90,45 @@ class ArtifactService:
         from ..storage.factory import StorageBackendFactory
 
         backend_type = (os.environ.get("ARTIFACT_STORAGE_BACKEND") or "local").strip().lower()
+        runtime_env = (os.environ.get("ARTIFACT_RUNTIME_ENV") or "dev").strip().lower()
+        strict_mode = self._is_truthy(os.environ.get("ARTIFACT_STORAGE_STRICT_MODE"))
+        if runtime_env in {"stage", "prod"}:
+            strict_mode = True
+
+        if backend_type == "local" and strict_mode:
+            raise ValueError(
+                "Local artifact backend is disallowed in strict mode "
+                f"(runtime={runtime_env}). Set ARTIFACT_STORAGE_BACKEND=azure_blob."
+            )
+
         if backend_type == "azure_blob":
+            container_name = self._resolve_blob_container(runtime_env)
+            auth_mode = (os.environ.get("ARTIFACT_AUTH_MODE") or "connection_string").strip().lower()
             try:
                 return StorageBackendFactory.create(
                     "azure_blob",
-                    container_name=os.environ.get("AZURE_STORAGE_CONTAINER") or "artifacts",
+                    container_name=container_name,
+                    auth_mode=auth_mode,
+                    account_url=os.environ.get("AZURE_STORAGE_ACCOUNT_URL"),
+                    managed_identity_client_id=os.environ.get(
+                        "AZURE_STORAGE_MANAGED_IDENTITY_CLIENT_ID"
+                    ),
+                    blob_prefix=(os.environ.get("AZURE_STORAGE_PREFIX") or runtime_env),
+                    max_retries=int(os.environ.get("AZURE_STORAGE_MAX_RETRIES") or "3"),
+                    retry_backoff_seconds=float(
+                        os.environ.get("AZURE_STORAGE_RETRY_BACKOFF_SECONDS") or "0.5"
+                    ),
+                    verify_uploads=self._is_truthy(
+                        os.environ.get("AZURE_STORAGE_VERIFY_UPLOADS"),
+                        default=True,
+                    ),
+                    runtime_env=runtime_env,
                 )
             except (ValueError, ImportError) as e:
+                if strict_mode:
+                    raise RuntimeError(
+                        "Failed to configure azure_blob artifact backend in strict mode."
+                    ) from e
                 logger.warning(
                     "ARTIFACT_STORAGE_BACKEND=azure_blob requested but backend unavailable: %s. "
                     "Falling back to local.",
@@ -106,6 +142,160 @@ class ArtifactService:
             backend_type,
         )
         return StorageBackendFactory.create("local", base_dir=artifact_dir)
+
+    @staticmethod
+    def _is_truthy(value: Optional[str], default: bool = False) -> bool:
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _integrity_metadata(data: bytes) -> Dict[str, Any]:
+        return {
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "byte_size": len(data),
+        }
+
+    def _resolve_blob_container(self, runtime_env: str) -> str:
+        base = (os.environ.get("AZURE_STORAGE_CONTAINER") or "artifacts").strip()
+        # Optional per-lane override; otherwise derive from base: {base}-{dev|stage|prod}
+        explicit = os.environ.get(f"AZURE_STORAGE_CONTAINER_{runtime_env.upper()}")
+        if explicit and explicit.strip():
+            container = explicit.strip()
+        elif runtime_env in ("dev", "stage", "prod"):
+            container = f"{base}-{runtime_env}"
+        else:
+            container = base
+        if not container:
+            raise ValueError("Resolved empty Azure blob container name.")
+
+        allow_cross_env = self._is_truthy(
+            os.environ.get("ARTIFACT_ALLOW_CROSS_ENV_CONTAINER"), default=False
+        )
+        lowered = container.lower()
+        if runtime_env != "prod" and "prod" in lowered and not allow_cross_env:
+            raise ValueError(
+                f"Refusing to use prod-like container {container!r} in runtime {runtime_env!r}. "
+                "Set ARTIFACT_ALLOW_CROSS_ENV_CONTAINER=true to override."
+            )
+        return container
+
+    def _record_storage_event(
+        self,
+        *,
+        operation: str,
+        status: str,
+        started_at: float,
+        logical_path: Optional[str] = None,
+        uri: Optional[str] = None,
+        artifact_type: Optional[str] = None,
+        error: Optional[Exception] = None,
+    ) -> None:
+        elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+        key = f"{operation}.{status}"
+        self._operation_counts[key] = int(self._operation_counts.get(key, 0)) + 1
+        if status == "success":
+            logger.info(
+                "artifact_storage_event op=%s status=%s elapsed_ms=%.2f artifact_type=%s logical_path=%s uri=%s count=%s",
+                operation,
+                status,
+                elapsed_ms,
+                artifact_type or "",
+                logical_path or "",
+                uri or "",
+                self._operation_counts[key],
+            )
+        else:
+            logger.warning(
+                "artifact_storage_event op=%s status=%s elapsed_ms=%.2f artifact_type=%s logical_path=%s uri=%s error=%s count=%s",
+                operation,
+                status,
+                elapsed_ms,
+                artifact_type or "",
+                logical_path or "",
+                uri or "",
+                error,
+                self._operation_counts[key],
+            )
+
+    def _write_artifact_bytes(
+        self,
+        *,
+        logical_path: str,
+        data: bytes,
+        artifact_type: str,
+        content_type: Optional[str] = None,
+    ) -> str:
+        started_at = time.perf_counter()
+        try:
+            uri = self.storage.write(logical_path, data, content_type=content_type)
+            self._record_storage_event(
+                operation="write",
+                status="success",
+                started_at=started_at,
+                logical_path=logical_path,
+                uri=uri,
+                artifact_type=artifact_type,
+            )
+            return uri
+        except Exception as e:
+            self._record_storage_event(
+                operation="write",
+                status="failure",
+                started_at=started_at,
+                logical_path=logical_path,
+                artifact_type=artifact_type,
+                error=e,
+            )
+            raise
+
+    def _read_artifact_bytes(
+        self,
+        *,
+        uri: str,
+        artifact_type: str,
+        expected_sha256: Optional[str] = None,
+        expected_byte_size: Optional[int] = None,
+    ) -> bytes:
+        started_at = time.perf_counter()
+        try:
+            if not self.storage.exists_from_uri(uri):
+                raise FileNotFoundError(f"Artifact not found: {uri}")
+            data = self.storage.read_from_uri(uri)
+            if expected_byte_size is not None and int(expected_byte_size) != len(data):
+                raise ValueError(
+                    f"Artifact byte size mismatch for {uri}: "
+                    f"expected={expected_byte_size}, actual={len(data)}"
+                )
+            if expected_sha256:
+                actual_sha256 = hashlib.sha256(data).hexdigest()
+                if actual_sha256 != str(expected_sha256):
+                    raise ValueError(
+                        f"Artifact checksum mismatch for {uri}: "
+                        f"expected={expected_sha256}, actual={actual_sha256}"
+                    )
+            self._record_storage_event(
+                operation="read",
+                status="success",
+                started_at=started_at,
+                uri=uri,
+                artifact_type=artifact_type,
+            )
+            return data
+        except Exception as e:
+            self._record_storage_event(
+                operation="read",
+                status="failure",
+                started_at=started_at,
+                uri=uri,
+                artifact_type=artifact_type,
+                error=e,
+            )
+            raise
+
+    def get_operation_counts(self) -> Dict[str, int]:
+        """Expose local artifact read/write counters for diagnostics/tests."""
+        return dict(self._operation_counts)
 
     def _generate_logical_path(
         self, run_id: int, step_name: str, artifact_type: str, extension: str
@@ -171,6 +361,10 @@ class ArtifactService:
 
         metadata = {
             "group_id": group_id,
+            "schema_version": "artifact.v1",
+            "governance_version": "blob_ops_phase2",
+            "storage_backend": getattr(self.storage, "backend_type", "unknown"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if metadata_json:
             metadata.update(metadata_json)
@@ -219,8 +413,11 @@ class ArtifactService:
             run_id, step_name, "sweep_results", "json"
         )
         data = json.dumps(sweep_results, indent=2, default=str).encode("utf-8")
-        uri = self.storage.write(
-            logical_path, data, content_type="application/json"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type="sweep_results",
+            content_type="application/json",
         )
         byte_size = len(data)
 
@@ -228,6 +425,7 @@ class ArtifactService:
             "step_name": step_name,
             "artifact_format": "json",
         }
+        artifact_metadata.update(self._integrity_metadata(data))
         if metadata:
             artifact_metadata.update(metadata)
 
@@ -280,8 +478,11 @@ class ArtifactService:
             "json",
         )
         data = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
-        uri = self.storage.write(
-            logical_path, data, content_type="application/json"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type="dataset_snapshot_manifest",
+            content_type="application/json",
         )
         byte_size = len(data)
         artifact_metadata = {
@@ -290,6 +491,7 @@ class ArtifactService:
             "manifest_hash": manifest_hash,
             "entry_count": len(entries),
         }
+        artifact_metadata.update(self._integrity_metadata(data))
         if metadata:
             artifact_metadata.update(metadata)
 
@@ -332,8 +534,11 @@ class ArtifactService:
         buf = io.BytesIO()
         np.save(buf, matrix)
         data = buf.getvalue()
-        uri = self.storage.write(
-            logical_path, data, content_type="application/octet-stream"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type="embedding_matrix",
+            content_type="application/octet-stream",
         )
         byte_size = len(data)
         artifact_metadata = {
@@ -345,6 +550,7 @@ class ArtifactService:
             "shape": list(matrix.shape),
             "dtype": str(matrix.dtype),
         }
+        artifact_metadata.update(self._integrity_metadata(data))
         if metadata:
             artifact_metadata.update(metadata)
         return self._link_artifact_to_group(
@@ -423,8 +629,11 @@ class ArtifactService:
         buf = io.BytesIO()
         np.save(buf, labels)
         data = buf.getvalue()
-        uri = self.storage.write(
-            logical_path, data, content_type="application/octet-stream"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type="cluster_labels",
+            content_type="application/octet-stream",
         )
         byte_size = len(data)
 
@@ -434,6 +643,7 @@ class ArtifactService:
             "shape": list(labels.shape),
             "dtype": str(labels.dtype),
         }
+        artifact_metadata.update(self._integrity_metadata(data))
         if k is not None:
             artifact_metadata["k"] = k
         if metadata:
@@ -480,8 +690,11 @@ class ArtifactService:
         buf = io.BytesIO()
         np.save(buf, components)
         data = buf.getvalue()
-        uri = self.storage.write(
-            logical_path, data, content_type="application/octet-stream"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type="pca_components",
+            content_type="application/octet-stream",
         )
         byte_size = len(data)
 
@@ -491,6 +704,7 @@ class ArtifactService:
             "shape": list(components.shape),
             "dtype": str(components.dtype),
         }
+        artifact_metadata.update(self._integrity_metadata(data))
         if metadata:
             artifact_metadata.update(metadata)
 
@@ -533,8 +747,11 @@ class ArtifactService:
             run_id, step_name, "metrics", "json"
         )
         data = json.dumps(metrics, indent=2, default=str).encode("utf-8")
-        uri = self.storage.write(
-            logical_path, data, content_type="application/json"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type="metrics",
+            content_type="application/json",
         )
         byte_size = len(data)
 
@@ -542,6 +759,7 @@ class ArtifactService:
             "step_name": step_name,
             "artifact_format": "json",
         }
+        artifact_metadata.update(self._integrity_metadata(data))
         if metadata:
             artifact_metadata.update(metadata)
 
@@ -591,8 +809,11 @@ class ArtifactService:
         for idx, rep in enumerate(representatives):
             writer.writerow([idx, rep])
         data = buf.getvalue().encode("utf-8")
-        uri = self.storage.write(
-            logical_path, data, content_type="text/csv"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type="representatives",
+            content_type="text/csv",
         )
         byte_size = len(data)
 
@@ -601,6 +822,7 @@ class ArtifactService:
             "artifact_format": "csv",
             "count": len(representatives),
         }
+        artifact_metadata.update(self._integrity_metadata(data))
         if k is not None:
             artifact_metadata["k"] = k
         if metadata:
@@ -622,21 +844,32 @@ class ArtifactService:
 
         return artifact_id
 
-    def load_artifact(self, uri: str, artifact_type: str) -> Union[Dict[str, Any], np.ndarray, list]:
+    def load_artifact(
+        self,
+        uri: str,
+        artifact_type: str,
+        *,
+        expected_sha256: Optional[str] = None,
+        expected_byte_size: Optional[int] = None,
+    ) -> Union[Dict[str, Any], np.ndarray, list]:
         """
         Load an artifact from URI.
 
         Args:
             uri: Artifact URI (from storage.get_uri)
             artifact_type: Type of artifact (determines loading method)
+            expected_sha256: Optional checksum expectation for integrity verification
+            expected_byte_size: Optional byte-size expectation for integrity verification
 
         Returns:
             Loaded artifact data (dict for JSON, np.ndarray for NPY, list for CSV)
         """
-        if not self.storage.exists_from_uri(uri):
-            raise FileNotFoundError(f"Artifact not found: {uri}")
-
-        data = self.storage.read_from_uri(uri)
+        data = self._read_artifact_bytes(
+            uri=uri,
+            artifact_type=artifact_type,
+            expected_sha256=expected_sha256,
+            expected_byte_size=expected_byte_size,
+        )
 
         if artifact_type in ("sweep_results", "metrics", "dataset_snapshot_manifest"):
             return json.loads(data.decode("utf-8"))

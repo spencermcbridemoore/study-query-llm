@@ -17,6 +17,8 @@ class JobRunOutcome:
     error: Optional[str]
     db_updated_by_runner: bool
     """If True, runner already called complete/fail; worker must not."""
+    metadata: Optional[Dict[str, Any]] = None
+    """Optional extra data (e.g., checkpoint_refs for langgraph_run)."""
 
 
 @dataclass

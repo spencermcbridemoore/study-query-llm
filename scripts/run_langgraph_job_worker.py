@@ -21,6 +21,8 @@ from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.job_runner_factory import create_job_runner
 from study_query_llm.services.job_runners import JobRunContext
+from study_query_llm.services.langgraph_provenance import record_langgraph_job_outcome
+from study_query_llm.services.method_service import MethodService
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
@@ -53,6 +55,8 @@ def _claim_next_langgraph_job(
             "job_key": str(job.job_key),
             "base_run_key": job.base_run_key,
             "seed_value": job.seed_value,
+            "request_group_id": int(job.request_group_id),
+            "attempt_count": int(job.attempt_count or 0),
         }
 
 
@@ -112,12 +116,37 @@ def main() -> None:
                     repo.fail_orchestration_job(
                         outcome.job_id, error_json={"error": outcome.error}
                     )
+                    method_svc = MethodService(repo)
+                    record_langgraph_job_outcome(
+                        method_svc=method_svc,
+                        request_group_id=job["request_group_id"],
+                        job_id=outcome.job_id,
+                        job_key=job_key,
+                        payload_json=job["payload_json"],
+                        status="failed",
+                        error=outcome.error,
+                    )
                 print(f"[{worker_id}] JOB ERROR {job_key}: {outcome.error}")
             else:
                 with db.session_scope() as session:
                     repo = RawCallRepository(session)
                     repo.complete_orchestration_job(
                         outcome.job_id, result_ref=outcome.result_ref
+                    )
+                    method_svc = MethodService(repo)
+                    record_langgraph_job_outcome(
+                        method_svc=method_svc,
+                        request_group_id=job["request_group_id"],
+                        job_id=outcome.job_id,
+                        job_key=job_key,
+                        payload_json=job["payload_json"],
+                        status="completed",
+                        result_ref=outcome.result_ref,
+                        checkpoint_refs=(
+                            outcome.metadata.get("checkpoint_refs")
+                            if outcome.metadata
+                            else None
+                        ),
                     )
                 completed += 1
                 print(f"[{worker_id}] DONE job {job_key} -> {outcome.result_ref}")
@@ -127,6 +156,16 @@ def main() -> None:
                 repo = RawCallRepository(session)
                 repo.fail_orchestration_job(
                     job_id, error_json={"error": str(exc)[:1000]}
+                )
+                method_svc = MethodService(repo)
+                record_langgraph_job_outcome(
+                    method_svc=method_svc,
+                    request_group_id=job["request_group_id"],
+                    job_id=job_id,
+                    job_key=job_key,
+                    payload_json=job["payload_json"],
+                    status="failed",
+                    error=str(exc)[:1000],
                 )
             print(f"[{worker_id}] JOB ERROR {job_key}: {exc}")
 

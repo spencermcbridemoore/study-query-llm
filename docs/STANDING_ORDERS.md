@@ -110,6 +110,13 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 - v2 schema includes: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `EmbeddingVector`, `GroupLink`
 - Migration from v1 to v2: Use `scripts/migrate_v1_to_v2.py`
 
+### Method Definitions and Provenance
+- **Whenever possible, register methods in the methods table** (`method_definitions`) and record results in `analysis_results`, rather than encoding "which method" only as new group types, link types, or free-form metadata in `groups.metadata_json`.
+- **Runs stay in groups**: A *run* (Group with steps, artifacts, raw_calls) is still the unit of execution; the method is *which* algorithm/version that run used. Use `method_definitions` for the method identity and version (e.g. `code_ref`, `code_commit`); use groups/links for run and step provenance.
+- **New analysis or algorithms**: Prefer registering a row in `method_definitions` (via `MethodService.register_method`) and writing structured results to `analysis_results` (via `MethodService.record_result`) keyed by `source_group_id` (and optionally `analysis_group_id`). Avoid introducing new `group_type` or link types solely to represent "kind of method."
+- **Parameters convention (soft)**: When a method has `parameters_schema`, include `result_json["parameters"]` with the run parameters (e.g., job payload) when recording results. This links parameters to results for queryability; validation is optional.
+- **Exceptions**: One-off or throwaway analyses that are not reused or versioned need not be registered; legacy or existing code that uses `metadata_json.algorithm` (or similar) can remain until migrated.
+
 ## Git Workflow Consistency
 
 ### Commit Practices
@@ -196,4 +203,5 @@ study-query-llm/
 - [ ] Follows async/await pattern for I/O
 - [ ] Uses dependency injection
 - [ ] Uses v2 database schema (if database work)
+- [ ] New analysis/algorithm methods registered in `method_definitions` and results in `analysis_results` when applicable (see § Method Definitions and Provenance)
 - [ ] No secrets committed

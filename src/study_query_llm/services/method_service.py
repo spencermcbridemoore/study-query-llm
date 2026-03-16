@@ -4,6 +4,11 @@ Method Service - Versioned analysis method definitions and result tracking.
 Provides structured provenance for analysis methods (extraction, metrics, etc.)
 and the results they produce. Supports default-to-latest version lookup.
 
+Parameters convention (soft): When a MethodDefinition has parameters_schema set,
+callers may include a "parameters" key in result_json whose shape matches that
+schema. This links the parameters used for a run to the method's definition.
+Validation is optional; the convention supports queryability and documentation.
+
 Usage:
     from study_query_llm.services.method_service import MethodService
     from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -23,6 +28,17 @@ Usage:
             source_group_id=42,
             result_key="chi_square",
             result_value=12.3,
+        )
+
+    With parameters convention (when method has parameters_schema):
+        method_svc.record_result(
+            method_definition_id=method_id,
+            source_group_id=run_id,
+            result_key="graph_output",
+            result_json={
+                "parameters": {"prompt": "hello", "k": 5},  # matches parameters_schema
+                "state": {"output": "..."},
+            },
         )
 """
 
@@ -79,7 +95,8 @@ class MethodService:
             description: Optional description
             input_schema: JSON describing expected input
             output_schema: JSON describing output shape
-            parameters_schema: JSON describing configurable knobs
+            parameters_schema: JSON describing configurable knobs. When set,
+                results may include result_json["parameters"] matching this shape.
             parent_version_id: FK to previous version (nullable for v1)
 
         Returns:
@@ -178,7 +195,9 @@ class MethodService:
             source_group_id: ID of the Group (sweep/run) that was analyzed
             result_key: Metric name (e.g., "chi_square", "ari")
             result_value: Numeric scalar (optional)
-            result_json: Structured data (optional)
+            result_json: Structured data (optional). When the method has
+                parameters_schema, prefer including a "parameters" key with
+                the run parameters used (e.g., payload from the job).
             analysis_group_id: Optional Group ID for full provenance chain
 
         Returns:

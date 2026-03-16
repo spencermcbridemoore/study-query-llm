@@ -150,6 +150,21 @@ Inspect jobs:
 python scripts/check_orchestration_jobs.py --request-id <REQUEST_ID>
 ```
 
+## 8) Job runner architecture and langgraph_run
+
+**Architecture boundary:** The DB `orchestration_jobs` table is the outer control plane (claim/lease/complete/fail). Job runners (`JobRunnerFactory` by `job_type`) execute the work inside a claimed job. LangGraph is an in-job workflow runtime—one DB job = one LangGraph run. LangGraph handles internal branching/parallelism; the DB handles scheduling and durability.
+
+- **Job types:** `run_k_try`, `reduce_k`, `finalize_run` (sweep), `langgraph_run` (agentic).
+- **Workers:** Sweep workers use `run_local_300_2datasets_worker.py`; LangGraph jobs use `run_langgraph_job_worker.py`.
+
+Run LangGraph worker:
+
+```bash
+python scripts/run_langgraph_job_worker.py --request-id <REQUEST_ID> --worker-id lg-worker-1 --idle-exit-seconds 60
+```
+
+Enqueue `langgraph_run` jobs via `RawCallRepository.enqueue_orchestration_job` with `job_type="langgraph_run"` and `payload_json={"prompt": "..."}`.
+
 ## Troubleshooting (Phase 2)
 
 ### Auth failures

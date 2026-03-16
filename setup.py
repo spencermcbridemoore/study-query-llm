@@ -23,6 +23,7 @@ setup(
     ],
     python_requires=">=3.10",
     install_requires=[
+        "pydantic>=2.0.0",
         "panel>=1.3.0",
         "python-dotenv>=1.0.0",
         "openai>=1.0.0",  # Azure OpenAI and OpenAI SDK
@@ -30,6 +31,8 @@ setup(
         "sqlalchemy>=2.0.0",  # Database ORM
         "psycopg2-binary>=2.9.0",  # PostgreSQL driver
         "pandas>=2.0.0",  # Data analysis and DataFrames
+        "langchain>=0.3.0",
+        "langgraph>=0.2.0",
     ],
     extras_require={
         "dev": [

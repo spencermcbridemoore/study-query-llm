@@ -44,6 +44,8 @@ from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.services.job_reducer_service import JobReducerService
+from study_query_llm.services.job_runner_factory import create_job_runner
+from study_query_llm.services.job_runners import JobRunContext, JobRunOutcome
 from study_query_llm.services.sweep_request_service import SweepRequestService
 from study_query_llm.utils.estela_loader import load_estela_dict
 from study_query_llm.utils.text_utils import flatten_prompt_dict
@@ -627,49 +629,48 @@ def _run_sharded_worker_loop(
         job_type = job.get("job_type")
         job_id = int(job["id"])
         job_key = str(job.get("job_key"))
-        base_run_key = job.get("base_run_key")
-        seed_value = job.get("seed_value")
         try:
-            if job_type == "run_k_try":
-                job_id_out, result_ref_out, error_out = run_one_run_k_try_job(
-                    job_snapshot=job,
-                    datasets=loaded,
-                    provider_cache=provider_cache,
-                    manager_cache=manager_cache,
-                    tei_endpoint=tei_endpoint,
-                    provider_label=provider_label,
-                    embedding_provider_name=embedding_provider_name,
-                    worker_slot=worker_slot,
-                    repo_root=repo_root,
-                    db=db,
-                    claim_wait_seconds=claim_wait_seconds,
-                )
-                if error_out is None:
+            runner = create_job_runner(
+                job_type,
+                run_k_try_fn=run_one_run_k_try_job,
+                reducer=reducer,
+            )
+            context = JobRunContext(
+                datasets=loaded,
+                provider_cache=provider_cache,
+                manager_cache=manager_cache,
+                tei_endpoint=tei_endpoint,
+                provider_label=provider_label,
+                embedding_provider_name=embedding_provider_name,
+                worker_slot=worker_slot,
+                repo_root=repo_root,
+                claim_wait_seconds=claim_wait_seconds,
+                reducer=reducer,
+                db=db,
+            )
+            outcome = runner.run(job, context)
+            if outcome.error is not None:
+                if not outcome.db_updated_by_runner:
                     with db.session_scope() as session:
                         repo = RawCallRepository(session)
-                        repo.complete_orchestration_job(job_id_out, result_ref=result_ref_out)
-                    completed_leaf_jobs += 1
-                    last_work_at = time.time()
-                    print(f"[{worker_id}] DONE job {job_key} -> {result_ref_out}")
-                else:
-                    with db.session_scope() as session:
-                        repo = RawCallRepository(session)
-                        repo.fail_orchestration_job(job_id_out, error_json={"error": error_out})
-                    print(f"[{worker_id}] JOB ERROR {job_key}: {error_out}")
-            elif job_type == "reduce_k":
-                reduce_started = time.perf_counter()
-                result_ref = reducer.reduce_k_job(job_id)
-                reduce_seconds = time.perf_counter() - reduce_started
-                print(f"[{worker_id}] REDUCED job {job_key} -> {result_ref} ({reduce_seconds:.2f}s)")
-                last_work_at = time.time()
-            elif job_type == "finalize_run":
-                finalize_started = time.perf_counter()
-                run_id = reducer.finalize_run_job(job_id)
-                finalize_seconds = time.perf_counter() - finalize_started
-                print(f"[{worker_id}] FINALIZED job {job_key} -> run_id={run_id} ({finalize_seconds:.2f}s)")
-                last_work_at = time.time()
+                        repo.fail_orchestration_job(
+                            outcome.job_id, error_json={"error": outcome.error}
+                        )
+                print(f"[{worker_id}] JOB ERROR {job_key}: {outcome.error}")
             else:
-                raise RuntimeError(f"Unsupported sharded job_type={job_type}")
+                if not outcome.db_updated_by_runner:
+                    with db.session_scope() as session:
+                        repo = RawCallRepository(session)
+                        repo.complete_orchestration_job(
+                            outcome.job_id, result_ref=outcome.result_ref
+                        )
+                    completed_leaf_jobs += 1
+                    print(f"[{worker_id}] DONE job {job_key} -> {outcome.result_ref}")
+                elif job_type == "reduce_k":
+                    print(f"[{worker_id}] REDUCED job {job_key} -> {outcome.result_ref}")
+                elif job_type == "finalize_run":
+                    print(f"[{worker_id}] FINALIZED job {job_key} -> run_id={outcome.result_ref}")
+                last_work_at = time.time()
         except Exception as exc:
             with db.session_scope() as session:
                 repo = RawCallRepository(session)

@@ -737,11 +737,11 @@ def _build_provider_for_engine(
     return manager, provider
 
 
-def run_worker(
+def _run_standalone_worker_loop(
+    *,
     request_id: int,
     worker_id: str,
     worker_slot: int,
-    job_mode: str,
     embedding_engine: Optional[str],
     tei_endpoint: Optional[str],
     provider_label: str,
@@ -752,22 +752,7 @@ def run_worker(
     force: bool,
     repo_root: Path,
 ) -> int:
-    if job_mode == "sharded":
-        return _run_sharded_worker_loop(
-            request_id=request_id,
-            worker_id=worker_id,
-            worker_slot=worker_slot,
-            embedding_engine=embedding_engine,
-            tei_endpoint=tei_endpoint,
-            provider_label=provider_label,
-            embedding_provider_name=embedding_provider_name,
-            claim_lease_seconds=claim_lease_seconds,
-            max_runs=max_runs,
-            idle_exit_seconds=idle_exit_seconds,
-            force=force,
-            repo_root=repo_root,
-        )
-
+    """Standalone mode: run-key claims via sweep_run_claims, no orchestration_jobs."""
     loaded = _load_datasets(repo_root)
     done = 0
     processed = 0
@@ -942,6 +927,44 @@ def run_worker(
         f"elapsed={int(time.time()-started_at)}s"
     )
     return done
+
+
+def run_worker(
+    request_id: int,
+    worker_id: str,
+    worker_slot: int,
+    job_mode: str,
+    embedding_engine: Optional[str],
+    tei_endpoint: Optional[str],
+    provider_label: str,
+    embedding_provider_name: Optional[str],
+    claim_lease_seconds: int,
+    max_runs: Optional[int],
+    idle_exit_seconds: int,
+    force: bool,
+    repo_root: Path,
+) -> int:
+    """Delegate to factory-created orchestrator based on job_mode."""
+    from study_query_llm.services.worker_orchestrator import create_worker_orchestrator
+
+    orchestrator = create_worker_orchestrator(
+        mode=job_mode,
+        run_standalone_fn=_run_standalone_worker_loop,
+        run_sharded_fn=_run_sharded_worker_loop,
+        request_id=request_id,
+        worker_id=worker_id,
+        worker_slot=worker_slot,
+        embedding_engine=embedding_engine,
+        tei_endpoint=tei_endpoint,
+        provider_label=provider_label,
+        embedding_provider_name=embedding_provider_name,
+        claim_lease_seconds=claim_lease_seconds,
+        max_runs=max_runs,
+        idle_exit_seconds=idle_exit_seconds,
+        force=force,
+        repo_root=repo_root,
+    )
+    return orchestrator.run()
 
 
 if __name__ == "__main__":

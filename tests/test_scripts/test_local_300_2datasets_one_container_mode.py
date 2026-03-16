@@ -88,11 +88,17 @@ def test_supervisor_engine_missing_count_filters_engine(monkeypatch):
         db.init_db()
 
         monkeypatch.setenv("DATABASE_URL", database_url)
-        module = importlib.import_module("scripts.run_local_300_2datasets_engine_supervisor")
-        module = importlib.reload(module)
+        from study_query_llm.services.supervisor_mode import (
+            StandaloneSupervisorMode,
+        )
 
-        engine_a_missing, total_missing = module._engine_missing_count(db, request_id, "engine/a")
-        engine_b_missing, _ = module._engine_missing_count(db, request_id, "engine/b")
+        mode = StandaloneSupervisorMode()
+        engine_a_missing, total_missing = mode.engine_work_remaining(
+            db, request_id, "engine/a"
+        )
+        engine_b_missing, _ = mode.engine_work_remaining(
+            db, request_id, "engine/b"
+        )
 
         assert total_missing == 4
         assert engine_a_missing == 2

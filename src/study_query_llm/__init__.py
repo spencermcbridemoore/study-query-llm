@@ -18,6 +18,7 @@ from .providers import BaseLLMProvider, ProviderResponse
 # Explicitly import subpackages to ensure they're discoverable
 # This makes study_query_llm.db, study_query_llm.services, etc. available for autocomplete
 from . import db
+from . import domain
 from . import services
 from . import utils
 
@@ -25,6 +26,7 @@ __all__ = [
     "BaseLLMProvider",
     "ProviderResponse",
     "db",
+    "domain",
     "services",
     "utils",
 ]

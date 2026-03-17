@@ -228,6 +228,9 @@ class BaseLLMProvider(ABC):
 - PostgreSQL for structured storage
 - Potential vector extensions for similarity search
 
+**Method definitions and analysis provenance (v2):**
+- Prefer registering analysis/algorithm methods in `method_definitions` and recording results in `analysis_results`, rather than encoding "method" only as new group types, link types, or metadata. Runs (Groups with steps and artifacts) remain the unit of execution; the methods table identifies *which* method/version produced results. See `docs/STANDING_ORDERS.md` (§ Method Definitions and Provenance) for the full rule.
+
 ---
 
 ### 6. Algorithms Layer
@@ -236,7 +239,18 @@ class BaseLLMProvider(ABC):
 Core clustering and dimensionality reduction algorithms (PCA, KLLMeans sweep).
 Framework-agnostic -- no database or provider dependencies.
 
-### 7. Experiments Layer
+### 7. Domain Layer
+**Location:** `src/study_query_llm/domain/`
+
+Conceptual models for problem representation and classification. Abstract structures
+that can be populated by parsers, extractors, or other tools.
+
+- `representation_hierarchy.py` -- Physics problem hierarchy (Lagrangian → Symmetry →
+  Constraint Hypergraph → Solution Path). Four abstraction levels forming a refinement
+  lattice; dimensional analysis orthogonal. Designed for future layers (parsers,
+  LLM-based extractors) to apply to problem text.
+
+### 8. Experiments Layer
 **Location:** `src/study_query_llm/experiments/`
 
 Experiment orchestration, result analysis, and sweep pipeline support:
@@ -244,7 +258,7 @@ Experiment orchestration, result analysis, and sweep pipeline support:
 - `sweep_io.py` -- sweep result serialization and file I/O
 - `ingestion.py` -- in-memory sweep result ingestion to database
 
-### 8. Model Lifecycle Managers
+### 9. Model Lifecycle Managers
 **Location:** `src/study_query_llm/providers/managers/`
 
 Infrastructure lifecycle managers for embedding/LLM backends:

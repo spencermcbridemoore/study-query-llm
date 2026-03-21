@@ -16,7 +16,7 @@ Usage:
 """
 
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from openai import AsyncAzureOpenAI
 from openai.types.chat import ChatCompletion
@@ -79,6 +79,54 @@ class AzureOpenAIProvider(BaseLLMProvider):
             f"endpoint: {config.endpoint}, api_version: {config.api_version}"
         )
 
+    @staticmethod
+    def _should_retry_with_max_completion_tokens(error: Exception) -> bool:
+        """
+        Return True when Azure rejects `max_tokens` and requests `max_completion_tokens`.
+        """
+        msg = str(error)
+        return (
+            "Unsupported parameter: 'max_tokens'" in msg
+            and "max_completion_tokens" in msg
+            and "unsupported_parameter" in msg
+        )
+
+    async def _create_chat_completion_with_token_fallback(
+        self, api_params: dict[str, Any]
+    ) -> Tuple[ChatCompletion, str]:
+        """
+        Create completion with automatic fallback to `max_completion_tokens`.
+
+        Returns:
+            Tuple of (completion, token_limit_param_used)
+        """
+        token_limit_param = (
+            "max_completion_tokens"
+            if "max_completion_tokens" in api_params
+            else ("max_tokens" if "max_tokens" in api_params else "none")
+        )
+
+        try:
+            completion: ChatCompletion = await self.client.chat.completions.create(
+                **api_params
+            )
+            return completion, token_limit_param
+        except Exception as e:
+            if (
+                "max_tokens" in api_params
+                and "max_completion_tokens" not in api_params
+                and self._should_retry_with_max_completion_tokens(e)
+            ):
+                fallback_params = dict(api_params)
+                fallback_params["max_completion_tokens"] = fallback_params.pop("max_tokens")
+                logger.warning(
+                    "Deployment '%s' rejected max_tokens; retrying with max_completion_tokens",
+                    self.deployment_name,
+                )
+                completion = await self.client.chat.completions.create(**fallback_params)
+                return completion, "max_completion_tokens"
+            raise
+
     async def complete(
         self,
         prompt: str,
@@ -113,7 +161,9 @@ class AzureOpenAIProvider(BaseLLMProvider):
             "temperature": temperature,
         }
 
-        if max_tokens is not None:
+        # If caller explicitly provides max_completion_tokens in kwargs,
+        # do not also send max_tokens.
+        if max_tokens is not None and "max_completion_tokens" not in kwargs:
             api_params["max_tokens"] = max_tokens
 
         # Add any additional kwargs
@@ -127,8 +177,8 @@ class AzureOpenAIProvider(BaseLLMProvider):
         )
         
         try:
-            completion: ChatCompletion = await self.client.chat.completions.create(
-                **api_params
+            completion, token_limit_param = await self._create_chat_completion_with_token_fallback(
+                api_params
             )
             end_time = time.time()
             latency_ms = (end_time - start_time) * 1000
@@ -162,6 +212,7 @@ class AzureOpenAIProvider(BaseLLMProvider):
             "prompt_tokens": usage.prompt_tokens if usage else None,
             "completion_tokens": usage.completion_tokens if usage else None,
             "temperature": temperature,
+            "token_limit_param": token_limit_param,
         }
 
         if max_tokens is not None:
@@ -277,11 +328,20 @@ class AzureOpenAIProvider(BaseLLMProvider):
             for model_id in chat_models[:MAX_DEPLOYMENT_PROBE_COUNT]:  # Limit to avoid too many API calls
                 try:
                     # Try a minimal completion to test if this works as a deployment
-                    await test_client.chat.completions.create(
-                        model=model_id,
-                        messages=[{"role": "user", "content": DEPLOYMENT_PROBE_PROMPT}],
-                        max_tokens=DEPLOYMENT_PROBE_MAX_TOKENS
-                    )
+                    base_params = {
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": DEPLOYMENT_PROBE_PROMPT}],
+                        "max_tokens": DEPLOYMENT_PROBE_MAX_TOKENS,
+                    }
+                    try:
+                        await test_client.chat.completions.create(**base_params)
+                    except Exception as probe_error:
+                        if AzureOpenAIProvider._should_retry_with_max_completion_tokens(probe_error):
+                            fallback_params = dict(base_params)
+                            fallback_params["max_completion_tokens"] = fallback_params.pop("max_tokens")
+                            await test_client.chat.completions.create(**fallback_params)
+                        else:
+                            raise
                     return model_id  # Found a working one!
                 except Exception:
                     continue  # Try next one

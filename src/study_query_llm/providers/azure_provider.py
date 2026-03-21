@@ -73,6 +73,7 @@ class AzureOpenAIProvider(BaseLLMProvider):
             azure_endpoint=config.endpoint,
         )
         self.deployment_name = config.deployment_name
+        self._preferred_token_limit_param = "max_tokens"
         
         logger.info(
             f"Initialized Azure OpenAI provider with deployment: {self.deployment_name}, "
@@ -100,30 +101,44 @@ class AzureOpenAIProvider(BaseLLMProvider):
         Returns:
             Tuple of (completion, token_limit_param_used)
         """
+        candidate_params = dict(api_params)
+
+        # If this deployment previously required max_completion_tokens,
+        # avoid an avoidable 400 on every request.
+        if (
+            self._preferred_token_limit_param == "max_completion_tokens"
+            and "max_tokens" in candidate_params
+            and "max_completion_tokens" not in candidate_params
+        ):
+            candidate_params["max_completion_tokens"] = candidate_params.pop("max_tokens")
+
         token_limit_param = (
             "max_completion_tokens"
-            if "max_completion_tokens" in api_params
-            else ("max_tokens" if "max_tokens" in api_params else "none")
+            if "max_completion_tokens" in candidate_params
+            else ("max_tokens" if "max_tokens" in candidate_params else "none")
         )
 
         try:
             completion: ChatCompletion = await self.client.chat.completions.create(
-                **api_params
+                **candidate_params
             )
+            if token_limit_param in ("max_tokens", "max_completion_tokens"):
+                self._preferred_token_limit_param = token_limit_param
             return completion, token_limit_param
         except Exception as e:
             if (
-                "max_tokens" in api_params
-                and "max_completion_tokens" not in api_params
+                "max_tokens" in candidate_params
+                and "max_completion_tokens" not in candidate_params
                 and self._should_retry_with_max_completion_tokens(e)
             ):
-                fallback_params = dict(api_params)
+                fallback_params = dict(candidate_params)
                 fallback_params["max_completion_tokens"] = fallback_params.pop("max_tokens")
                 logger.warning(
                     "Deployment '%s' rejected max_tokens; retrying with max_completion_tokens",
                     self.deployment_name,
                 )
                 completion = await self.client.chat.completions.create(**fallback_params)
+                self._preferred_token_limit_param = "max_completion_tokens"
                 return completion, "max_completion_tokens"
             raise
 

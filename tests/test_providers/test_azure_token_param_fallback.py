@@ -107,3 +107,41 @@ async def test_complete_respects_explicit_max_completion_tokens(provider):
     assert "max_tokens" not in call_kwargs
     assert call_kwargs["max_completion_tokens"] == 64
     assert result.metadata["token_limit_param"] == "max_completion_tokens"
+
+
+@pytest.mark.asyncio
+async def test_complete_caches_preferred_token_limit_param(provider):
+    """After first fallback, subsequent calls should use max_completion_tokens directly."""
+    unsupported_error = Exception(
+        "Error code: 400 - {'error': {'message': \"Unsupported parameter: "
+        "'max_tokens' is not supported with this model. Use "
+        "'max_completion_tokens' instead.\", 'type': 'invalid_request_error', "
+        "'param': 'max_tokens', 'code': 'unsupported_parameter'}}"
+    )
+    provider._mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            unsupported_error,        # first call attempt 1
+            _mock_chat_response(),    # first call fallback
+            _mock_chat_response(),    # second call (should use cached preference)
+        ]
+    )
+
+    # First call learns fallback behavior
+    first = await provider.complete("first", max_tokens=32)
+    assert first.metadata["token_limit_param"] == "max_completion_tokens"
+
+    # Second call should not attempt max_tokens first
+    second = await provider.complete("second", max_tokens=32)
+    assert second.metadata["token_limit_param"] == "max_completion_tokens"
+
+    assert provider._mock_client.chat.completions.create.await_count == 3
+    first_attempt = provider._mock_client.chat.completions.create.await_args_list[0].kwargs
+    first_fallback = provider._mock_client.chat.completions.create.await_args_list[1].kwargs
+    second_call = provider._mock_client.chat.completions.create.await_args_list[2].kwargs
+
+    assert "max_tokens" in first_attempt
+    assert "max_completion_tokens" not in first_attempt
+    assert "max_completion_tokens" in first_fallback
+    assert "max_tokens" not in first_fallback
+    assert "max_completion_tokens" in second_call
+    assert "max_tokens" not in second_call

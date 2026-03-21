@@ -10,6 +10,14 @@ from .session_utils import (
 )
 from .text_utils import is_prompt_key, flatten_prompt_dict, clean_texts
 from .estela_loader import load_estela_dict
+from .mcq_template_loader import (
+    build_prompt_from_params,
+    expand_parameter_schema,
+    expand_parameter_schema_filtered,
+    get_all_prompts,
+    load_config,
+    load_sweep_config,
+)
 
 __all__ = [
     "get_logger",
@@ -23,5 +31,11 @@ __all__ = [
     "flatten_prompt_dict",
     "clean_texts",
     "load_estela_dict",
+    "load_config",
+    "build_prompt_from_params",
+    "expand_parameter_schema",
+    "expand_parameter_schema_filtered",
+    "get_all_prompts",
+    "load_sweep_config",
 ]
 

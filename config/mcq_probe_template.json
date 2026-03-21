@@ -1,0 +1,27 @@
+{
+  "template": "Create a {subject_descriptor} multiple-choice test with exactly {question_count} questions.\n\nRequirements:\n- Each question must have exactly {num_options} options labeled [{labels_inline}].\n- Keep stems and options concise.\n{spread_instruction}- Include an answer key at the end.\n- Use this exact answer-key line format: `1: {example_label}`, `2: {example_label}`, ...\n\nOutput format:\nQ1. <question>\n{options_block}\n\n... continue until Q{question_count} ...\n\nAnswer Key:\n1: <{label_range}>\n2: <{label_range}>\n...\n{question_count}: <{label_range}>\n",
+  "parameter_schema": {
+    "level": [
+      "elementary school",
+      "middle school",
+      "high school",
+      "college",
+      "graduate"
+    ],
+    "subject": [
+      "math",
+      "chemistry",
+      "physics",
+      "biology",
+      "economics",
+      "sociology",
+      "psychology"
+    ],
+    "options_per_question": [2, 3, 4, 5, 6],
+    "questions_per_test": [1, 5, 10, 20],
+    "label_style": ["upper", "lower", "numbers"],
+    "spread_correct_answer_uniformly": [true, false]
+  },
+  "spread_instruction_when_true": "- Spread the correct answer uniformly across positions (avoid bias toward any particular option).\n",
+  "spread_instruction_when_false": ""
+}

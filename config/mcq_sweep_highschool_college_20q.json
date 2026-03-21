@@ -1,0 +1,22 @@
+{
+  "name": "highschool_college_20q_4_5_options",
+  "parameter_filter": {
+    "level": ["high school", "college"],
+    "subject": ["math", "chemistry", "physics", "biology", "economics", "sociology", "psychology"],
+    "options_per_question": [4, 5],
+    "questions_per_test": [20],
+    "label_style": ["upper"],
+    "spread_correct_answer_uniformly": [false]
+  },
+  "llms": [
+    "Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "Llama-4-Scout-17B-16E-Instruct",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-oss-120b"
+  ],
+  "samples_per_combo": 50,
+  "concurrency": 20,
+  "temperature": 0.7,
+  "max_tokens": 2000
+}

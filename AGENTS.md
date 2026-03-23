@@ -15,6 +15,10 @@ Panel-based web application for running LLM inference experiments across multipl
 - **Contributing**: `CONTRIBUTING.md` - Development process and guidelines
 - **Standing Orders**: `docs/STANDING_ORDERS.md` - Consistency guidelines
 
+## Local development
+- **`.venv`:** `python -m venv .venv`, activate, then `pip install -e ".[dev]"`.
+- **Miniconda:** dedicated env **`study-query-llm`** from repo root: `conda env create -f environment.yml` (first time) or `conda env update -f environment.yml -n study-query-llm --prune`, then `conda activate study-query-llm`.
+
 ## Essential Constraints
 - Always use v2 database schema for new features (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`)
 - Follow bottom-up, incremental development approach

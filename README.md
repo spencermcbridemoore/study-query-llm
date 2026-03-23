@@ -72,6 +72,16 @@ pip install -e ".[dev]"
 
    This installs the package with development dependencies including pytest.
 
+   **Miniconda / conda (optional):** create or refresh the dedicated env **`study-query-llm`** from the repo root:
+
+   ```bash
+   conda env create -f environment.yml          # first time only
+   conda env update -f environment.yml -n study-query-llm --prune   # refresh existing env
+   conda activate study-query-llm
+   ```
+
+   The file `environment.yml` installs Python 3.11, scientific stack, Panel/plotly, pytest, and `pip install -e .` for this package.
+
 3. **Configure environment**
    
    Create a `.env` file in the project root:

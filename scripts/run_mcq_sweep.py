@@ -20,7 +20,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from study_query_llm.config import Config
 from study_query_llm.experiments.mcq_answer_position_probe import run_probe
+from study_query_llm.providers.factory import ProviderFactory
+from study_query_llm.services._shared import deployment_override
+from study_query_llm.services.inference_service import InferenceService
 from study_query_llm.utils.mcq_template_loader import (
     load_config,
     load_sweep_config,
@@ -129,12 +133,53 @@ def _load_existing_completed_keys(
     return existing
 
 
+async def _verify_azure_chat_deployment(deployment_name: str) -> Optional[str]:
+    """Return error message if deployment does not accept a minimal chat call; else None."""
+    with deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment_name):
+        fresh_config = Config()
+        if "azure" in fresh_config._provider_configs:
+            del fresh_config._provider_configs["azure"]
+        service: Optional[InferenceService] = None
+        try:
+            provider = ProviderFactory(fresh_config).create_chat_provider(
+                "azure", deployment_name
+            )
+            service = InferenceService(
+                provider=provider,
+                repository=None,
+                require_db_persistence=False,
+                max_retries=2,
+                initial_wait=0.5,
+                max_wait=4.0,
+            )
+            await service.run_inference("ping", temperature=0.0, max_tokens=1)
+            return None
+        except Exception as exc:
+            return str(exc)[:800]
+        finally:
+            if service is not None:
+                await service.close()
+
+
+async def verify_azure_chat_deployments(deployment_names: List[str]) -> List[Tuple[str, str]]:
+    """Ping all deployments in parallel; return list of (name, error) for failures."""
+
+    async def check(name: str) -> Tuple[str, Optional[str]]:
+        err = await _verify_azure_chat_deployment(name)
+        return (name, err)
+
+    results = await asyncio.gather(*[check(n) for n in deployment_names])
+    return [(n, e) for n, e in results if e]
+
+
 async def run_sweep(
     sweep_config_path: Path,
     dry_run: bool = False,
     subset: Optional[str] = None,
     concurrency_override: Optional[int] = None,
+    cell_concurrency_override: Optional[int] = None,
     idempotent: bool = False,
+    skip_verify: bool = False,
 ) -> int:
     """
     Run the MCQ sweep as defined in the sweep config.
@@ -159,16 +204,28 @@ async def run_sweep(
     llms = sweep_config["llms"]
     samples_per_combo = sweep_config["samples_per_combo"]
     concurrency = concurrency_override or sweep_config.get("concurrency", 20)
+    cell_concurrency = cell_concurrency_override or int(
+        sweep_config.get("cell_concurrency", 1)
+    )
+    cell_concurrency = max(1, cell_concurrency)
     temperature = sweep_config.get("temperature", 0.7)
     max_tokens = sweep_config.get("max_tokens", 2000)
     idempotent_enabled = idempotent or bool(sweep_config.get("idempotent", False))
+    verify_deployments = (
+        not skip_verify and bool(sweep_config.get("verify_deployments", True))
+    )
+    if sweep_config.get("progress_every") is not None:
+        progress_every = int(sweep_config["progress_every"])
+    else:
+        progress_every = 10 if samples_per_combo > 10 else max(1, samples_per_combo)
     out_dir = PROJECT_ROOT / "experimental_results" / "mcq_answer_position_probe"
     out_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"[INFO] Sweep: {sweep_name}")
     print(f"[INFO] LLMs: {len(llms)} ({', '.join(llms)})")
     print(f"[INFO] Samples per combo: {samples_per_combo}")
-    print(f"[INFO] Concurrency: {concurrency}")
+    print(f"[INFO] In-cell concurrency (parallel samples): {concurrency}")
+    print(f"[INFO] Cell concurrency (parallel combos x model): {cell_concurrency}")
     print(f"[INFO] Idempotent mode: {idempotent_enabled}")
     
     # Expand parameter schema with filter
@@ -193,7 +250,9 @@ async def run_sweep(
             all_tasks.append((params, deployment))
     
     total_tasks = len(all_tasks)
+    approx_calls = total_tasks * int(samples_per_combo)
     print(f"[INFO] Total tasks: {total_tasks} (combos x LLMs)")
+    print(f"[INFO] Approx. total LLM calls: {approx_calls} (tasks x samples_per_combo)")
     existing_completed = (
         _load_existing_completed_keys(out_dir) if idempotent_enabled else {}
     )
@@ -230,14 +289,27 @@ async def run_sweep(
                 f"opts={options} samples={samples_per_combo}"
             )
         return 0
-    
+
+    if verify_deployments:
+        print("\n[INFO] Verifying Azure chat deployments (minimal completion each)...")
+        bad = await verify_azure_chat_deployments(list(llms))
+        if bad:
+            print("[FATAL] One or more deployments failed verification:")
+            for name, err in bad:
+                print(f"  - {name!r}: {err}")
+            return 1
+        print(f"[INFO] All {len(llms)} deployment(s) responded OK.")
+
     # Execute tasks
     print(f"\n[INFO] Starting execution...")
     completed = 0
     skipped = 0
-    errors = []
-    
-    for task_idx, (params, deployment) in enumerate(all_tasks, 1):
+    errors: List[Tuple[int, Dict[str, Any], str, str]] = []
+    state_lock = asyncio.Lock()
+    cell_sem = asyncio.Semaphore(cell_concurrency)
+
+    async def run_cell(task_idx: int, params: Dict[str, Any], deployment: str) -> None:
+        nonlocal completed, skipped
         level = params["level"]
         subject = params["subject"]
         options = params["options_per_question"]
@@ -257,62 +329,74 @@ async def run_sweep(
             spread=spread,
         )
 
-        if idempotent_enabled and key in existing_completed:
+        async with cell_sem:
+            if idempotent_enabled:
+                async with state_lock:
+                    if key in existing_completed:
+                        print(
+                            f"\n[{task_idx}/{total_tasks}] {deployment} | {subject_str} | "
+                            f"q={questions} opts={options} ({','.join(labels)})"
+                        )
+                        print(f"  [SKIP] Already completed in {existing_completed[key].name}")
+                        skipped += 1
+                        return
+
             print(
                 f"\n[{task_idx}/{total_tasks}] {deployment} | {subject_str} | "
                 f"q={questions} opts={options} ({','.join(labels)})"
             )
-            print(f"  [SKIP] Already completed in {existing_completed[key].name}")
-            skipped += 1
-            continue
-        
-        print(
-            f"\n[{task_idx}/{total_tasks}] {deployment} | {subject_str} | "
-            f"q={questions} opts={options} ({','.join(labels)})"
-        )
-        
-        try:
-            details = await run_probe(
-                deployment=deployment,
-                subject=subject,
-                question_count=questions,
-                labels=labels,
-                samples=samples_per_combo,
-                concurrency=concurrency,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                progress_every=10,
-                level=level if isinstance(level, str) and level.strip() else None,
-                spread_correct_answer_uniformly=spread,
-            )
-            
-            # Save results
-            summary = details["summary"]
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            
-            out_name = (
-                f"{_safe_name(deployment)}_{_safe_name(level)}_{_safe_name(subject)}_"
-                f"q{questions}_c{options}_n{samples_per_combo}_{timestamp}.json"
-            )
-            out_path = out_dir / out_name
-            
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(details, f, indent=2, ensure_ascii=False)
-            existing_completed[key] = out_path
-            
-            valid = summary.get("samples_with_valid_answer_key", 0)
-            errors_count = summary.get("call_error_count", 0)
-            parse_failures = summary.get("parse_failure_count", 0)
-            print(
-                f"  [OK] Saved: {out_path.name} | "
-                f"valid={valid}/{samples_per_combo} errors={errors_count} parse_failures={parse_failures}"
-            )
-            completed += 1
-            
-        except Exception as exc:
-            error_msg = f"Task {task_idx} failed: {exc}"
-            print(f"  [ERROR] {error_msg}")
-            errors.append((task_idx, params, deployment, str(exc)))
+
+            try:
+                details = await run_probe(
+                    deployment=deployment,
+                    subject=subject,
+                    question_count=questions,
+                    labels=labels,
+                    samples=samples_per_combo,
+                    concurrency=concurrency,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    progress_every=progress_every,
+                    level=level if isinstance(level, str) and level.strip() else None,
+                    spread_correct_answer_uniformly=spread,
+                )
+
+                summary = details["summary"]
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+                out_name = (
+                    f"{_safe_name(deployment)}_{_safe_name(level)}_{_safe_name(subject)}_"
+                    f"q{questions}_c{options}_n{samples_per_combo}_{timestamp}.json"
+                )
+                out_path = out_dir / out_name
+
+                async with state_lock:
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        json.dump(details, f, indent=2, ensure_ascii=False)
+                    existing_completed[key] = out_path
+                    completed += 1
+
+                valid = summary.get("samples_with_valid_answer_key", 0)
+                errors_count = summary.get("call_error_count", 0)
+                parse_failures = summary.get("parse_failure_count", 0)
+                print(
+                    f"  [OK] Saved: {out_path.name} | "
+                    f"valid={valid}/{samples_per_combo} errors={errors_count} "
+                    f"parse_failures={parse_failures}"
+                )
+
+            except Exception as exc:
+                error_msg = f"Task {task_idx} failed: {exc}"
+                print(f"  [ERROR] {error_msg}")
+                async with state_lock:
+                    errors.append((task_idx, params, deployment, str(exc)))
+
+    await asyncio.gather(
+        *[
+            run_cell(task_idx, params, deployment)
+            for task_idx, (params, deployment) in enumerate(all_tasks, 1)
+        ]
+    )
     
     # Summary
     print(f"\n[SUMMARY]")
@@ -362,6 +446,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip cells already completed on disk to avoid duplicate spend",
     )
+    parser.add_argument(
+        "--cell-concurrency",
+        type=int,
+        default=None,
+        help="Override max concurrent sweep cells (see config cell_concurrency).",
+    )
+    parser.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="Skip Azure deployment ping checks before the sweep (not recommended).",
+    )
     return parser.parse_args()
 
 
@@ -373,7 +468,9 @@ def main() -> int:
             dry_run=args.dry_run,
             subset=args.subset,
             concurrency_override=args.concurrency,
+            cell_concurrency_override=args.cell_concurrency,
             idempotent=args.idempotent,
+            skip_verify=args.skip_verify,
         )
     )
 

@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from study_query_llm.services.job_runners import JobRunContext
-from study_query_llm.services.langgraph_job_runner import LangGraphJobRunner
+from study_query_llm.services.jobs import JobRunContext, LangGraphJobRunner
 
 
 def test_langgraph_runner_echo():

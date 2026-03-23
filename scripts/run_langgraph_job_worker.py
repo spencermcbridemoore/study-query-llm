@@ -19,8 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.services.job_runner_factory import create_job_runner
-from study_query_llm.services.job_runners import JobRunContext
+from study_query_llm.services.jobs import JobRunContext, create_job_runner
 from study_query_llm.services.langgraph_provenance import record_langgraph_job_outcome
 from study_query_llm.services.method_service import MethodService
 

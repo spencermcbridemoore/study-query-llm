@@ -43,9 +43,12 @@ from study_query_llm.services.embeddings import (
 from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
-from study_query_llm.services.job_reducer_service import JobReducerService
-from study_query_llm.services.job_runner_factory import create_job_runner
-from study_query_llm.services.job_runners import JobRunContext, JobRunOutcome
+from study_query_llm.services.jobs import (
+    JobReducerService,
+    JobRunContext,
+    JobRunOutcome,
+    create_job_runner,
+)
 from study_query_llm.services.sweep_request_service import SweepRequestService
 from study_query_llm.utils.estela_loader import load_estela_dict
 from study_query_llm.utils.text_utils import flatten_prompt_dict

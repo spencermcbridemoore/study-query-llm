@@ -72,7 +72,7 @@ def _ensure_method_registered(
         return method_svc.register_method(
             name=name,
             version=version,
-            code_ref="src/study_query_llm/services/langgraph_job_runner.py",
+            code_ref="src/study_query_llm/services/jobs/langgraph_job_runner.py",
             description="LangGraph run (minimal echo or custom graph)",
             parameters_schema={
                 "type": "object",

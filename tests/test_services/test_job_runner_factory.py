@@ -6,18 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from study_query_llm.services.job_runner_factory import (
-    create_job_runner,
-    get_supported_job_types,
-)
-from study_query_llm.services.job_runners import (
+from study_query_llm.services.jobs import (
     FinalizeRunRunner,
     JobRunContext,
     JobRunOutcome,
+    LangGraphJobRunner,
     ReduceKRunner,
     RunKTryRunner,
+    create_job_runner,
+    get_supported_job_types,
 )
-from study_query_llm.services.langgraph_job_runner import LangGraphJobRunner
 
 
 def _mock_run_k_try(**kwargs) -> tuple:

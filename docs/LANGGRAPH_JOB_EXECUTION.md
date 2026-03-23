@@ -71,4 +71,4 @@ python scripts/run_langgraph_job_worker.py --request-id <REQUEST_ID> --worker-id
 
 ## Extending
 
-To add custom LangGraph graphs, extend `LangGraphJobRunner` or add new runner types in `job_runner_factory.py`. Keep the boundary: DB orchestrates jobs; LangGraph orchestrates steps inside a job.
+To add custom LangGraph graphs, extend `LangGraphJobRunner` or add new runner types in `jobs/job_runner_factory.py`. Keep the boundary: DB orchestrates jobs; LangGraph orchestrates steps inside a job.

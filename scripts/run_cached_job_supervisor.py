@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.services.job_reducer_service import JobReducerService
+from study_query_llm.services.jobs import JobReducerService
 
 from scripts.run_local_300_2datasets_worker import worker_main_queued
 

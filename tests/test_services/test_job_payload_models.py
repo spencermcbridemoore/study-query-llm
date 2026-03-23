@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from study_query_llm.services.job_payload_models import (
+from study_query_llm.services.jobs import (
     JobSnapshot,
     RunKTryPayload,
     parse_job_snapshot,

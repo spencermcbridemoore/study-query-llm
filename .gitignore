@@ -114,6 +114,9 @@ Thumbs.db
 *.backup
 ~*
 
+# Scratch outputs (procedural graphs, local experiments)
+scratch/out/
+
 # Temporary plan files (session-specific)
 .plans/
 

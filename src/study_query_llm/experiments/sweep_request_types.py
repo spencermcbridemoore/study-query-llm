@@ -274,6 +274,8 @@ class McqSweepAdapter:
         options_list = _axis_values(parameter_axes, ("options_per_question",))
         questions_list = _axis_values(parameter_axes, ("questions_per_test",))
         labels = _axis_values(parameter_axes, ("label_styles", "label_style"))
+        if not labels:
+            labels = ["upper"]
         spreads = _axis_values(parameter_axes, ("spread_correct_answer_uniformly",))
         deployments = _axis_values(parameter_axes, ("deployments", "llms", "models"))
 

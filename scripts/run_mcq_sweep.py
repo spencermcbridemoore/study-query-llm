@@ -49,27 +49,32 @@ def _task_key(
     question_count: int,
     labels: List[str],
     samples: int,
-) -> Tuple[str, str, int, str, int]:
+    *,
+    level: str = "",
+    spread: bool = False,
+) -> Tuple[str, str, str, int, str, int, bool]:
     """Build a deterministic key for a sweep cell."""
     return (
         deployment.strip().lower(),
+        (level or "").strip().lower(),
         subject.strip().lower(),
         int(question_count),
         ",".join(labels),
         int(samples),
+        bool(spread),
     )
 
 
 def _load_existing_completed_keys(
     out_dir: Path,
-) -> Dict[Tuple[str, str, int, str, int], Path]:
+) -> Dict[Tuple[str, str, str, int, str, int, bool], Path]:
     """
     Return keys for cells already fully completed on disk.
 
     A result is considered complete when:
     - samples_with_successful_call == samples_requested
     """
-    existing: Dict[Tuple[str, str, int, str, int], Path] = {}
+    existing: Dict[Tuple[str, str, str, int, str, int, bool], Path] = {}
     if not out_dir.exists():
         return existing
 
@@ -88,6 +93,11 @@ def _load_existing_completed_keys(
 
         deployment = summary.get("deployment")
         subject = summary.get("subject")
+        level = summary.get("level")
+        if not isinstance(level, str):
+            level = ""
+        spread_raw = summary.get("spread_correct_answer_uniformly", False)
+        spread = bool(spread_raw) if isinstance(spread_raw, bool) else False
         question_count = summary.get("question_count")
         labels = summary.get("labels")
         samples_requested = summary.get("samples_requested")
@@ -111,6 +121,8 @@ def _load_existing_completed_keys(
             question_count=question_count,
             labels=labels,
             samples=samples_requested,
+            level=level,
+            spread=spread,
         )
         existing[key] = json_path
 
@@ -199,14 +211,17 @@ async def run_sweep(
             options = params["options_per_question"]
             questions = params["questions_per_test"]
             label_style = params["label_style"]
+            spread = bool(params.get("spread_correct_answer_uniformly", False))
             subject_str = f"{level} {subject}"
             labels = mcq_template_loader._labels_for(options, label_style)
             key = _task_key(
                 deployment=deployment,
-                subject=subject_str,
+                subject=subject,
                 question_count=questions,
                 labels=labels,
                 samples=samples_per_combo,
+                level=level if isinstance(level, str) else "",
+                spread=spread,
             )
             dry_run_status = "SKIP" if idempotent_enabled and key in existing_completed else "RUN"
             print(
@@ -228,16 +243,18 @@ async def run_sweep(
         options = params["options_per_question"]
         questions = params["questions_per_test"]
         label_style = params["label_style"]
-        
-        # Derive subject string and labels for run_probe
+        spread = bool(params.get("spread_correct_answer_uniformly", False))
+
         subject_str = f"{level} {subject}"
         labels = mcq_template_loader._labels_for(options, label_style)
         key = _task_key(
             deployment=deployment,
-            subject=subject_str,
+            subject=subject,
             question_count=questions,
             labels=labels,
             samples=samples_per_combo,
+            level=level if isinstance(level, str) else "",
+            spread=spread,
         )
 
         if idempotent_enabled and key in existing_completed:
@@ -257,7 +274,7 @@ async def run_sweep(
         try:
             details = await run_probe(
                 deployment=deployment,
-                subject=subject_str,
+                subject=subject,
                 question_count=questions,
                 labels=labels,
                 samples=samples_per_combo,
@@ -265,6 +282,8 @@ async def run_sweep(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 progress_every=10,
+                level=level if isinstance(level, str) and level.strip() else None,
+                spread_correct_answer_uniformly=spread,
             )
             
             # Save results

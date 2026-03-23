@@ -56,6 +56,27 @@ def test_create_mcq_request_expands_expected_keys_and_analysis_contract():
         assert any("5opt_20q_upper_no_spread_50samples_v1" in k for k in keys)
 
 
+def test_create_mcq_request_defaults_missing_label_styles_to_upper():
+    db = _db()
+    axes = {k: v for k, v in _mcq_axes().items() if k != "label_styles"}
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        req_id = svc.create_request(
+            request_name="mcq_default_labels",
+            algorithm="mcq_answer_position_probe",
+            fixed_config={"samples_per_combo": 50, "template_version": "v1"},
+            parameter_axes=axes,
+            entry_max=None,
+            sweep_type="mcq",
+        )
+        req = svc.get_request(req_id)
+        assert req is not None
+        assert req["expected_count"] == 2
+        keys = req.get("expected_run_keys") or []
+        assert all("_upper_" in k or "upper" in k for k in keys)
+
+
 def test_mcq_progress_and_finalize_creates_mcq_sweep():
     db = _db()
     with db.session_scope() as session:

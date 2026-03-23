@@ -41,6 +41,9 @@ def execute_mcq_standalone_run(
     """
     deployment = str(target.get("deployment") or "")
     subject = str(target.get("subject") or "physics")
+    level_raw = target.get("level")
+    level = str(level_raw).strip() if level_raw is not None else ""
+    spread_correct = bool(target.get("spread_correct_answer_uniformly", False))
     num_options = int(target.get("options_per_question") or 4)
     question_count = int(target.get("questions_per_test") or 10)
     label_style = str(target.get("label_style") or "upper")
@@ -83,6 +86,8 @@ def execute_mcq_standalone_run(
             max_tokens=max_tokens,
             progress_every=progress_every,
             progress_callback=_progress if progress_every > 0 else None,
+            level=level or None,
+            spread_correct_answer_uniformly=spread_correct,
         )
 
     try:

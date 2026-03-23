@@ -46,6 +46,8 @@ async def _main_async(args: argparse.Namespace) -> int:
         max_tokens=args.max_tokens,
         progress_every=args.progress_every,
         progress_callback=_cb if args.progress_every > 0 else None,
+        level=args.level.strip() or None,
+        spread_correct_answer_uniformly=args.spread_correct_answer_uniformly,
     )
     summary = details["summary"]
     print_summary(summary)
@@ -68,6 +70,12 @@ async def _main_async(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run MCQ answer-position probe.")
     parser.add_argument("--deployment", type=str, required=True, help="Azure deployment name.")
+    parser.add_argument(
+        "--level",
+        type=str,
+        default="",
+        help='Optional difficulty (e.g. "high school"); included in the prompt.',
+    )
     parser.add_argument("--subject", type=str, default="physics")
     parser.add_argument("--question-count", type=int, default=10)
     parser.add_argument(
@@ -81,6 +89,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--max-tokens", type=int, default=900)
     parser.add_argument("--progress-every", type=int, default=10)
+    parser.add_argument(
+        "--spread-correct-answer-uniformly",
+        action="store_true",
+        help="Ask the model to spread correct answers across option positions.",
+    )
     return parser.parse_args()
 
 

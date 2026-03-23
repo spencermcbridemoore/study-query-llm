@@ -28,16 +28,38 @@ def _answer_line_re(labels: List[str]) -> re.Pattern:
     )
 
 
-def build_prompt(subject: str, question_count: int, labels: List[str]) -> str:
+def build_prompt(
+    subject: str,
+    question_count: int,
+    labels: List[str],
+    *,
+    level: Optional[str] = None,
+    spread_correct_answer_uniformly: bool = False,
+) -> str:
     labels_inline = ",".join(labels)
     num_options = len(labels)
     label_range = f"{labels[0]}-{labels[-1]}" if labels else "A-E"
     options_block = "\n".join(f"{l}) <option>" for l in labels)
+    level_stripped = level.strip() if isinstance(level, str) else ""
+    if level_stripped:
+        intro = (
+            f"Create a multiple-choice test in {subject} at {level_stripped} level "
+            f"with exactly {question_count} questions.\n\n"
+        )
+    else:
+        intro = f"Create a {subject} multiple-choice test with exactly {question_count} questions.\n\n"
+    spread_line = ""
+    if spread_correct_answer_uniformly and labels:
+        spread_line = (
+            f"- Spread the correct answers in the answer key roughly evenly across "
+            f"positions [{labels_inline}]; avoid putting most correct answers on the same option.\n"
+        )
     return (
-        f"Create a {subject} multiple-choice test with exactly {question_count} questions.\n\n"
+        f"{intro}"
         f"Requirements:\n"
         f"- Each question must have exactly {num_options} options labeled [{labels_inline}].\n"
         f"- Keep stems and options concise.\n"
+        f"{spread_line}"
         f"- Include an answer key at the end.\n"
         f"- Use this exact answer-key line format: `1: {labels[0]}`, `2: {labels[1]}`, ...\n\n"
         f"Output format:\n"
@@ -124,11 +146,20 @@ async def run_probe(
     max_tokens: Optional[int],
     progress_every: int,
     progress_callback: ProgressCallback = None,
+    *,
+    level: Optional[str] = None,
+    spread_correct_answer_uniformly: bool = False,
 ) -> dict:
     """Run MCQ answer-position probe; returns dict with summary, call_errors, parse_failures."""
     valid_labels = {label.upper() for label in labels}
     labels_upper = [label.upper() for label in labels]
-    prompt = build_prompt(subject=subject, question_count=question_count, labels=labels_upper)
+    prompt = build_prompt(
+        subject=subject,
+        question_count=question_count,
+        labels=labels_upper,
+        level=level,
+        spread_correct_answer_uniformly=spread_correct_answer_uniformly,
+    )
 
     call_errors: List[dict] = []
     parse_failures: List[dict] = []
@@ -288,9 +319,15 @@ async def run_probe(
             sum(((pooled_counts.get(label, 0) - expected) ** 2) / expected for label in labels_upper)
         )
 
+    level_out: Optional[str] = None
+    if isinstance(level, str) and level.strip():
+        level_out = level.strip()
+
     summary = {
         "deployment": deployment,
         "subject": subject,
+        "level": level_out,
+        "spread_correct_answer_uniformly": bool(spread_correct_answer_uniformly),
         "question_count": int(question_count),
         "labels": labels_upper,
         "samples_requested": int(samples),
@@ -331,7 +368,13 @@ def print_summary(summary: dict) -> None:
     labels = summary["labels"]
     print("\n=== MCQ Answer Position Probe ===")
     print(f"deployment: {summary['deployment']}")
+    if summary.get("level"):
+        print(f"level: {summary['level']}")
     print(f"subject: {summary['subject']}")
+    print(
+        "spread_correct_answer_uniformly: "
+        f"{summary.get('spread_correct_answer_uniformly', False)}"
+    )
     print(f"question_count: {summary['question_count']}")
     print(
         "samples: requested={requested}, successful_calls={ok_calls}, valid_keys={valid}".format(

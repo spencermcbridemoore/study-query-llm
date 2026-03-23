@@ -1,14 +1,27 @@
 """Experiment orchestration, dataset handling, and result analysis for sweep pipelines."""
 
 from study_query_llm.experiments.sweep_request_types import (
+    ANALYSIS_STATUS_COMPLETE,
+    ANALYSIS_STATUS_FAILED,
+    ANALYSIS_STATUS_NOT_REQUIRED,
+    ANALYSIS_STATUS_NOT_STARTED,
+    ANALYSIS_STATUS_RUNNING,
     REQUEST_SCHEMA_VERSION,
     REQUEST_STATUS_CANCELLED,
     REQUEST_STATUS_FULFILLED,
     REQUEST_STATUS_REQUESTED,
     REQUEST_STATUS_RUNNING,
     RunTarget,
+    SweepAnalysisDefinition,
+    SweepTargetSpec,
+    SWEEP_TYPE_CLUSTERING,
+    SWEEP_TYPE_MCQ,
     build_run_key,
+    build_mcq_run_key,
     expand_parameter_axes,
+    get_sweep_type_adapter,
+    list_registered_sweep_types,
+    list_request_group_types,
     normalize_summarizer,
     targets_to_run_keys,
 )

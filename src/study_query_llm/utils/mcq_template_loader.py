@@ -10,6 +10,11 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "mcq_probe_template.json"
 
 
+def labels_for_mcq_options(options_per_question: int, label_style: str) -> List[str]:
+    """Public helper: option labels (A,B,...) for MCQ probes."""
+    return _labels_for(options_per_question, label_style)
+
+
 def _labels_for(options_per_question: int, label_style: str) -> List[str]:
     """Return option labels for given count and style."""
     n = int(options_per_question)

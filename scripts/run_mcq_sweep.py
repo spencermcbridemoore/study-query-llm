@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,14 +20,17 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from study_query_llm.experiments.mcq_answer_position_probe import run_probe
 from study_query_llm.utils.mcq_template_loader import (
     load_config,
     load_sweep_config,
     expand_parameter_schema_filtered,
 )
-# Import _labels_for from the module since it's not exported
 from study_query_llm.utils import mcq_template_loader
-from scripts.run_mcq_answer_position_probe import run_probe, _safe_name
+
+
+def _safe_name(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_\-]+", "_", value).strip("_") or "value"
 
 
 def _parse_subset(subset_str: str) -> tuple[int, int]:

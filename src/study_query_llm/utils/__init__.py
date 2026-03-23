@@ -15,6 +15,7 @@ from .mcq_template_loader import (
     expand_parameter_schema,
     expand_parameter_schema_filtered,
     get_all_prompts,
+    labels_for_mcq_options,
     load_config,
     load_sweep_config,
 )
@@ -37,5 +38,6 @@ __all__ = [
     "expand_parameter_schema_filtered",
     "get_all_prompts",
     "load_sweep_config",
+    "labels_for_mcq_options",
 ]
 

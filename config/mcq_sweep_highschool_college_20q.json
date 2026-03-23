@@ -1,5 +1,5 @@
 {
-  "name": "highschool_college_20q_4_5_options_5samples",
+  "name": "highschool_college_20q_4_5_options_50samples_1000answers",
   "parameter_filter": {
     "level": ["high school", "college"],
     "subject": ["math", "chemistry", "physics", "biology", "economics", "sociology", "psychology"],
@@ -15,11 +15,11 @@
     "gpt-5.4-nano",
     "gpt-oss-120b"
   ],
-  "samples_per_combo": 5,
-  "concurrency": 5,
-  "cell_concurrency": 28,
+  "samples_per_combo": 50,
+  "concurrency": 50,
+  "cell_concurrency": 10,
   "verify_deployments": true,
   "temperature": 0.7,
   "max_tokens": 4000,
-  "progress_every": 1
+  "progress_every": 5
 }

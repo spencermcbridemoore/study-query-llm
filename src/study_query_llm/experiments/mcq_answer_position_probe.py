@@ -170,6 +170,8 @@ async def run_probe(
 
     pooled_counts: Counter = Counter()
     per_sample_props: Dict[str, List[float]] = {label: [] for label in labels_upper}
+    n_samples = int(samples)
+    per_sample_label_counts: List[Optional[Dict[str, int]]] = [None] * n_samples
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
     started_at = time.perf_counter()
 
@@ -266,6 +268,10 @@ async def run_probe(
                         run_counts = Counter(answers)
                         pooled_counts.update(run_counts)
                         valid_runs += 1
+                        if 1 <= sample_idx <= n_samples:
+                            per_sample_label_counts[sample_idx - 1] = {
+                                lbl: int(run_counts.get(lbl, 0)) for lbl in labels_upper
+                            }
                         for label in labels_upper:
                             per_sample_props[label].append(
                                 run_counts.get(label, 0) / float(question_count)
@@ -352,6 +358,7 @@ async def run_probe(
         "successful_call_latency_ms_p95": _percentile(successful_call_latencies_ms, 0.95),
         "pooled_distribution": pooled_distribution,
         "per_sample_distribution_stats": per_sample_stats,
+        "per_sample_label_counts": per_sample_label_counts,
         "chi_square_vs_uniform": chi_square,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }

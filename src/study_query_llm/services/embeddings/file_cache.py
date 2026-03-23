@@ -5,12 +5,13 @@ Cache is optional and best-effort. Missing or invalid cache never raises;
 callers fall back to the embedding API.
 """
 
-from pathlib import Path
-from typing import Optional, Tuple, List, Callable, Any, Awaitable
 import hashlib
+from pathlib import Path
+from typing import Any, Awaitable, Callable, List, Optional, Tuple
+
 import numpy as np
 
-from ..utils.logging_config import get_logger
+from ...utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -58,7 +59,6 @@ def load_embedding_cache(cache_path: Path) -> Optional[Tuple[List[str], np.ndarr
             texts = data["texts"]
             embeddings = data["embeddings"]
             labels = data["labels"]
-            # npz may store 0-dim array for scalar; ensure 1D for texts/labels
             if texts.ndim == 0:
                 texts = np.atleast_1d(texts)
             texts_list = texts.tolist()
@@ -90,9 +90,7 @@ def save_embedding_cache(
     seed: Optional[int] = None,
     n_samples: Optional[int] = None,
 ) -> None:
-    """
-    Save (texts, embeddings, labels) to a .npz file. Creates parent directory if needed.
-    """
+    """Save (texts, embeddings, labels) to a .npz file. Creates parent directory if needed."""
     cache_path = Path(cache_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     texts_arr = np.array(texts, dtype=object)

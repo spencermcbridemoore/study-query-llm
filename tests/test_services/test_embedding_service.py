@@ -8,11 +8,11 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from study_query_llm.services.embedding_service import (
-    EmbeddingService,
+from study_query_llm.services.embeddings import (
+    DEPLOYMENT_MAX_TOKENS,
     EmbeddingRequest,
     EmbeddingResponse,
-    DEPLOYMENT_MAX_TOKENS,
+    EmbeddingService,
     estimate_tokens,
 )
 from study_query_llm.providers.base_embedding import BaseEmbeddingProvider, EmbeddingResult
@@ -190,6 +190,19 @@ async def test_compute_request_hash_deterministic(mock_provider):
         "Different text", "text-embedding-ada-002", None, "float", "azure"
     )
     assert hash1 != hash3
+
+
+@pytest.mark.asyncio
+async def test_compute_request_hash_whitespace_sensitive(mock_provider):
+    """Raw-exact keying keeps whitespace/newline differences distinct."""
+    service = EmbeddingService(provider=mock_provider)
+    hash_a = service._compute_request_hash(
+        "Hello world", "text-embedding-ada-002", None, "float", "azure"
+    )
+    hash_b = service._compute_request_hash(
+        "Hello  world\n", "text-embedding-ada-002", None, "float", "azure"
+    )
+    assert hash_a != hash_b
 
 
 @pytest.mark.asyncio
@@ -634,6 +647,30 @@ async def test_get_embeddings_batch_chunked_mixed_cached_uncached(db_connection,
         assert results[0].cached is True
         assert results[1].cached is True
         assert results[2].cached is False
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings_batch_chunked_dedupes_uncached_repeats(db_connection, mock_provider):
+    """Repeated uncached texts in one chunk should be sent once."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = EmbeddingService(repository=repo, provider=mock_provider)
+        requests = [
+            EmbeddingRequest(text="Repeat", deployment="text-embedding-ada-002"),
+            EmbeddingRequest(text="Repeat", deployment="text-embedding-ada-002"),
+            EmbeddingRequest(text="Unique", deployment="text-embedding-ada-002"),
+        ]
+        with patch.object(
+            service,
+            "_create_embedding_batch_with_retry",
+            return_value=[_make_batch_embedding(0), _make_batch_embedding(1)],
+        ) as mock_batch:
+            results = await service.get_embeddings_batch(requests, chunk_size=10)
+
+        assert len(results) == 3
+        assert mock_batch.call_count == 1
+        called_texts = mock_batch.call_args[0][0]
+        assert called_texts == ["Repeat", "Unique"]
 
 
 @pytest.mark.asyncio

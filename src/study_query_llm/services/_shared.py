@@ -1,7 +1,7 @@
 """Shared utilities for service-layer classes.
 
 Centralises patterns that were previously duplicated across
-embedding_service, summarization_service, and inference_service.
+embedding, summarization, and inference services.
 """
 
 from __future__ import annotations

@@ -20,10 +20,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYMENT_MAX_TOKENS
+from study_query_llm.services.embeddings import (
+    DEPLOYMENT_MAX_TOKENS,
+    estimate_tokens,
+    fetch_embeddings_async,
+)
 from study_query_llm.algorithms import SweepConfig
-
-from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.experiments.sweep_io import get_output_dir
 from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db

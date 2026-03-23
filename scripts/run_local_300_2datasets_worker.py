@@ -35,10 +35,10 @@ from study_query_llm.experiments.sweep_io import get_output_dir, serialize_sweep
 from study_query_llm.providers.managed_tei_embedding_provider import ManagedTEIEmbeddingProvider
 from study_query_llm.providers.managers.local_docker_tei import LocalDockerTEIManager
 from study_query_llm.providers.factory import ProviderFactory
-from study_query_llm.services.embedding_service import (
+from study_query_llm.services.embeddings import (
+    CACHE_KEY_VERSION,
     EmbeddingRequest,
     EmbeddingService,
-    CACHE_KEY_VERSION,
 )
 from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService

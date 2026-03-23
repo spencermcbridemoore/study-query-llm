@@ -36,13 +36,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.services.embedding_service import EmbeddingService, EmbeddingRequest, estimate_tokens, DEPLOYMENT_MAX_TOKENS
+from study_query_llm.services.embeddings import (
+    DEPLOYMENT_MAX_TOKENS,
+    EmbeddingRequest,
+    EmbeddingService,
+    estimate_tokens,
+    fetch_embeddings_async,
+)
 from study_query_llm.services import get_embeddings_with_file_cache
 from study_query_llm.services.summarization_service import SummarizationService, SummarizationRequest
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.algorithms import SweepConfig, run_sweep
-
-from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.providers.managers.ollama import ollama_vram_scope
 from study_query_llm.experiments.sweep_io import get_output_dir

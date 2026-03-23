@@ -32,11 +32,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Core library imports
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYMENT_MAX_TOKENS
+from study_query_llm.services.embeddings import (
+    DEPLOYMENT_MAX_TOKENS,
+    estimate_tokens,
+    fetch_embeddings_async,
+)
 from study_query_llm.algorithms import SweepConfig
 
 # Shared script utilities
-from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.providers.managers.ollama import ollama_vram_scope
 from study_query_llm.experiments.sweep_io import get_output_dir

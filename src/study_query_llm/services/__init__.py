@@ -19,12 +19,15 @@ from .inference_service import InferenceService
 from .model_registry import ModelRegistry
 from .preprocessors import PromptPreprocessor
 from .study_service import StudyService
-from .embedding_service import EmbeddingService, EmbeddingRequest, EmbeddingResponse
-from .embedding_file_cache import (
+from .embeddings import (
+    EmbeddingService,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    fetch_embeddings_async,
+    get_cache_path,
+    get_embeddings_with_file_cache,
     load_embedding_cache,
     save_embedding_cache,
-    get_embeddings_with_file_cache,
-    get_cache_path,
 )
 from .provenance_service import ProvenanceService
 from .summarization_service import (
@@ -48,6 +51,7 @@ __all__ = [
     "save_embedding_cache",
     "get_embeddings_with_file_cache",
     "get_cache_path",
+    "fetch_embeddings_async",
     "ProvenanceService",
     "SummarizationService",
     "SummarizationRequest",

@@ -106,7 +106,7 @@ async def test_mini_sweep_local(tei_endpoint, ollama_chat_mgr):
 
     from study_query_llm.db.connection_v2 import DatabaseConnectionV2
     from study_query_llm.algorithms.sweep import run_sweep, SweepConfig
-    from study_query_llm.services.embedding_helpers import fetch_embeddings_async
+    from study_query_llm.services.embeddings import fetch_embeddings_async
     from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 
     db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)

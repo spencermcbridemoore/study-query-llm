@@ -30,12 +30,14 @@ import numpy as np
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.db.models_v2 import SweepRunClaim
-from study_query_llm.services.embedding_service import estimate_tokens, DEPLOYMENT_MAX_TOKENS
+from study_query_llm.services.embeddings import (
+    DEPLOYMENT_MAX_TOKENS,
+    estimate_tokens,
+    fetch_embeddings_async,
+)
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.sweep_request_service import SweepRequestService
 from study_query_llm.algorithms import SweepConfig
-
-from study_query_llm.services.embedding_helpers import fetch_embeddings_async
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.experiments.sweep_io import save_single_sweep_result as save_pkl, get_output_dir
 from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db

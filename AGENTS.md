@@ -10,7 +10,7 @@ Panel-based web application for running LLM inference experiments across multipl
 
 ## Key Documentation
 - **Planning & Status**: `docs/IMPLEMENTATION_PLAN.md` - Phased roadmap and current status
-- **Architecture**: `docs/ARCHITECTURE.md` - System design and patterns
+- **Architecture**: `docs/ARCHITECTURE.md` - System design and patterns (includes **Standalone sweep worker**: `python -m study_query_llm.cli sweep-worker` / `analyze`, `experiments/sweep_worker_main.py`)
 - **Coding Rules**: `.cursorrules` - Detailed technical conventions (Cursor-specific)
 - **Contributing**: `CONTRIBUTING.md` - Development process and guidelines
 - **Standing Orders**: `docs/STANDING_ORDERS.md` - Consistency guidelines

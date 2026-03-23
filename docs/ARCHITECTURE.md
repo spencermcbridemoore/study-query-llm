@@ -258,6 +258,24 @@ Experiment orchestration, result analysis, and sweep pipeline support:
 - `sweep_io.py` -- sweep result serialization and file I/O
 - `ingestion.py` -- in-memory sweep result ingestion to database
 
+#### Standalone sweep worker (clustering and MCQ)
+
+Sweep **requests** are typed (`sweep_type` in the v2 request record) and expanded into `run_key` → **target** dicts by adapters in `sweep_request_types.py`. The **worker** is the single place that owns claim/lease/completion and delivery bookkeeping; per-type execution stays in library modules.
+
+| Piece | Role |
+| ----- | ---- |
+| `sweep_worker_main.py` | Loads a request, computes missing `(run_key, target)` from progress, dispatches by `sweep_type` (`clustering`, `mcq`), calls `SweepRequestService` for claims and `record_delivery`. Rejects sharded job mode for non-clustering types. |
+| Clustering path | Dataset load, embedding cache, `run_sweep` + `ingest_result_to_db` (same end state as before standardization). |
+| `mcq_answer_position_probe.py` | Async MCQ probe: prompts, parsing, summary payloads (no DB). |
+| `sweep_mcq_standalone.py` | One standalone MCQ run: invoke probe, persist `mcq_run` group + metadata via `mcq_run_persistence.py`. |
+| `SweepRequestService` | Request lifecycle, deliveries, analysis catalog state (`src/study_query_llm/services/sweep_request_service.py`). |
+
+**CLI entrypoint** (thin glue only): `python -m study_query_llm.cli` with subcommands `sweep-worker` / `worker` (same argv as `sweep_worker_main.main`) and `analyze` / `sweep-analyze` for MCQ analysis over delivered runs. See `src/study_query_llm/cli/__main__.py`. The script `scripts/run_local_300_2datasets_worker.py` remains a compatibility wrapper for supervisors that import symbols from the old path.
+
+**Post-run analysis (MCQ):** `src/study_query_llm/analysis/mcq_from_run.py` implements metrics from persisted `metadata_json` (including `result_summary`); `mcq_analyze_request.py` walks `analysis_catalog` on a request and records `AnalysisResult` rows via `SweepRequestService`.
+
+Adding a **new sweep type** in the future: register an adapter (targets, run keys, group/delivery rules) next to existing types, implement a standalone runner module, and extend the worker dispatch table—keep scripts as argparse + env only.
+
 ### 9. Model Lifecycle Managers
 **Location:** `src/study_query_llm/providers/managers/`
 

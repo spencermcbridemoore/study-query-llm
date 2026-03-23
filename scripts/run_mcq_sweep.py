@@ -23,7 +23,11 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from study_query_llm.config import Config
 from study_query_llm.experiments.mcq_answer_position_probe import run_probe
 from study_query_llm.providers.factory import ProviderFactory
-from study_query_llm.services._shared import deployment_override
+from study_query_llm.services._shared import (
+    AZURE_CHAT_DEPLOYMENT_PROBE_MAX_TOKENS,
+    AZURE_CHAT_DEPLOYMENT_PROBE_PROMPT,
+    deployment_override,
+)
 from study_query_llm.services.inference_service import InferenceService
 from study_query_llm.utils.mcq_template_loader import (
     load_config,
@@ -152,7 +156,11 @@ async def _verify_azure_chat_deployment(deployment_name: str) -> Optional[str]:
                 initial_wait=0.5,
                 max_wait=4.0,
             )
-            await service.run_inference("ping", temperature=0.0, max_tokens=1)
+            await service.run_inference(
+                AZURE_CHAT_DEPLOYMENT_PROBE_PROMPT,
+                temperature=0.0,
+                max_tokens=AZURE_CHAT_DEPLOYMENT_PROBE_MAX_TOKENS,
+            )
             return None
         except Exception as exc:
             return str(exc)[:800]

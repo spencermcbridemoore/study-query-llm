@@ -13,6 +13,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Minimal chat completion used to verify an Azure deployment accepts traffic.
+# Avoid trivial prompts like "ping" with max_tokens=1 — some Azure OpenAI models
+# return model_error / "invalid content" for ambiguous or ultra-short generations.
+AZURE_CHAT_DEPLOYMENT_PROBE_PROMPT = (
+    "API health check only. What is one plus one? Reply with just the single digit, "
+    "no punctuation or explanation."
+)
+AZURE_CHAT_DEPLOYMENT_PROBE_MAX_TOKENS = 32
+
 # Union of retryable error patterns used by both EmbeddingService and
 # InferenceService.  Order doesn't matter -- we just check substring membership.
 RETRYABLE_ERROR_PATTERNS = [

@@ -41,7 +41,12 @@ def _nullcontext():
 from ..config import Config
 from ..providers.factory import ProviderFactory
 from ..services.inference_service import InferenceService
-from ._shared import deployment_override, handle_db_persistence_error
+from ._shared import (
+    AZURE_CHAT_DEPLOYMENT_PROBE_MAX_TOKENS,
+    AZURE_CHAT_DEPLOYMENT_PROBE_PROMPT,
+    deployment_override,
+    handle_db_persistence_error,
+)
 from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -142,7 +147,11 @@ class SummarizationService:
                 provider_instance = factory.create_chat_provider(provider, deployment)
 
             service = InferenceService(provider_instance, repository=None)
-            await service.run_inference("ping", temperature=0.0, max_tokens=1)
+            await service.run_inference(
+                AZURE_CHAT_DEPLOYMENT_PROBE_PROMPT,
+                temperature=0.0,
+                max_tokens=AZURE_CHAT_DEPLOYMENT_PROBE_MAX_TOKENS,
+            )
             return True
 
         except Exception as e:

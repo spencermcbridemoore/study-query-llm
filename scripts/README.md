@@ -9,7 +9,7 @@ previously in `scripts/common/` now lives in canonical locations under `src/stud
 |---|---|
 | Model managers (protocol, ACI, Docker, Ollama) | `study_query_llm.providers.managers` |
 | `data_utils.py`, `estela_loader.py` | `study_query_llm.utils` |
-| `embedding_utils.py` | `study_query_llm.services.embedding_helpers` |
+| `embedding_utils.py` | `study_query_llm.services.embeddings` (`EmbeddingService`, `fetch_embeddings_async`, file cache helpers) |
 | `sweep_utils.py` (serialization/save) | `study_query_llm.experiments.sweep_io` |
 | `sweep_utils.py` (paraphraser factory) | `study_query_llm.services.paraphraser_factory` |
 | `sweep_utils.py` (DB ingestion) | `study_query_llm.experiments.ingestion` |

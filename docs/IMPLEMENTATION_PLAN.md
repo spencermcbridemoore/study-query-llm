@@ -555,7 +555,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - Install: `pip install tenacity` (for retry decorators)
 
 **Files to create:**
-- `src/study_query_llm/services/embedding_service.py`
+- `src/study_query_llm/services/embeddings/` package (main class in `service.py`)
 
 **Files to update:**
 - `src/study_query_llm/services/__init__.py` (export `EmbeddingService`)
@@ -949,8 +949,8 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - [`src/study_query_llm/providers/factory.py`](src/study_query_llm/providers/factory.py): Added ``create_embedding_provider()`` factory method and ``get_available_embedding_providers()``
 - [`src/study_query_llm/providers/__init__.py`](src/study_query_llm/providers/__init__.py): Exports for new classes
 - [`src/study_query_llm/config.py`](src/study_query_llm/config.py): Added ``"huggingface"`` and ``"local"`` provider config entries
-- [`src/study_query_llm/services/embedding_service.py`](src/study_query_llm/services/embedding_service.py): Accepts ``provider`` parameter; delegates API calls to injected ``BaseEmbeddingProvider``; removed Azure-specific client code
-- [`src/study_query_llm/services/embedding_helpers.py`](src/study_query_llm/services/embedding_helpers.py): ``fetch_embeddings_async()`` with ``provider_name`` parameter (default ``"azure"``)
+- [`src/study_query_llm/services/embeddings/service.py`](src/study_query_llm/services/embeddings/service.py): Accepts ``provider`` parameter; delegates API calls to injected ``BaseEmbeddingProvider``; removed Azure-specific client code
+- [`src/study_query_llm/services/embeddings/helpers.py`](src/study_query_llm/services/embeddings/helpers.py): ``fetch_embeddings_async()`` with ``provider_name`` parameter (default ``"azure"``)
 
 **Design:**
 - ``BaseEmbeddingProvider(ABC)`` defines ``create_embeddings()``, ``get_provider_name()``, ``close()``, and optional ``validate_model()``
@@ -1019,7 +1019,7 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 ```python
 from study_query_llm.providers.managers import manager_from_env
 from study_query_llm.providers.aci_tei_embedding_provider import ACITEIEmbeddingProvider
-from study_query_llm.services.embedding_service import EmbeddingService
+from study_query_llm.services.embeddings import EmbeddingService
 
 HF_MODELS = ["BAAI/bge-m3", "BAAI/bge-large-en-v1.5", "nomic-ai/nomic-embed-text-v1.5"]
 
@@ -1093,7 +1093,7 @@ Manager duck-type contract (both `ACITEIManager` and `LocalDockerTEIManager` sat
 ```python
 from study_query_llm.providers.managers import LocalDockerTEIManager
 from study_query_llm.providers import ManagedTEIEmbeddingProvider
-from study_query_llm.services.embedding_service import EmbeddingService
+from study_query_llm.services.embeddings import EmbeddingService
 
 HF_MODELS = ["BAAI/bge-m3", "BAAI/bge-large-en-v1.5", "nomic-ai/nomic-embed-text-v1.5"]
 

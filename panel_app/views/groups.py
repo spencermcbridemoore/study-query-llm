@@ -20,9 +20,11 @@ def create_groups_ui() -> pn.viewable.Viewable:
 
     groups_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=400)
     group_members_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=400)
+    groups_notice = pn.pane.Markdown("", sizing_mode="stretch_width")
 
     def update_groups():
         """Update groups display."""
+        groups_notice.object = ""
         try:
             db = get_db_connection()
             with db.session_scope() as session:
@@ -55,6 +57,7 @@ def create_groups_ui() -> pn.viewable.Viewable:
                     groups_table.object = pd.DataFrame(groups_data)
                 else:
                     groups_table.object = None
+                    groups_notice.object = "_No `Group` rows returned (schema is empty or limit 50)._"
 
                 members = session.query(GroupMember).order_by(GroupMember.added_at.desc()).limit(100).all()
 
@@ -88,11 +91,14 @@ def create_groups_ui() -> pn.viewable.Viewable:
                     group_members_table.object = pd.DataFrame(members_data)
                 else:
                     group_members_table.object = None
+                    if groups:
+                        groups_notice.object = "_No group membership rows in the last 100._"
 
         except Exception as e:
             logger.error(f"Failed to update groups: {str(e)}", exc_info=True)
             groups_table.object = None
             group_members_table.object = None
+            groups_notice.object = f"**Error loading groups:** `{e!s}`"
 
     refresh_button.on_click(lambda e: update_groups())
 
@@ -101,6 +107,7 @@ def create_groups_ui() -> pn.viewable.Viewable:
     return pn.Column(
         pn.pane.Markdown("## Groups Management"),
         pn.Row(refresh_button, pn.Spacer()),
+        groups_notice,
         pn.pane.Markdown("### Groups"),
         groups_table,
         pn.pane.Markdown("### Group Members"),

@@ -20,7 +20,7 @@ def create_analytics_ui() -> pn.viewable.Viewable:
         width=100
     )
 
-    summary_output = pn.pane.Str("", sizing_mode='stretch_width')
+    summary_output = pn.pane.Markdown("", sizing_mode='stretch_width')
     provider_comparison_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=200)
     recent_table = pn.pane.DataFrame(None, sizing_mode='stretch_width', height=400)
 
@@ -35,11 +35,12 @@ def create_analytics_ui() -> pn.viewable.Viewable:
 
                 stats = study_service.get_summary_stats()
                 logger.debug(f"Analytics stats: {stats}")
-                summary_text = f"""
-**Total Inferences:** {stats['total_inferences']}  
-**Total Tokens:** {stats['total_tokens']:,}  
-**Unique Providers:** {stats['unique_providers']}
-"""
+                summary_text = (
+                    f"**Total inferences:** {stats['total_inferences']:,}  \n"
+                    f"**Total tokens:** {stats['total_tokens']:,}  \n"
+                    f"**Unique providers:** {stats['unique_providers']:,}  \n\n"
+                    "_Zeros usually mean no rows in `raw_calls` for this database._"
+                )
                 summary_output.object = summary_text
 
                 comparison_df = study_service.get_provider_comparison()
@@ -58,9 +59,11 @@ def create_analytics_ui() -> pn.viewable.Viewable:
                     recent_table.object = display_df
                 else:
                     recent_table.object = None
+                    if stats.get("total_inferences", 0) == 0:
+                        pass  # summary already explains zeros
 
         except Exception as e:
-            error_msg = f"Error loading analytics: {str(e)}"
+            error_msg = f"**Error loading analytics:** `{e!s}`"
             logger.error(f"Failed to update analytics: {str(e)}", exc_info=True)
             summary_output.object = error_msg
             provider_comparison_table.object = None

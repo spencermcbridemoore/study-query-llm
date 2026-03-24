@@ -41,6 +41,38 @@ def get_db_connection() -> DatabaseConnectionV2:
     return _db_connection
 
 
+def get_database_health_markdown() -> str:
+    """
+    Human-readable DB status for the Panel sidebar (connection + row counts).
+
+    Helps distinguish a failed connection from an empty Neon/database.
+    """
+    try:
+        db = get_db_connection()
+        with db.session_scope() as session:
+            from study_query_llm.db.models_v2 import Group, RawCall
+
+            n_groups = session.query(Group).count()
+            n_raw = session.query(RawCall).count()
+        target = database_connection_summary(config.database.connection_string)
+        return (
+            "### Database\n\n"
+            "**Status:** connected  \n"
+            f"**Target:** `{target}`  \n"
+            f"**Groups:** {n_groups:,} &nbsp;·&nbsp; **Raw calls:** {n_raw:,}  \n\n"
+            "_If both counts are zero, the app is still talking to the database; "
+            "this project may simply have no rows ingested yet._"
+        )
+    except Exception as exc:
+        logger.exception("Database health check failed")
+        return (
+            "### Database\n\n"
+            "**Status:** **error** (see below)  \n\n"
+            f"```\n{exc!s}\n```\n\n"
+            "_Check `DATABASE_URL`, `.env` in the repo root, and server logs._"
+        )
+
+
 def get_inference_service(provider_name: str, deployment_name: Optional[str] = None) -> InferenceService:
     """
     Get or create inference service for a provider.

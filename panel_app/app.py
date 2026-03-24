@@ -36,7 +36,7 @@ except ImportError:
 
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 
-from panel_app.helpers import HEADER_BG, HEADER_FG
+from panel_app.helpers import HEADER_BG, HEADER_FG, get_database_health_markdown
 from panel_app.views.inference import create_inference_ui
 from panel_app.views.analytics import create_analytics_ui
 from panel_app.views.groups import create_groups_ui
@@ -115,6 +115,11 @@ def _request_shutdown() -> None:
 def create_dashboard() -> pn.viewable.Viewable:
     """Create the main dashboard with tabs."""
 
+    connection_banner = pn.pane.Markdown(
+        get_database_health_markdown(),
+        sizing_mode="stretch_width",
+    )
+
     inference_tab = create_inference_ui()
     analytics_tab = create_analytics_ui()
     groups_tab = create_groups_ui()
@@ -128,10 +133,16 @@ def create_dashboard() -> pn.viewable.Viewable:
         ("Groups", groups_tab),
         ("Sweep Explorer", sweep_explorer_tab),
         sizing_mode='stretch_width',
-        dynamic=True,
+        # Lazy tabs can leave some panes blank until visited; render all up front.
+        dynamic=False,
     )
 
-    return tabs
+    return pn.Column(
+        connection_banner,
+        pn.layout.Divider(),
+        tabs,
+        sizing_mode="stretch_width",
+    )
 
 
 def create_app() -> pn.template.FastListTemplate:

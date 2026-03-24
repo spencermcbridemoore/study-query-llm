@@ -487,7 +487,7 @@ def create_inference_ui() -> pn.viewable.Viewable:
         ("Standalone Call", standalone_tab),
         ("Batch Run", batch_tab),
         sizing_mode="stretch_width",
-        dynamic=True,
+        dynamic=False,
     )
 
     return pn.Column(

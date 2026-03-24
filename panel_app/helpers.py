@@ -6,7 +6,7 @@ Provides database/service accessors and UI constants used across view modules.
 
 from typing import Optional
 
-from study_query_llm.config import config
+from study_query_llm.config import config, database_connection_summary
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.providers.factory import ProviderFactory
@@ -31,7 +31,10 @@ def get_db_connection() -> DatabaseConnectionV2:
     """Get or create v2 database connection."""
     global _db_connection
     if _db_connection is None:
-        logger.info("Initializing v2 database connection...")
+        logger.info(
+            "Initializing v2 database connection (%s)",
+            database_connection_summary(config.database.connection_string),
+        )
         _db_connection = DatabaseConnectionV2(config.database.connection_string)
         _db_connection.init_db()
         logger.info("V2 database connection established")

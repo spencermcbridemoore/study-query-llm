@@ -17,9 +17,22 @@ from typing import Optional, Sequence, Set
 
 # Ensure the project root is on sys.path so `panel serve panel_app/app.py`
 # can resolve package imports without a manual PYTHONPATH override.
-_project_root = str(Path(__file__).resolve().parent.parent)
+_project_root_path = Path(__file__).resolve().parent.parent
+_project_root = str(_project_root_path)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
+
+# Load repo .env before any study_query_llm import so DATABASE_URL is set under
+# ``panel serve`` (Bokeh cwd is not always the repo root; empty DATABASE_URL in
+# the environment would otherwise skip dotenv merge with override=False).
+try:
+    from dotenv import load_dotenv
+
+    _env_file = _project_root_path / ".env"
+    if _env_file.is_file() and not str(os.environ.get("DATABASE_URL", "") or "").strip():
+        load_dotenv(_env_file, encoding="utf-8", override=True)
+except ImportError:
+    pass
 
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 

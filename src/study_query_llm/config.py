@@ -16,21 +16,61 @@ Usage:
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 from pathlib import Path
+from typing import Optional
+from urllib.parse import urlparse, urlunparse
 
 
-# Try to load .env file if it exists
-try:
-    from dotenv import load_dotenv
+def _repo_root() -> Path:
+    """Project root: parent of ``src/`` (``study_query_llm/config.py`` → repo)."""
+    return Path(__file__).resolve().parent.parent.parent
 
-    # Look for .env in project root (parent of src/)
-    env_path = Path(__file__).parent.parent.parent / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
-except ImportError:
-    # python-dotenv not installed - will use system environment variables
-    pass
+
+def _dotenv_candidate_paths() -> list[Path]:
+    """Ordered list of .env paths; deduped by resolved path."""
+    paths: list[Path] = []
+    override = os.environ.get("STUDY_QUERY_LLM_DOTENV", "").strip()
+    if override:
+        paths.append(Path(override))
+    paths.append(_repo_root() / ".env")
+    paths.append(Path.cwd() / ".env")
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for p in paths:
+        try:
+            key = p.resolve()
+        except OSError:
+            key = p
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def _load_dotenv_files() -> None:
+    """
+    Load ``.env`` so ``DATABASE_URL`` and other keys are set before ``Config()`` runs.
+
+    If ``DATABASE_URL`` is missing or blank, the first existing candidate file is loaded
+    with ``override=True`` so values from disk win over empty shell placeholders.
+    Panel / Bokeh often run with a working directory that is not the repo root, so we
+    try both the repo-root ``.env`` and ``Path.cwd() / .env``.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    existing = [p for p in _dotenv_candidate_paths() if p.is_file()]
+    if not existing:
+        return
+    db_set = bool(str(os.environ.get("DATABASE_URL", "") or "").strip())
+    if not db_set:
+        load_dotenv(existing[0], encoding="utf-8", override=True)
+        for p in existing[1:]:
+            load_dotenv(p, encoding="utf-8", override=False)
+    else:
+        for p in existing:
+            load_dotenv(p, encoding="utf-8", override=False)
 
 
 @dataclass
@@ -75,9 +115,10 @@ class Config:
 
     def __init__(self):
         """Load configuration from environment."""
-        self.database = DatabaseConfig(
-            connection_string=os.getenv("DATABASE_URL", "sqlite:///study_query_llm.db")
-        )
+        raw_db = os.getenv("DATABASE_URL", "") or ""
+        if not str(raw_db).strip():
+            raw_db = "sqlite:///study_query_llm.db"
+        self.database = DatabaseConfig(connection_string=str(raw_db).strip())
 
         # Provider configurations (lazy-loaded to avoid requiring all keys)
         self._provider_configs = {}
@@ -175,8 +216,39 @@ class Config:
         return available
 
 
+_load_dotenv_files()
+
 # Global config instance
 config = Config()
+
+
+def redact_database_url(url: str) -> str:
+    """Mask password in a SQLAlchemy URL for logs (best-effort)."""
+    if not url or not isinstance(url, str):
+        return str(url)
+    try:
+        p = urlparse(url.replace("postgresql+asyncpg", "postgresql", 1))
+        if p.password is not None:
+            user = p.username or ""
+            host = p.hostname or ""
+            port = f":{p.port}" if p.port else ""
+            netloc = f"{user}:***@{host}{port}"
+            return urlunparse((p.scheme, netloc, p.path or "", "", "", ""))
+    except Exception:
+        pass
+    return url
+
+
+def database_connection_summary(url: str) -> str:
+    """Short label for logging: engine + redacted target."""
+    u = (url or "").lower()
+    if "postgresql" in u or "postgres" in u:
+        kind = "postgresql"
+    elif u.startswith("sqlite"):
+        kind = "sqlite"
+    else:
+        kind = "other"
+    return f"{kind} {redact_database_url(url)}"
 
 
 def require_provider(provider_name: str) -> ProviderConfig:

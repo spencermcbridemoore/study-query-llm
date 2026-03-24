@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pickle
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +34,8 @@ from study_query_llm.experiments.result_metrics import (
     rows_from_50runs as _rows_from_50runs,
     rows_from_sweep as _rows_from_sweep,
 )
+from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_MCQ
+from study_query_llm.services.sweep_query_service import mcq_explorer_metric_columns
 
 # Categorical dimensions available for faceting / color / filters
 CATEGORICAL_DIMS = ["dataset", "engine", "summarizer", "data_type"]
@@ -124,11 +127,32 @@ def load_sweep_data(data_dir: str | Path) -> pd.DataFrame:
 # Aggregation
 # ===========================================================================
 
+def _group_cols_for_aggregate(
+    df: pd.DataFrame,
+    group_dims: list[str],
+    x_axis: str | None,
+) -> list[str]:
+    """Dims to group by when aggregating; includes x_axis if present (for line plots)."""
+    tail = ["k", "n_samples"]
+    parts = list(group_dims)
+    if x_axis and x_axis in df.columns and x_axis not in parts:
+        parts.append(x_axis)
+    parts.extend(tail)
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in parts:
+        if c in df.columns and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
 def aggregate_df(
     df: pd.DataFrame,
     y_metric: str,
     agg_mode: str,
     group_dims: list[str] | None = None,
+    x_axis: str | None = None,
 ) -> pd.DataFrame:
     """
     Transform the flat DataFrame according to the aggregation mode.
@@ -152,7 +176,7 @@ def aggregate_df(
         out["y_err"] = np.nan
         return out
 
-    group_cols = [c for c in group_dims + ["k", "n_samples"] if c in df.columns]
+    group_cols = _group_cols_for_aggregate(df, group_dims, x_axis)
 
     if agg_mode == "Last k only":
         cat_cols = [c for c in group_dims if c in df.columns]
@@ -164,11 +188,24 @@ def aggregate_df(
 
     if agg_mode in ("Mean", "Mean ± stdev"):
         if not group_cols:
-            # No grouping dims — aggregate everything into one series
-            mean_val = df[y_metric].mean()
-            std_val = df[y_metric].std() if agg_mode == "Mean ± stdev" else np.nan
-            # Keep k progression by grouping on k alone
-            agg = df.groupby(["k"], as_index=False).agg(
+            # No facet/color dims — aggregate; keep k and/or x_axis progression
+            gb_cols = [c for c in ["k"] if c in df.columns]
+            if x_axis and x_axis in df.columns and x_axis not in gb_cols:
+                gb_cols.append(x_axis)
+            if not gb_cols:
+                m = float(df[y_metric].mean())
+                std_v = (
+                    float(df[y_metric].std())
+                    if agg_mode == "Mean ± stdev" and len(df) > 1
+                    else np.nan
+                )
+                agg = pd.DataFrame({y_metric: [m]})
+                if agg_mode == "Mean ± stdev":
+                    agg["y_err"] = [0.0 if std_v != std_v else std_v]
+                else:
+                    agg["y_err"] = [np.nan]
+                return agg
+            agg = df.groupby(gb_cols, as_index=False).agg(
                 y_mean=(y_metric, "mean"),
                 y_std=(y_metric, "std"),
             )
@@ -308,6 +345,110 @@ DIM_DEFAULT_ROLES = {
     BIN_DIM: "Free",
 }
 
+MCQ_CATEGORICAL_DIMS = (
+    "deployment",
+    "subject",
+    "level",
+    "options_per_question",
+    "spread_correct_answer_uniformly",
+    "label_style",
+    "run_key",
+)
+
+MCQ_DIM_DEFAULT_ROLES = {
+    "deployment": "Color",
+    "subject": "Grid rows",
+    "level": "Grid cols",
+    "options_per_question": "Filter",
+    "spread_correct_answer_uniformly": "Free",
+    "label_style": "Free",
+    "run_key": "Free",
+    BIN_DIM: "Free",
+}
+
+MCQ_X_AXIS_OPTIONS = [
+    "subject",
+    "deployment",
+    "run_key",
+    "run_idx",
+    "n_samples",
+    "answer_count_total",
+    "options_per_question",
+    "level",
+]
+
+MCQ_METRICS = list(mcq_explorer_metric_columns())
+
+_DIM_LABELS = {BIN_DIM: "sample size bin"}
+
+
+@dataclass(frozen=True)
+class _ExplorerProfile:
+    categorical_dims: tuple[str, ...]
+    metrics: tuple[str, ...]
+    x_axis_options: tuple[str, ...]
+    default_y: str
+    default_x: str
+
+
+_CLUSTERING_PROFILE = _ExplorerProfile(
+    categorical_dims=tuple(CATEGORICAL_DIMS),
+    metrics=tuple(METRICS),
+    x_axis_options=tuple(X_AXIS_OPTIONS),
+    default_y="ari",
+    default_x="k",
+)
+
+_MCQ_PROFILE = _ExplorerProfile(
+    categorical_dims=MCQ_CATEGORICAL_DIMS,
+    metrics=tuple(MCQ_METRICS),
+    x_axis_options=tuple(MCQ_X_AXIS_OPTIONS),
+    default_y="answer_key_parse_rate",
+    default_x="subject",
+)
+
+
+def _build_profile_dim_widgets(
+    categorical_dims: tuple[str, ...],
+    dim_default_roles: dict[str, str],
+    *,
+    include_bin_dim: bool,
+) -> tuple[dict[str, pn.widgets.Select], dict[str, pn.widgets.MultiSelect], list]:
+    """Build role MultiSelect / Select widgets for one profile; optionally add BIN_DIM."""
+    role_sels: dict[str, pn.widgets.Select] = {}
+    val_filters: dict[str, pn.widgets.MultiSelect] = {}
+    blocks: list = []
+    dims = list(categorical_dims) + ([BIN_DIM] if include_bin_dim else [])
+    for dim in dims:
+        default_role = dim_default_roles.get(dim, "Free")
+        role_sel = pn.widgets.Select(
+            name=f"{dim} role",
+            options=DIM_ROLES,
+            value=default_role,
+            width=160,
+        )
+        val_filter = pn.widgets.MultiSelect(
+            name="values",
+            options=[],
+            value=[],
+            height=100,
+            width=175,
+            visible=(default_role in ROLES_WITH_VALUE_FILTER),
+        )
+        role_sels[dim] = role_sel
+        val_filters[dim] = val_filter
+        label = _DIM_LABELS.get(dim, dim)
+        blocks.append(
+            pn.Column(
+                pn.pane.Markdown(f"**{label}**"),
+                role_sel,
+                val_filter,
+                width=190,
+                margin=(0, 8, 0, 0),
+            )
+        )
+    return role_sels, val_filters, blocks
+
 
 # ===========================================================================
 # n_samples binning helpers
@@ -355,6 +496,14 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
 
     # --- State ---
     _state: dict = {"df": pd.DataFrame(), "loaded": False}
+
+    # --- Sweep type (clustering vs MCQ) ---
+    sweep_type_sel = pn.widgets.RadioButtonGroup(
+        name="Sweep type",
+        options=["Clustering", "MCQ"],
+        value="Clustering",
+        button_type="default",
+    )
 
     # --- Widgets: source toggle ---
     source_toggle = pn.widgets.RadioButtonGroup(
@@ -429,6 +578,11 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         step=1,
         width=300,
     )
+    k_range_section = pn.Column(
+        pn.pane.Markdown("### k Range"),
+        k_slider,
+        visible=True,
+    )
 
     # --- Widgets: sample size binning ---
     bin_edges_input = pn.widgets.TextInput(
@@ -438,42 +592,42 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         width=300,
     )
 
-    # --- Per-dimension role widgets ---
-    # role_sels[dim]   = Select widget for the role
-    # val_filters[dim] = MultiSelect for value filtering (visible when role affects the plot)
-    # dim_blocks[dim]  = Column containing both widgets (rendered in the layout)
-    role_sels: dict[str, pn.widgets.Select] = {}
-    val_filters: dict[str, pn.widgets.MultiSelect] = {}
-    dim_blocks: dict[str, pn.Column] = {}
+    # --- Per-dimension role widgets (clustering row, MCQ row, shared sample-size bin) ---
+    role_sels_c, val_filters_c, blocks_c = _build_profile_dim_widgets(
+        tuple(CATEGORICAL_DIMS), DIM_DEFAULT_ROLES, include_bin_dim=False
+    )
+    role_sels_m, val_filters_m, blocks_m = _build_profile_dim_widgets(
+        MCQ_CATEGORICAL_DIMS, MCQ_DIM_DEFAULT_ROLES, include_bin_dim=False
+    )
+    role_sels_bin, val_filters_bin, blocks_bin = _build_profile_dim_widgets(
+        (), {BIN_DIM: "Free"}, include_bin_dim=True
+    )
 
-    _DIM_LABELS = {BIN_DIM: "sample size bin"}
+    role_sels_c.update(role_sels_bin)
+    val_filters_c.update(val_filters_bin)
+    role_sels_m.update(role_sels_bin)
+    val_filters_m.update(val_filters_bin)
 
-    for dim in ALL_DIMS:
-        default_role = DIM_DEFAULT_ROLES.get(dim, "Free")
-        role_sel = pn.widgets.Select(
-            name=f"{dim} role",
-            options=DIM_ROLES,
-            value=default_role,
-            width=160,
-        )
-        val_filter = pn.widgets.MultiSelect(
-            name=f"values",
-            options=[],
-            value=[],
-            height=100,
-            width=175,
-            visible=(default_role in ROLES_WITH_VALUE_FILTER),
-        )
-        role_sels[dim] = role_sel
-        val_filters[dim] = val_filter
-        label = _DIM_LABELS.get(dim, dim)
-        dim_blocks[dim] = pn.Column(
-            pn.pane.Markdown(f"**{label}**"),
-            role_sel,
-            val_filter,
-            width=190,
-            margin=(0, 8, 0, 0),
-        )
+    dim_row_clustering = pn.Row(*blocks_c, sizing_mode="stretch_width")
+    dim_row_mcq = pn.Row(*blocks_m, sizing_mode="stretch_width")
+    dim_row_bin = pn.Row(*blocks_bin, sizing_mode="stretch_width")
+    dim_row_mcq.visible = False
+
+    def _is_mcq() -> bool:
+        return sweep_type_sel.value == "MCQ"
+
+    def _active_profile() -> _ExplorerProfile:
+        return _MCQ_PROFILE if _is_mcq() else _CLUSTERING_PROFILE
+
+    def _active_role_sels() -> dict[str, pn.widgets.Select]:
+        return role_sels_m if _is_mcq() else role_sels_c
+
+    def _active_val_filters() -> dict[str, pn.widgets.MultiSelect]:
+        return val_filters_m if _is_mcq() else val_filters_c
+
+    def _profile_dim_order() -> list[str]:
+        p = _active_profile()
+        return list(p.categorical_dims) + [BIN_DIM]
 
     # --- Plot pane ---
     plot_pane = pn.pane.Plotly(
@@ -486,8 +640,11 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     def _check_role_conflicts() -> str | None:
         """Return a warning string if any exclusive role is assigned to 2+ dims."""
         role_counts: dict[str, list[str]] = {}
-        for dim in ALL_DIMS:
-            role = role_sels[dim].value
+        rs = _active_role_sels()
+        for dim in _profile_dim_order():
+            if dim not in rs:
+                continue
+            role = rs[dim].value
             if role in EXCLUSIVE_ROLES:
                 role_counts.setdefault(role, []).append(dim)
         conflicts = [
@@ -520,20 +677,23 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             return
 
         # Read roles (only for dims present in the data)
-        active_dims = [d for d in ALL_DIMS if d in df.columns]
-        roles = {dim: role_sels[dim].value for dim in active_dims}
+        rs = _active_role_sels()
+        vf = _active_val_filters()
+        active_dims = [d for d in _profile_dim_order() if d in df.columns]
+        roles = {dim: rs[dim].value for dim in active_dims}
 
         # 1. Apply value filters for dims with a filterable role
         filtered = df
         for dim, role in roles.items():
             if role in ROLES_WITH_VALUE_FILTER:
-                selected = val_filters[dim].value
+                selected = vf[dim].value
                 if selected:
                     filtered = filtered[filtered[dim].isin(selected)]
 
-        # Apply k range
-        k_lo, k_hi = k_slider.value
-        filtered = filtered[(filtered["k"] >= k_lo) & (filtered["k"] <= k_hi)]
+        # Apply k range (clustering only; MCQ uses k=1)
+        if "k" in filtered.columns:
+            k_lo, k_hi = k_slider.value
+            filtered = filtered[(filtered["k"] >= k_lo) & (filtered["k"] <= k_hi)]
 
         # 2. Resolve facet/color dims from roles
         facet_row = next((d for d, r in roles.items() if r == "Grid rows"), None)
@@ -547,7 +707,13 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         x_axis = x_axis_sel.value
         agg_mode = agg_radio.value
 
-        aggregated = aggregate_df(filtered, y_metric, agg_mode, group_dims=group_dims)
+        aggregated = aggregate_df(
+            filtered,
+            y_metric,
+            agg_mode,
+            group_dims=group_dims,
+            x_axis=x_axis,
+        )
 
         fig = build_figure(
             aggregated,
@@ -563,10 +729,9 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         plot_pane.height = height_slider.value
 
     # --- Role change callback ---
-    def make_role_callback(dim: str):
+    def make_role_callback(dim: str, vf: pn.widgets.MultiSelect):
         def on_role_change(event):
             new_role = event.new
-            vf = val_filters[dim]
             vf.visible = (new_role in ROLES_WITH_VALUE_FILTER)
             if new_role in ROLES_WITH_VALUE_FILTER and not vf.options:
                 df = _state.get("df", pd.DataFrame())
@@ -586,6 +751,9 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
 
     # --- Source toggle callback ---
     def on_source_change(event=None):
+        if _is_mcq() and source_toggle.value == "Files":
+            source_toggle.value = "Database"
+            return
         is_files = source_toggle.value == "Files"
         data_dir_input.visible = is_files
         sweep_select.visible = not is_files
@@ -593,26 +761,64 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             _populate_sweep_options()
 
     def _populate_sweep_options():
-        """Fetch clustering_sweep list from DB and populate the selector."""
+        """Populate DB scope dropdown (clustering sweep or MCQ request)."""
         try:
             from panel_app.helpers import get_db_connection
             from study_query_llm.db.raw_call_repository import RawCallRepository
             from study_query_llm.services.sweep_query_service import SweepQueryService
+            from study_query_llm.services.sweep_request_service import SweepRequestService
+
             db = get_db_connection()
             with db.session_scope() as session:
                 repo = RawCallRepository(session)
-                svc = SweepQueryService(repo)
-                sweeps = svc.list_clustering_sweeps()
-            opts: dict = {"All": None}
-            for sw in sweeps:
-                label = f"{sw['name']}  ({sw['n_runs']} runs)"
-                opts[label] = sw["id"]
+                qsvc = SweepQueryService(repo)
+                if _is_mcq():
+                    rsvc = SweepRequestService(repo)
+                    reqs = rsvc.list_requests(
+                        sweep_type=SWEEP_TYPE_MCQ,
+                        include_fulfilled=True,
+                    )
+                    opts: dict = {"All": None}
+                    for r in reqs:
+                        label = f"{r['name']}  (id={r['id']}, {r.get('request_status', '?')})"
+                        opts[label] = r["id"]
+                    sweep_select.name = "MCQ request"
+                else:
+                    sweeps = qsvc.list_clustering_sweeps()
+                    opts = {"All": None}
+                    for sw in sweeps:
+                        label = f"{sw['name']}  ({sw['n_runs']} runs)"
+                        opts[label] = sw["id"]
+                    sweep_select.name = "Clustering sweep"
             sweep_select.options = opts
             sweep_select.value = None
         except Exception as exc:
             logger.warning("Could not populate sweep list: %s", exc)
 
     source_toggle.param.watch(on_source_change, "value")
+
+    def _apply_profile_widgets(event=None):
+        """Axis options, row visibility, and source rules when sweep type changes."""
+        prof = _active_profile()
+        _state["df"] = pd.DataFrame()
+        _state["loaded"] = False
+        load_status.object = "_Sweep type changed — click **Load / Reload**._"
+        y_axis_sel.options = list(prof.metrics)
+        if y_axis_sel.value not in prof.metrics:
+            y_axis_sel.value = prof.default_y
+        x_axis_sel.options = list(prof.x_axis_options)
+        if x_axis_sel.value not in prof.x_axis_options:
+            x_axis_sel.value = prof.default_x
+        dim_row_clustering.visible = not _is_mcq()
+        dim_row_mcq.visible = _is_mcq()
+        k_range_section.visible = not _is_mcq()
+        if _is_mcq():
+            source_toggle.value = "Database"
+            data_dir_input.visible = False
+            sweep_select.visible = True
+            _populate_sweep_options()
+        else:
+            on_source_change()
 
     # --- Load logic ---
     def load_data(event=None):
@@ -633,32 +839,40 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                     load_status.object = "**No matching pkl files found** in that directory."
                 return
 
-            k_min = int(df["k"].min())
-            k_max = int(df["k"].max())
-
-            for dim in CATEGORICAL_DIMS:
+            cat_dims = (
+                list(MCQ_CATEGORICAL_DIMS) if _is_mcq() else list(CATEGORICAL_DIMS)
+            )
+            vf_act = _active_val_filters()
+            rs_act = _active_role_sels()
+            for dim in cat_dims:
                 if dim in df.columns:
                     opts = sorted(df[dim].unique().tolist())
-                    val_filters[dim].options = opts
-                    if role_sels[dim].value in ROLES_WITH_VALUE_FILTER:
-                        val_filters[dim].value = opts
+                    vf_act[dim].options = opts
+                    if rs_act[dim].value in ROLES_WITH_VALUE_FILTER:
+                        vf_act[dim].value = opts
 
             # Update n_samples_bin options if bin edges are set
             edges = parse_bin_edges(bin_edges_input.value)
             if edges and "n_samples" in df.columns:
                 bins = assign_n_samples_bin(df["n_samples"], edges)
                 bin_opts = sorted(bins.unique().tolist())
-                val_filters[BIN_DIM].options = bin_opts
-                if role_sels[BIN_DIM].value in ROLES_WITH_VALUE_FILTER:
-                    val_filters[BIN_DIM].value = bin_opts
+                val_filters_bin[BIN_DIM].options = bin_opts
+                if rs_act[BIN_DIM].value in ROLES_WITH_VALUE_FILTER:
+                    val_filters_bin[BIN_DIM].value = bin_opts
 
-            k_slider.start = k_min
-            k_slider.end = k_max
-            k_slider.value = (k_min, k_max)
+            if "k" in df.columns:
+                k_min = int(df["k"].min())
+                k_max = int(df["k"].max())
+                k_slider.start = k_min
+                k_slider.end = k_max
+                k_slider.value = (k_min, k_max)
+                k_part = f"k: {k_min}–{k_max}"
+            else:
+                k_part = ""
 
             dim_summary = " | ".join(
                 f"{dim}: {df[dim].nunique()}"
-                for dim in CATEGORICAL_DIMS
+                for dim in cat_dims
                 if dim in df.columns
             )
             if source_toggle.value == "Database":
@@ -667,7 +881,8 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                 source_hint = data_dir_input.value.strip()
             load_status.object = (
                 f"**Loaded:** {len(df)} rows from {source_hint} | "
-                f"{dim_summary} | k: {k_min}–{k_max}"
+                f"{dim_summary}"
+                + (f" | {k_part}" if k_part else "")
             )
             refresh_plot()
         except Exception as e:
@@ -687,8 +902,20 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         with db.session_scope() as session:
             repo = RawCallRepository(session)
             svc = SweepQueryService(repo)
-            clustering_sweep_id = sweep_select.value  # None means "All"
-            df = svc.get_sweep_metrics_df(clustering_sweep_id=clustering_sweep_id)
+            scope_id = sweep_select.value  # None means "All"
+            if _is_mcq():
+                df = svc.get_mcq_metrics_df(mcq_request_id=scope_id)
+                extra_pct = [
+                    c
+                    for c in df.columns
+                    if c.startswith("pct_") and c not in MCQ_METRICS
+                ]
+                if extra_pct:
+                    cur = list(y_axis_sel.options)
+                    merged = list(dict.fromkeys(cur + sorted(extra_pct)))
+                    y_axis_sel.options = merged
+            else:
+                df = svc.get_sweep_metrics_df(clustering_sweep_id=scope_id)
         return df
 
     # --- Bin edges change callback ---
@@ -699,12 +926,13 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             refresh_plot()
             return
         edges = parse_bin_edges(bin_edges_input.value)
-        vf = val_filters[BIN_DIM]
+        vf = val_filters_bin[BIN_DIM]
+        rs_bin = role_sels_bin[BIN_DIM]
         if edges and "n_samples" in df.columns:
             bins = assign_n_samples_bin(df["n_samples"], edges)
             opts = sorted(bins.unique().tolist())
             vf.options = opts
-            if role_sels[BIN_DIM].value in ROLES_WITH_VALUE_FILTER:
+            if rs_bin.value in ROLES_WITH_VALUE_FILTER:
                 vf.value = opts
         else:
             vf.options = []
@@ -714,9 +942,22 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     # --- Wire callbacks ---
     load_button.on_click(load_data)
 
-    for dim in ALL_DIMS:
-        role_sels[dim].param.watch(make_role_callback(dim), "value")
-        val_filters[dim].param.watch(refresh_plot, "value")
+    for dim in role_sels_c:
+        if dim == BIN_DIM:
+            continue
+        role_sels_c[dim].param.watch(make_role_callback(dim, val_filters_c[dim]), "value")
+        val_filters_c[dim].param.watch(refresh_plot, "value")
+    for dim in role_sels_m:
+        if dim == BIN_DIM:
+            continue
+        role_sels_m[dim].param.watch(make_role_callback(dim, val_filters_m[dim]), "value")
+        val_filters_m[dim].param.watch(refresh_plot, "value")
+    role_sels_bin[BIN_DIM].param.watch(
+        make_role_callback(BIN_DIM, val_filters_bin[BIN_DIM]), "value"
+    )
+    val_filters_bin[BIN_DIM].param.watch(refresh_plot, "value")
+
+    sweep_type_sel.param.watch(_apply_profile_widgets, "value")
 
     bin_edges_input.param.watch(_update_bin_dim_options, "value")
 
@@ -726,9 +967,17 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         widget.param.watch(refresh_plot, "value_throttled")
 
     # --- Layout ---
-    dim_roles_row = pn.Row(*[dim_blocks[dim] for dim in ALL_DIMS])
+    dim_roles_column = pn.Column(
+        dim_row_clustering,
+        dim_row_mcq,
+        dim_row_bin,
+        sizing_mode="stretch_width",
+    )
 
     controls = pn.Column(
+        pn.pane.Markdown("### Sweep type"),
+        sweep_type_sel,
+        pn.layout.Divider(),
         pn.pane.Markdown("### Data Source"),
         source_toggle,
         pn.Row(data_dir_input, sweep_select, load_button),
@@ -750,13 +999,12 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             "**Grid rows**, **Grid cols**, or **Color**. Each exclusive role may only be assigned to one dimension. "
             "Dimensions with a plot role also show a value selector to include/exclude specific groups._"
         ),
-        dim_roles_row,
+        dim_roles_column,
         pn.layout.Divider(),
         pn.pane.Markdown("### Aggregation"),
         agg_radio,
         pn.layout.Divider(),
-        pn.pane.Markdown("### k Range"),
-        k_slider,
+        k_range_section,
         pn.layout.Divider(),
         pn.pane.Markdown("### Display"),
         height_slider,

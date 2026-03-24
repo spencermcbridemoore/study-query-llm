@@ -9,13 +9,16 @@ instead of pkl files.  Rows are one-per-restart-per-k, matching the
 
 from __future__ import annotations
 
-from typing import Optional, List
+import math
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from sqlalchemy import text as sa_text, func
 
+from ..analysis.mcq_from_run import compliance_rates_from_probe
 from ..db.models_v2 import Group, GroupLink
 from ..db.raw_call_repository import RawCallRepository
+from ..services.provenance_service import GROUP_TYPE_MCQ_RUN
 from ..services.sweep_request_service import SweepRequestService
 from ..utils.logging_config import get_logger
 
@@ -278,6 +281,73 @@ class SweepQueryService:
             ["dataset", "engine", "summarizer", "k", "run_idx"],
         ).reset_index(drop=True)
 
+    def get_mcq_metrics_df(self, mcq_request_id: Optional[int] = None) -> pd.DataFrame:
+        """
+        Build a tidy DataFrame with one row per ``mcq_run`` group.
+
+        When ``mcq_request_id`` is set, only runs linked to that request via
+        ``GroupLink`` (``link_type='contains'``, parent = request) are included.
+        When None, all ``mcq_run`` groups are returned (unbounded; use request
+        filter in UI when possible).
+
+        Columns include categoricals from run metadata, compliance metrics
+        (via :func:`compliance_rates_from_probe`), ``chi_square_vs_uniform``,
+        ``answer_count_total``, and per-label ``pct_{L}`` / ``count_{L}`` from
+        ``pooled_distribution``.
+        """
+        session = self.repository.session
+
+        if mcq_request_id is not None:
+            child_links = (
+                session.query(GroupLink)
+                .filter(
+                    GroupLink.parent_group_id == mcq_request_id,
+                    GroupLink.link_type == "contains",
+                )
+                .all()
+            )
+            run_ids = list({lnk.child_group_id for lnk in child_links})
+            if not run_ids:
+                return _empty_mcq_df()
+            runs = (
+                session.query(Group)
+                .filter(
+                    Group.group_type == GROUP_TYPE_MCQ_RUN,
+                    Group.id.in_(run_ids),
+                )
+                .all()
+            )
+        else:
+            runs = (
+                session.query(Group)
+                .filter(Group.group_type == GROUP_TYPE_MCQ_RUN)
+                .order_by(Group.id.asc())
+                .all()
+            )
+
+        if not runs:
+            return _empty_mcq_df()
+
+        runs_sorted = sorted(runs, key=lambda g: (str((g.metadata_json or {}).get("run_key") or ""), g.id))
+        rows: List[Dict[str, Any]] = []
+        for i, run in enumerate(runs_sorted):
+            rows.append(_mcq_row_from_group(run, run_idx=i))
+
+        df = pd.DataFrame(rows)
+        if df.empty:
+            return _empty_mcq_df()
+
+        df["k"] = df["k"].astype(int)
+        df["run_idx"] = df["run_idx"].astype(int)
+        df["n_samples"] = df["n_samples"].fillna(0).astype(int)
+        for cat in _MCQ_CATEGORICAL_COLS:
+            if cat in df.columns:
+                df[cat] = df[cat].astype(str)
+        return df.sort_values(
+            ["deployment", "subject", "run_key"],
+            kind="mergesort",
+        ).reset_index(drop=True)
+
     def count_runs(self) -> int:
         """Return the total number of sweep run groups in the DB."""
         session = self.repository.session
@@ -304,3 +374,114 @@ def _empty_df() -> pd.DataFrame:
     return pd.DataFrame({col: pd.Series([], dtype="float64" if col not in (
         "dataset", "engine", "summarizer", "data_type",
     ) else "str") for col in EXPECTED_COLUMNS})
+
+
+_MCQ_CATEGORICAL_COLS = (
+    "run_key",
+    "deployment",
+    "subject",
+    "level",
+    "options_per_question",
+    "questions_per_test",
+    "label_style",
+    "spread_correct_answer_uniformly",
+    "samples_per_combo",
+    "template_version",
+)
+
+_MCQ_STATIC_FLOAT_COLS = (
+    "chi_square_vs_uniform",
+    "answer_count_total",
+    "format_compliance_rate",
+    "question_count_compliance_rate",
+    "answer_key_parse_rate",
+)
+
+
+def _mcq_row_from_group(run: Group, run_idx: int) -> Dict[str, Any]:
+    meta = dict(run.metadata_json or {})
+    summary = dict(meta.get("result_summary") or {})
+    probe_details: Dict[str, Any] = {
+        "summary": summary,
+        "call_errors": [],
+        "parse_failures": [],
+    }
+    rates = compliance_rates_from_probe(probe_details)
+
+    n_samples = int(
+        summary.get("answer_count_total")
+        or summary.get("samples_with_valid_answer_key")
+        or 0
+    )
+    chi = summary.get("chi_square_vs_uniform")
+    try:
+        chi_f = float(chi)
+    except (TypeError, ValueError):
+        chi_f = float("nan")
+
+    row: Dict[str, Any] = {
+        "run_key": str(meta.get("run_key", "")),
+        "deployment": str(meta.get("deployment", "") or summary.get("deployment", "") or ""),
+        "subject": str(meta.get("subject", "") or summary.get("subject", "") or ""),
+        "level": str(meta.get("level") or summary.get("level") or ""),
+        "options_per_question": str(meta.get("options_per_question", "")),
+        "questions_per_test": str(meta.get("questions_per_test", "")),
+        "label_style": str(meta.get("label_style", "")),
+        "spread_correct_answer_uniformly": str(meta.get("spread_correct_answer_uniformly", "")),
+        "samples_per_combo": str(meta.get("samples_per_combo", "")),
+        "template_version": str(meta.get("template_version", "")),
+        "k": 1,
+        "run_idx": int(run_idx),
+        "n_samples": n_samples,
+        "chi_square_vs_uniform": chi_f,
+        "answer_count_total": float(summary.get("answer_count_total") or 0),
+        **rates,
+    }
+
+    pooled = summary.get("pooled_distribution") or {}
+    for lab, cell in pooled.items():
+        if not lab:
+            continue
+        key = str(lab).upper()
+        cell_d = cell or {}
+        pct = cell_d.get("pct")
+        cnt = cell_d.get("count")
+        if isinstance(pct, (int, float)) and not (isinstance(pct, float) and math.isnan(float(pct))):
+            row[f"pct_{key}"] = float(pct)
+        else:
+            row[f"pct_{key}"] = float("nan")
+        try:
+            row[f"count_{key}"] = int(cnt) if cnt is not None else 0
+        except (TypeError, ValueError):
+            row[f"count_{key}"] = 0
+
+    return row
+
+
+def _empty_mcq_df() -> pd.DataFrame:
+    str_cols = list(_MCQ_CATEGORICAL_COLS)
+    num_cols = ["k", "run_idx", "n_samples"] + list(_MCQ_STATIC_FLOAT_COLS)
+    # Placeholder label columns so the Panel metric list can resolve when DB is empty
+    for lab in ("A", "B", "C", "D", "E"):
+        num_cols.append(f"pct_{lab}")
+        num_cols.append(f"count_{lab}")
+    cols: Dict[str, pd.Series] = {
+        c: pd.Series([], dtype="str") for c in str_cols
+    }
+    cols.update({c: pd.Series([], dtype="float64") for c in num_cols})
+    return pd.DataFrame(cols)
+
+
+# Public list of MCQ metric column names for Panel (excludes ids / raw counts if desired)
+def mcq_explorer_metric_columns() -> List[str]:
+    """Scalar/plot Y-axis columns for MCQ sweep explorer (stable ordering)."""
+    base = [
+        "format_compliance_rate",
+        "question_count_compliance_rate",
+        "answer_key_parse_rate",
+        "chi_square_vs_uniform",
+        "answer_count_total",
+    ]
+    for lab in ("A", "B", "C", "D", "E"):
+        base.append(f"pct_{lab}")
+    return base

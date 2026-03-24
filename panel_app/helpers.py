@@ -55,13 +55,21 @@ def get_database_health_markdown() -> str:
             n_groups = session.query(Group).count()
             n_raw = session.query(RawCall).count()
         target = database_connection_summary(config.database.connection_string)
+        empty_note = ""
+        if n_groups == 0 and n_raw == 0:
+            empty_note = (
+                "\n\n**Note:** The Inference tab lists deployments from your **provider API**, "
+                "not from `groups` / `raw_calls`. Groups, Embeddings, Analytics, and Sweep Explorer "
+                "only show rows **written to this** `DATABASE_URL`. If you expected data, point "
+                "`DATABASE_URL` at the same Postgres branch where you ingest sweeps or run workers."
+            )
         return (
             "### Database\n\n"
             "**Status:** connected  \n"
             f"**Target:** `{target}`  \n"
             f"**Groups:** {n_groups:,} &nbsp;·&nbsp; **Raw calls:** {n_raw:,}  \n\n"
-            "_If both counts are zero, the app is still talking to the database; "
-            "this project may simply have no rows ingested yet._"
+            "_If both counts are zero, this database has no v2 `groups` / `raw_calls` rows yet._"
+            f"{empty_note}"
         )
     except Exception as exc:
         logger.exception("Database health check failed")

@@ -158,9 +158,9 @@ def aggregate_df(
     Transform the flat DataFrame according to the aggregation mode.
 
     Args:
-        group_dims: Which categorical dimensions to group by. Only dims that
-            have a visual role (Grid rows/cols/Color) should be included so that
-            "Free" dims don't accidentally split aggregated series. Defaults to
+        group_dims: Which categorical dimensions to group by. Include dims with
+            visual roles (Grid rows/cols/Color) and **Mean group** so that
+            "Free" / "Filter" dims don't split aggregated series. Defaults to
             all CATEGORICAL_DIMS for backward compatibility.
 
     Returns a DataFrame ready for plotting, adding `y_err` column for Mean±stdev.
@@ -239,12 +239,17 @@ def build_figure(
     color_dim: Optional[str],
     agg_mode: str,
     plot_height: int = 600,
+    *,
+    connect_lines: bool = True,
 ) -> go.Figure:
     """
     Build a Plotly figure from the prepared DataFrame.
 
     Uses px.line for standard modes, px.scatter for Last k only,
     and adds error bands for Mean±stdev.
+
+    If connect_lines is False, scatter traces use markers only; if True, lines
+    connect points (scatter sorted by x for stable polylines).
     """
     if df.empty or y_metric not in df.columns:
         fig = go.Figure()
@@ -278,8 +283,14 @@ def build_figure(
         if col in plot_df.columns:
             plot_df[col] = plot_df[col].astype(str)
 
+    xcol = x_axis if x_axis in plot_df.columns else "k"
+    if agg_mode == "Last k only" and connect_lines:
+        sort_cols = [c for c in [xcol, color, facet_row, facet_col] if c and c in plot_df.columns]
+        if sort_cols:
+            plot_df = plot_df.sort_values(sort_cols, kind="mergesort")
+
     common_kwargs = dict(
-        x=x_axis if x_axis in plot_df.columns else "k",
+        x=xcol,
         y=y_metric,
         facet_row=facet_row,
         facet_col=facet_col,
@@ -318,17 +329,154 @@ def build_figure(
     fig.update_xaxes(title_text=x_axis)
     fig.update_yaxes(title_text=y_metric)
 
+    if connect_lines:
+        fig.update_traces(mode="lines+markers", selector=dict(type="scatter"))
+    else:
+        fig.update_traces(mode="markers", selector=dict(type="scatter"))
+
+    return fig
+
+
+MAX_BAR_METRICS = 12
+
+
+def aggregated_metrics_long(
+    filtered: pd.DataFrame,
+    metrics: list[str],
+    agg_mode: str,
+    group_dims: list[str],
+    x_axis: str,
+    facet_row: Optional[str],
+    facet_col: Optional[str],
+) -> pd.DataFrame:
+    """One row per (facet cells, x bucket, metric) for grouped bar charts."""
+    rows: list[dict] = []
+    facet_keys = [c for c in [facet_row, facet_col] if c and c in filtered.columns]
+
+    for m in metrics:
+        if m not in filtered.columns:
+            continue
+        agg = aggregate_df(
+            filtered, m, agg_mode, group_dims=group_dims, x_axis=x_axis
+        )
+        if agg.empty:
+            continue
+        xcol = x_axis if x_axis in agg.columns else ("k" if "k" in agg.columns else None)
+        use = agg.dropna(subset=[m])
+        if use.empty:
+            continue
+        for _, r in use.iterrows():
+            extras = [
+                d
+                for d in group_dims
+                if d in r.index
+                and d != facet_row
+                and d != facet_col
+                and d != xcol
+            ]
+            if xcol is None:
+                x_cat = (
+                    " | ".join(str(r[d]) for d in extras) if extras else "(all)"
+                )
+            elif extras:
+                x_cat = str(r[xcol]) + " | " + " | ".join(str(r[d]) for d in extras)
+            else:
+                x_cat = str(r[xcol])
+            rec: dict = {
+                "x_cat": x_cat,
+                "metric": m,
+                "value": float(r[m]),
+            }
+            if "y_err" in use.columns:
+                ev = r["y_err"]
+                rec["y_err"] = float(ev) if pd.notna(ev) else np.nan
+            else:
+                rec["y_err"] = np.nan
+            for fk in facet_keys:
+                if fk in r.index:
+                    rec[fk] = r[fk]
+            rows.append(rec)
+
+    if not rows:
+        return pd.DataFrame(columns=["x_cat", "metric", "value", "y_err", *facet_keys])
+
+    long_df = pd.DataFrame(rows)
+    for fk in facet_keys:
+        if fk in long_df.columns:
+            long_df[fk] = long_df[fk].astype(str)
+    return long_df
+
+
+def build_figure_bars(
+    long_df: pd.DataFrame,
+    x_axis: str,
+    row_dim: Optional[str],
+    col_dim: Optional[str],
+    agg_mode: str,
+    plot_height: int = 600,
+) -> go.Figure:
+    """Grouped bars: x = category, color = metric name."""
+    if long_df.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No bar data (check metrics and filters).",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16),
+        )
+        fig.update_layout(height=plot_height)
+        return fig
+
+    plot_df = long_df.copy()
+    facet_row = row_dim if row_dim and row_dim != "None" else None
+    facet_col = col_dim if col_dim and col_dim != "None" else None
+
+    use_err = "y_err" in plot_df.columns and plot_df["y_err"].notna().any()
+    if use_err:
+        fig = px.bar(
+            plot_df,
+            x="x_cat",
+            y="value",
+            color="metric",
+            facet_row=facet_row,
+            facet_col=facet_col,
+            barmode="group",
+            title=f"Grouped metrics — {agg_mode}",
+            error_y="y_err",
+        )
+    else:
+        fig = px.bar(
+            plot_df,
+            x="x_cat",
+            y="value",
+            color="metric",
+            facet_row=facet_row,
+            facet_col=facet_col,
+            barmode="group",
+            title=f"Grouped metrics — {agg_mode}",
+        )
+
+    fig.update_layout(
+        height=plot_height,
+        margin=dict(l=40, r=20, t=60, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    fig.update_xaxes(title_text=x_axis)
+    fig.update_yaxes(title_text="value")
     return fig
 
 
 # Roles available for each categorical dimension
-DIM_ROLES = ["Free", "Filter", "Grid rows", "Grid cols", "Color"]
+DIM_ROLES = ["Free", "Filter", "Mean group", "Grid rows", "Grid cols", "Color"]
 
 # Exclusive roles — only one dimension may hold each at a time
 EXCLUSIVE_ROLES = {"Grid rows", "Grid cols", "Color"}
 
 # Roles that show a value filter MultiSelect
-ROLES_WITH_VALUE_FILTER = {"Filter", "Grid rows", "Grid cols", "Color"}
+ROLES_WITH_VALUE_FILTER = {"Filter", "Mean group", "Grid rows", "Grid cols", "Color"}
 
 # Derived n_samples bin dimension name
 BIN_DIM = "n_samples_bin"
@@ -495,7 +643,11 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     """Create the interactive Sweep Explorer tab with per-dimension role selectors."""
 
     # --- State ---
-    _state: dict = {"df": pd.DataFrame(), "loaded": False}
+    _state: dict = {
+        "df": pd.DataFrame(),
+        "loaded": False,
+        "load_summary": "_No data loaded._",
+    }
 
     # --- Sweep type (clustering vs MCQ) ---
     sweep_type_sel = pn.widgets.RadioButtonGroup(
@@ -549,6 +701,27 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         options=X_AXIS_OPTIONS,
         value="k",
         width=150,
+    )
+
+    plot_type_sel = pn.widgets.RadioButtonGroup(
+        name="Plot type",
+        options=["Line plot", "Grouped metrics (bars)"],
+        value="Line plot",
+        button_type="default",
+    )
+
+    metrics_multi = pn.widgets.MultiSelect(
+        name="Metrics (bars)",
+        options=list(METRICS),
+        value=["ari"],
+        height=120,
+        width=300,
+        visible=False,
+    )
+
+    connect_lines_chk = pn.widgets.Checkbox(
+        name="Connect points (show lines)",
+        value=True,
     )
 
     # --- Widgets: aggregation ---
@@ -631,7 +804,16 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
 
     # --- Plot pane ---
     plot_pane = pn.pane.Plotly(
-        build_figure(pd.DataFrame(), "ari", "k", "summarizer", "dataset", "engine", "Mean"),
+        build_figure(
+            pd.DataFrame(),
+            "ari",
+            "k",
+            "summarizer",
+            "dataset",
+            "engine",
+            "Mean",
+            connect_lines=True,
+        ),
         sizing_mode="stretch_width",
         height=700,
     )
@@ -657,6 +839,7 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     # --- Plot refresh logic ---
     def refresh_plot(event=None):
         df = _state.get("df", pd.DataFrame())
+        base = _state.get("load_summary", "_No data loaded._")
         if df.empty:
             return
 
@@ -700,33 +883,70 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         facet_col = next((d for d, r in roles.items() if r == "Grid cols"), None)
         color_dim = next((d for d, r in roles.items() if r == "Color"), None)
 
-        # 3. Dims with a visual role are grouped in aggregation; Free/Filter dims are not
-        group_dims = [d for d, r in roles.items() if r in ("Grid rows", "Grid cols", "Color")]
+        # 3. Dims with a visual or mean-group role are grouped in aggregation
+        group_dims = [
+            d
+            for d, r in roles.items()
+            if r in ("Grid rows", "Grid cols", "Color", "Mean group")
+        ]
 
-        y_metric = y_axis_sel.value
         x_axis = x_axis_sel.value
         agg_mode = agg_radio.value
+        is_line = plot_type_sel.value == "Line plot"
+        connect_lines = connect_lines_chk.value
 
-        aggregated = aggregate_df(
-            filtered,
-            y_metric,
-            agg_mode,
-            group_dims=group_dims,
-            x_axis=x_axis,
-        )
+        bar_color_ignored = bool(not is_line and color_dim)
 
-        fig = build_figure(
-            aggregated,
-            y_metric=y_metric,
-            x_axis=x_axis,
-            row_dim=facet_row,
-            col_dim=facet_col,
-            color_dim=color_dim,
-            agg_mode=agg_mode,
-            plot_height=height_slider.value,
-        )
+        if is_line:
+            y_metric = y_axis_sel.value
+            aggregated = aggregate_df(
+                filtered,
+                y_metric,
+                agg_mode,
+                group_dims=group_dims,
+                x_axis=x_axis,
+            )
+            fig = build_figure(
+                aggregated,
+                y_metric=y_metric,
+                x_axis=x_axis,
+                row_dim=facet_row,
+                col_dim=facet_col,
+                color_dim=color_dim,
+                agg_mode=agg_mode,
+                plot_height=height_slider.value,
+                connect_lines=connect_lines,
+            )
+        else:
+            chosen = list(metrics_multi.value or [])[:MAX_BAR_METRICS]
+            long_df = aggregated_metrics_long(
+                filtered,
+                chosen,
+                agg_mode,
+                group_dims,
+                x_axis,
+                facet_row,
+                facet_col,
+            )
+            fig = build_figure_bars(
+                long_df,
+                x_axis,
+                facet_row,
+                facet_col,
+                agg_mode,
+                plot_height=height_slider.value,
+            )
+
         plot_pane.object = fig
         plot_pane.height = height_slider.value
+
+        suffix = ""
+        if bar_color_ignored:
+            suffix = (
+                "\n\n_Bar mode: **Color** role is ignored; "
+                "legend shows metrics._"
+            )
+        load_status.object = base + suffix
 
     # --- Role change callback ---
     def make_role_callback(dim: str, vf: pn.widgets.MultiSelect):
@@ -802,10 +1022,20 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         prof = _active_profile()
         _state["df"] = pd.DataFrame()
         _state["loaded"] = False
-        load_status.object = "_Sweep type changed — click **Load / Reload**._"
+        _state["load_summary"] = "_Sweep type changed — click **Load / Reload**._"
+        load_status.object = _state["load_summary"]
         y_axis_sel.options = list(prof.metrics)
         if y_axis_sel.value not in prof.metrics:
             y_axis_sel.value = prof.default_y
+        metrics_multi.options = list(prof.metrics)
+        if metrics_multi.value and all(m in prof.metrics for m in metrics_multi.value):
+            pass
+        else:
+            metrics_multi.value = (
+                [prof.default_y]
+                if prof.default_y in prof.metrics
+                else ([prof.metrics[0]] if prof.metrics else [])
+            )
         x_axis_sel.options = list(prof.x_axis_options)
         if x_axis_sel.value not in prof.x_axis_options:
             x_axis_sel.value = prof.default_x
@@ -837,6 +1067,7 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                     load_status.object = "**No sweep run groups found** in the database."
                 else:
                     load_status.object = "**No matching pkl files found** in that directory."
+                _state["load_summary"] = load_status.object
                 return
 
             cat_dims = (
@@ -884,10 +1115,12 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                 f"{dim_summary}"
                 + (f" | {k_part}" if k_part else "")
             )
+            _state["load_summary"] = load_status.object
             refresh_plot()
         except Exception as e:
             logger.error("Failed to load sweep data: %s", e, exc_info=True)
             load_status.object = f"**Error:** {e}"
+            _state["load_summary"] = load_status.object
 
     def _load_from_files() -> pd.DataFrame:
         data_dir = data_dir_input.value.strip()
@@ -914,6 +1147,9 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
                     cur = list(y_axis_sel.options)
                     merged = list(dict.fromkeys(cur + sorted(extra_pct)))
                     y_axis_sel.options = merged
+                    m_opts = list(metrics_multi.options)
+                    merged_m = list(dict.fromkeys(m_opts + sorted(extra_pct)))
+                    metrics_multi.options = merged_m
             else:
                 df = svc.get_sweep_metrics_df(clustering_sweep_id=scope_id)
         return df
@@ -961,7 +1197,16 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
 
     bin_edges_input.param.watch(_update_bin_dim_options, "value")
 
-    for widget in [y_axis_sel, x_axis_sel, agg_radio]:
+    def _sync_plot_type_widgets(event=None):
+        is_line = plot_type_sel.value == "Line plot"
+        y_axis_sel.visible = is_line
+        metrics_multi.visible = not is_line
+        connect_lines_chk.visible = is_line
+        refresh_plot()
+
+    plot_type_sel.param.watch(_sync_plot_type_widgets, "value")
+
+    for widget in [y_axis_sel, x_axis_sel, agg_radio, metrics_multi, connect_lines_chk]:
         widget.param.watch(refresh_plot, "value")
     for widget in [height_slider, k_slider]:
         widget.param.watch(refresh_plot, "value_throttled")
@@ -983,8 +1228,11 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         pn.Row(data_dir_input, sweep_select, load_button),
         load_status,
         pn.layout.Divider(),
-        pn.pane.Markdown("### Axes"),
+        pn.pane.Markdown("### Axes & plot"),
+        plot_type_sel,
         pn.Row(y_axis_sel, x_axis_sel),
+        metrics_multi,
+        connect_lines_chk,
         pn.layout.Divider(),
         pn.pane.Markdown(
             "### Sample Size Binning\n"
@@ -996,7 +1244,8 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         pn.pane.Markdown(
             "### Dimension Roles\n"
             "_Each dimension can be: **Free** (pass-through), **Filter** (include/exclude values), "
-            "**Grid rows**, **Grid cols**, or **Color**. Each exclusive role may only be assigned to one dimension. "
+            "**Mean group** (split aggregation means without facet/color), **Grid rows**, **Grid cols**, or **Color**. "
+            "Each exclusive role (**Grid rows**, **Grid cols**, **Color**) may only be assigned to one dimension. "
             "Dimensions with a plot role also show a value selector to include/exclude specific groups._"
         ),
         dim_roles_column,
@@ -1011,6 +1260,8 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
         sizing_mode="stretch_width",
         margin=(10, 10),
     )
+
+    _sync_plot_type_widgets()
 
     return pn.Column(
         pn.pane.Markdown("## Sweep Explorer"),

@@ -103,6 +103,8 @@ dmypy.json
 !tsconfig.json
 !config/mcq_probe_template.json
 !config/mcq_sweep_highschool_college_20q.json
+!config/mcq_sweep_highschool_college_20q_5samples.json
+!config/mcq_sweep_highschool_college_20q_50samples.json
 
 # OS files
 .DS_Store

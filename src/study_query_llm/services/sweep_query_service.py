@@ -10,15 +10,23 @@ instead of pkl files.  Rows are one-per-restart-per-k, matching the
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from sqlalchemy import text as sa_text, func
+from sqlalchemy.orm import Session, aliased
 
 from ..analysis.mcq_from_run import compliance_rates_from_probe
 from ..db.models_v2 import Group, GroupLink
 from ..db.raw_call_repository import RawCallRepository
-from ..services.provenance_service import GROUP_TYPE_MCQ_RUN
+from ..services.provenance_service import (
+    GROUP_TYPE_CLUSTERING_SWEEP,
+    GROUP_TYPE_CLUSTERING_SWEEP_REQUEST,
+    GROUP_TYPE_MCQ_RUN,
+    GROUP_TYPE_MCQ_SWEEP,
+    GROUP_TYPE_MCQ_SWEEP_REQUEST,
+)
 from ..services.sweep_request_service import SweepRequestService
 from ..utils.logging_config import get_logger
 
@@ -26,10 +34,77 @@ logger = get_logger(__name__)
 
 EXPECTED_COLUMNS = [
     "dataset", "engine", "summarizer", "data_type",
+    "clustering_sweep_id",
     "k", "run_idx", "n_samples",
     "objective", "dispersion", "silhouette", "ari",
     "cosine_sim", "cosine_sim_norm",
 ]
+
+_CLUSTERING_PARENT_TYPES = (
+    GROUP_TYPE_CLUSTERING_SWEEP,
+    GROUP_TYPE_CLUSTERING_SWEEP_REQUEST,
+)
+_CLUSTERING_PARENT_PREFERENCE = (
+    GROUP_TYPE_CLUSTERING_SWEEP,
+    GROUP_TYPE_CLUSTERING_SWEEP_REQUEST,
+)
+
+_MCQ_PARENT_TYPES = (
+    GROUP_TYPE_MCQ_SWEEP_REQUEST,
+    GROUP_TYPE_MCQ_SWEEP,
+)
+_MCQ_PARENT_PREFERENCE = (
+    GROUP_TYPE_MCQ_SWEEP_REQUEST,
+    GROUP_TYPE_MCQ_SWEEP,
+)
+
+_NO_PARENT_SCOPE_SENTINEL = ""
+
+
+def _parent_scope_id_by_child_run(
+    session: Session,
+    run_ids: List[int],
+    *,
+    allowed_parent_types: tuple[str, ...],
+    preference_order: tuple[str, ...],
+) -> Dict[int, int]:
+    """
+    Map each child run group id to a single parent scope id via ``contains`` links.
+
+    When multiple parents match (e.g. both sweep and request), pick the type that
+    appears earliest in *preference_order*; ties use ``min(parent_group_id)``.
+    """
+    if not run_ids:
+        return {}
+    type_rank = {t: i for i, t in enumerate(preference_order)}
+    Parent = aliased(Group)
+    rows = (
+        session.query(
+            GroupLink.child_group_id,
+            GroupLink.parent_group_id,
+            Parent.group_type,
+        )
+        .join(Parent, Parent.id == GroupLink.parent_group_id)
+        .filter(
+            GroupLink.child_group_id.in_(run_ids),
+            GroupLink.link_type == "contains",
+            Parent.deleted_at.is_(None),
+            Parent.group_type.in_(allowed_parent_types),
+        )
+        .all()
+    )
+    by_child: dict[int, list[tuple[int, str]]] = defaultdict(list)
+    for child_id, parent_id, gtype in rows:
+        if gtype not in type_rank:
+            continue
+        by_child[child_id].append((parent_id, gtype))
+
+    out: dict[int, int] = {}
+    for child_id, candidates in by_child.items():
+        best_rank = min(type_rank[gt] for _, gt in candidates)
+        best = [(pid, gt) for pid, gt in candidates if type_rank[gt] == best_rank]
+        out[child_id] = min(pid for pid, _ in best)
+    return out
 
 
 class SweepQueryService:
@@ -48,7 +123,10 @@ class SweepQueryService:
         session = self.repository.session
         sweeps = (
             session.query(Group)
-            .filter(Group.group_type == "clustering_sweep")
+            .filter(
+                Group.group_type == "clustering_sweep",
+                Group.deleted_at.is_(None),
+            )
             .order_by(Group.created_at.desc())
             .all()
         )
@@ -157,10 +235,12 @@ class SweepQueryService:
             query = session.query(Group).filter(
                 Group.group_type == "clustering_run",
                 Group.id.in_(run_ids),
+                Group.deleted_at.is_(None),
             )
         else:
             query = session.query(Group).filter(
                 Group.group_type == "clustering_run",
+                Group.deleted_at.is_(None),
                 sa_text("metadata_json->>'algorithm' LIKE :alg"),
             ).params(alg="cosine_kllmeans%")
         if dataset:
@@ -200,6 +280,20 @@ class SweepQueryService:
 
         run_ids = list(run_meta.keys())
 
+        if clustering_sweep_id is not None:
+            run_to_scope = {rid: str(clustering_sweep_id) for rid in run_ids}
+        else:
+            pmap = _parent_scope_id_by_child_run(
+                session,
+                run_ids,
+                allowed_parent_types=_CLUSTERING_PARENT_TYPES,
+                preference_order=_CLUSTERING_PARENT_PREFERENCE,
+            )
+            run_to_scope = {
+                rid: str(pmap[rid]) if rid in pmap else _NO_PARENT_SCOPE_SENTINEL
+                for rid in run_ids
+            }
+
         # Bulk fetch all clustering_step links for every run in one query
         all_step_links = (
             session.query(GroupLink)
@@ -223,7 +317,10 @@ class SweepQueryService:
         # Bulk fetch all step groups in one query — only metadata_json needed
         steps = (
             session.query(Group)
-            .filter(Group.id.in_(step_ids))
+            .filter(
+                Group.id.in_(step_ids),
+                Group.deleted_at.is_(None),
+            )
             .all()
         )
 
@@ -257,6 +354,7 @@ class SweepQueryService:
                     "engine": rmeta["engine"],
                     "summarizer": rmeta["summarizer"],
                     "data_type": rmeta["data_type"],
+                    "clustering_sweep_id": run_to_scope[run_id],
                     "k": k,
                     "run_idx": i,
                     "n_samples": n_samples,
@@ -275,10 +373,23 @@ class SweepQueryService:
         df["k"] = df["k"].astype(int)
         df["run_idx"] = df["run_idx"].astype(int)
         df["n_samples"] = df["n_samples"].fillna(0).astype(int)
-        for cat in ("dataset", "engine", "summarizer", "data_type"):
+        for cat in (
+            "dataset",
+            "engine",
+            "summarizer",
+            "data_type",
+            "clustering_sweep_id",
+        ):
             df[cat] = df[cat].astype(str)
         return df.sort_values(
-            ["dataset", "engine", "summarizer", "k", "run_idx"],
+            [
+                "clustering_sweep_id",
+                "dataset",
+                "engine",
+                "summarizer",
+                "k",
+                "run_idx",
+            ],
         ).reset_index(drop=True)
 
     def get_mcq_metrics_df(self, mcq_request_id: Optional[int] = None) -> pd.DataFrame:
@@ -314,13 +425,17 @@ class SweepQueryService:
                 .filter(
                     Group.group_type == GROUP_TYPE_MCQ_RUN,
                     Group.id.in_(run_ids),
+                    Group.deleted_at.is_(None),
                 )
                 .all()
             )
         else:
             runs = (
                 session.query(Group)
-                .filter(Group.group_type == GROUP_TYPE_MCQ_RUN)
+                .filter(
+                    Group.group_type == GROUP_TYPE_MCQ_RUN,
+                    Group.deleted_at.is_(None),
+                )
                 .order_by(Group.id.asc())
                 .all()
             )
@@ -328,10 +443,31 @@ class SweepQueryService:
         if not runs:
             return _empty_mcq_df()
 
+        run_id_list = [r.id for r in runs]
+        if mcq_request_id is not None:
+            run_to_mcq_scope = {rid: str(mcq_request_id) for rid in run_id_list}
+        else:
+            pmap = _parent_scope_id_by_child_run(
+                session,
+                run_id_list,
+                allowed_parent_types=_MCQ_PARENT_TYPES,
+                preference_order=_MCQ_PARENT_PREFERENCE,
+            )
+            run_to_mcq_scope = {
+                rid: str(pmap[rid]) if rid in pmap else _NO_PARENT_SCOPE_SENTINEL
+                for rid in run_id_list
+            }
+
         runs_sorted = sorted(runs, key=lambda g: (str((g.metadata_json or {}).get("run_key") or ""), g.id))
         rows: List[Dict[str, Any]] = []
         for i, run in enumerate(runs_sorted):
-            rows.append(_mcq_row_from_group(run, run_idx=i))
+            rows.append(
+                _mcq_row_from_group(
+                    run,
+                    run_idx=i,
+                    parent_mcq_request_id=run_to_mcq_scope[run.id],
+                )
+            )
 
         df = pd.DataFrame(rows)
         if df.empty:
@@ -355,6 +491,7 @@ class SweepQueryService:
             session.query(Group)
             .filter(
                 Group.group_type == "clustering_run",
+                Group.deleted_at.is_(None),
                 sa_text("metadata_json->>'algorithm' LIKE :alg"),
             )
             .params(alg="cosine_kllmeans%")
@@ -371,13 +508,24 @@ def _safe_idx(lst: list, idx: int):
 
 
 def _empty_df() -> pd.DataFrame:
-    return pd.DataFrame({col: pd.Series([], dtype="float64" if col not in (
-        "dataset", "engine", "summarizer", "data_type",
-    ) else "str") for col in EXPECTED_COLUMNS})
+    str_cols = (
+        "dataset",
+        "engine",
+        "summarizer",
+        "data_type",
+        "clustering_sweep_id",
+    )
+    return pd.DataFrame(
+        {
+            col: pd.Series([], dtype="float64" if col not in str_cols else "str")
+            for col in EXPECTED_COLUMNS
+        }
+    )
 
 
 _MCQ_CATEGORICAL_COLS = (
     "run_key",
+    "mcq_request_id",
     "deployment",
     "subject",
     "level",
@@ -398,7 +546,12 @@ _MCQ_STATIC_FLOAT_COLS = (
 )
 
 
-def _mcq_row_from_group(run: Group, run_idx: int) -> Dict[str, Any]:
+def _mcq_row_from_group(
+    run: Group,
+    run_idx: int,
+    *,
+    parent_mcq_request_id: str = _NO_PARENT_SCOPE_SENTINEL,
+) -> Dict[str, Any]:
     meta = dict(run.metadata_json or {})
     summary = dict(meta.get("result_summary") or {})
     probe_details: Dict[str, Any] = {
@@ -421,6 +574,7 @@ def _mcq_row_from_group(run: Group, run_idx: int) -> Dict[str, Any]:
 
     row: Dict[str, Any] = {
         "run_key": str(meta.get("run_key", "")),
+        "mcq_request_id": str(parent_mcq_request_id),
         "deployment": str(meta.get("deployment", "") or summary.get("deployment", "") or ""),
         "subject": str(meta.get("subject", "") or summary.get("subject", "") or ""),
         "level": str(meta.get("level") or summary.get("level") or ""),

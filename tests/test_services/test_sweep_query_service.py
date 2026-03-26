@@ -4,27 +4,17 @@ from __future__ import annotations
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.services.provenance_service import GROUP_TYPE_MCQ_RUN
+from study_query_llm.services.provenance_service import (
+    GROUP_TYPE_MCQ_RUN,
+    GROUP_TYPE_MCQ_SWEEP_REQUEST,
+)
 from study_query_llm.services.sweep_query_service import SweepQueryService
-from study_query_llm.services.sweep_request_service import SweepRequestService
 
 
 def _db():
     db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
     db.init_db()
     return db
-
-
-def _mcq_axes():
-    return {
-        "levels": ["high school"],
-        "subjects": ["physics"],
-        "deployments": ["gpt-4o-mini"],
-        "options_per_question": [4],
-        "questions_per_test": [20],
-        "label_styles": ["upper"],
-        "spread_correct_answer_uniformly": [False],
-    }
 
 
 def _summary_with_pooled():
@@ -57,23 +47,23 @@ def test_get_mcq_metrics_df_empty():
     assert df.empty
     assert "pct_A" in df.columns
     assert "format_compliance_rate" in df.columns
+    assert "mcq_request_id" in df.columns
 
 
 def test_get_mcq_metrics_df_all_runs_and_request_filter():
     db = _db()
+    run_key = "4opt_20q_upper_no_spread_50samples_v1"
     with db.session_scope() as session:
         repo = RawCallRepository(session)
-        rsvc = SweepRequestService(repo)
-        req_id = rsvc.create_request(
-            request_name="mcq_qs",
-            algorithm="mcq_answer_position_probe",
-            fixed_config={"samples_per_combo": 50, "template_version": "v1"},
-            parameter_axes=_mcq_axes(),
-            entry_max=None,
-            sweep_type="mcq",
+        req_id = repo.create_group(
+            group_type=GROUP_TYPE_MCQ_SWEEP_REQUEST,
+            name="mcq_qs",
+            metadata_json={
+                "expected_run_keys": [run_key],
+                "expected_count": 1,
+                "request_status": "running",
+            },
         )
-        req = rsvc.get_request(req_id)
-        run_key = req["expected_run_keys"][0]
 
         meta = {
             "run_key": run_key,
@@ -105,6 +95,7 @@ def test_get_mcq_metrics_df_all_runs_and_request_filter():
         assert len(df_all) == 1
         row = df_all.iloc[0]
         assert row["run_key"] == run_key
+        assert row["mcq_request_id"] == str(req_id)
         assert row["k"] == 1
         assert abs(float(row["pct_A"]) - 0.25) < 1e-6
         assert abs(float(row["format_compliance_rate"]) - 0.9) < 1e-6
@@ -126,6 +117,8 @@ def test_get_mcq_metrics_df_all_runs_and_request_filter():
 
         df_all2 = qsvc.get_mcq_metrics_df()
         assert len(df_all2) == 2
+        orphan_row = df_all2[df_all2["run_key"] == "orphan_only"].iloc[0]
+        assert orphan_row["mcq_request_id"] == ""
 
         missing = qsvc.get_mcq_metrics_df(mcq_request_id=999999)
         assert missing.empty
@@ -135,14 +128,13 @@ def test_get_mcq_metrics_df_request_with_no_links_returns_empty():
     db = _db()
     with db.session_scope() as session:
         repo = RawCallRepository(session)
-        rsvc = SweepRequestService(repo)
-        req_id = rsvc.create_request(
-            request_name="empty_req",
-            algorithm="mcq_answer_position_probe",
-            fixed_config={"samples_per_combo": 50},
-            parameter_axes=_mcq_axes(),
-            entry_max=None,
-            sweep_type="mcq",
+        req_id = repo.create_group(
+            group_type=GROUP_TYPE_MCQ_SWEEP_REQUEST,
+            name="empty_req",
+            metadata_json={
+                "expected_run_keys": [],
+                "request_status": "requested",
+            },
         )
         qsvc = SweepQueryService(repo)
         df = qsvc.get_mcq_metrics_df(mcq_request_id=req_id)

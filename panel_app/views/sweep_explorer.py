@@ -38,7 +38,13 @@ from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_MCQ
 from study_query_llm.services.sweep_query_service import mcq_explorer_metric_columns
 
 # Categorical dimensions available for faceting / color / filters
-CATEGORICAL_DIMS = ["dataset", "engine", "summarizer", "data_type"]
+CATEGORICAL_DIMS = [
+    "dataset",
+    "engine",
+    "summarizer",
+    "data_type",
+    "clustering_sweep_id",
+]
 
 # Numeric dimensions usable on X-axis
 X_AXIS_OPTIONS = ["k", "run_idx", "n_samples"]
@@ -490,6 +496,7 @@ DIM_DEFAULT_ROLES = {
     "engine": "Color",
     "summarizer": "Grid rows",
     "data_type": "Filter",
+    "clustering_sweep_id": "Free",
     BIN_DIM: "Free",
 }
 
@@ -501,6 +508,7 @@ MCQ_CATEGORICAL_DIMS = (
     "spread_correct_answer_uniformly",
     "label_style",
     "run_key",
+    "mcq_request_id",
 )
 
 MCQ_DIM_DEFAULT_ROLES = {
@@ -511,6 +519,7 @@ MCQ_DIM_DEFAULT_ROLES = {
     "spread_correct_answer_uniformly": "Free",
     "label_style": "Free",
     "run_key": "Free",
+    "mcq_request_id": "Free",
     BIN_DIM: "Free",
 }
 
@@ -527,7 +536,11 @@ MCQ_X_AXIS_OPTIONS = [
 
 MCQ_METRICS = list(mcq_explorer_metric_columns())
 
-_DIM_LABELS = {BIN_DIM: "sample size bin"}
+_DIM_LABELS = {
+    BIN_DIM: "sample size bin",
+    "clustering_sweep_id": "clustering sweep id",
+    "mcq_request_id": "MCQ request id",
+}
 
 
 @dataclass(frozen=True)

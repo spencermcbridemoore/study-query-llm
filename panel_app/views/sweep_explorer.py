@@ -8,7 +8,6 @@ dimensional control (rows, cols, color, x, y, aggregation, filters).
 
 from __future__ import annotations
 
-import pickle
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,11 +30,11 @@ from study_query_llm.experiments.result_metrics import (
     dist_from_result as _dist_from_z,
     try_ari as _try_ari,
     try_silhouette as _try_silhouette,
-    rows_from_50runs as _rows_from_50runs,
-    rows_from_sweep as _rows_from_sweep,
 )
 from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_MCQ
 from study_query_llm.services.sweep_query_service import mcq_explorer_metric_columns
+
+from panel_app.views.sweep_explorer_load import fetch_sweep_dataframe
 
 # Categorical dimensions available for faceting / color / filters
 CATEGORICAL_DIMS = [
@@ -53,81 +52,7 @@ AGGREGATION_OPTIONS = ["Raw runs", "Mean", "Mean ± stdev", "Last k only"]
 
 
 
-# _rows_from_50runs and _rows_from_sweep are imported from
-# study_query_llm.experiments.result_metrics above.
-
-
-def load_sweep_data(data_dir: str | Path) -> pd.DataFrame:
-    """
-    Scan data_dir for both pkl patterns and flatten into a tidy DataFrame.
-
-    Returns an empty DataFrame with the correct schema if nothing is found.
-    """
-    data_dir = Path(data_dir)
-    all_rows: list[dict] = []
-
-    # --- 50-runs files (original and bigrun_300 series) ---
-    for pattern in ("no_pca_50runs_*.pkl", "bigrun_300_*.pkl"):
-        for p in sorted(data_dir.glob(pattern)):
-            try:
-                if p.stat().st_size == 0:
-                    continue
-                with open(p, "rb") as f:
-                    data = pickle.load(f)
-            except Exception as e:
-                logger.warning("Skip %s: %s", p.name, e)
-                continue
-            if not isinstance(data, dict) or "result" not in data:
-                continue
-            try:
-                all_rows.extend(_rows_from_50runs({"data": data}))
-            except Exception as e:
-                logger.warning("Error parsing %s: %s", p.name, e)
-
-    # --- multi-embedding sweep files ---
-    for p in sorted(data_dir.glob("experimental_sweep_*.pkl")):
-        try:
-            if p.stat().st_size == 0:
-                continue
-            with open(p, "rb") as f:
-                data = pickle.load(f)
-        except Exception as e:
-            logger.warning("Skip %s: %s", p.name, e)
-            continue
-        if not isinstance(data, dict):
-            continue
-        meta = data.get("metadata") or {}
-        sweep = meta.get("sweep_config") or {}
-        # Only load no-PCA multi-embedding sweep files (matching original script filter)
-        if "embedding_engine" not in meta:
-            continue
-        try:
-            all_rows.extend(_rows_from_sweep({"data": data}))
-        except Exception as e:
-            logger.warning("Error parsing %s: %s", p.name, e)
-
-    if not all_rows:
-        schema = {
-            "dataset": pd.Series([], dtype="str"),
-            "engine": pd.Series([], dtype="str"),
-            "summarizer": pd.Series([], dtype="str"),
-            "data_type": pd.Series([], dtype="str"),
-            "k": pd.Series([], dtype="int64"),
-            "run_idx": pd.Series([], dtype="int64"),
-            "n_samples": pd.Series([], dtype="int64"),
-            **{m: pd.Series([], dtype="float64") for m in METRICS},
-        }
-        return pd.DataFrame(schema)
-
-    df = pd.DataFrame(all_rows)
-    df["k"] = df["k"].astype(int)
-    df["run_idx"] = df["run_idx"].astype(int)
-    df["n_samples"] = df["n_samples"].fillna(0).astype(int)
-    for cat in CATEGORICAL_DIMS:
-        if cat in df.columns:
-            df[cat] = df[cat].astype(str)
-    return df.sort_values(["dataset", "engine", "summarizer", "k", "run_idx"]).reset_index(drop=True)
-
+# load_sweep_data lives in sweep_explorer_load; re-exported via import above.
 
 # ===========================================================================
 # Aggregation
@@ -1067,10 +992,19 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
     def load_data(event=None):
         load_status.object = "_Loading…_"
         try:
-            if source_toggle.value == "Database":
-                df = _load_from_database()
-            else:
-                df = _load_from_files()
+            df, extra_pct = fetch_sweep_dataframe(
+                is_mcq=_is_mcq(),
+                source_is_database=(source_toggle.value == "Database"),
+                data_dir=data_dir_input.value.strip(),
+                scope_id=sweep_select.value,
+            )
+            if extra_pct:
+                cur = list(y_axis_sel.options)
+                merged = list(dict.fromkeys(cur + sorted(extra_pct)))
+                y_axis_sel.options = merged
+                m_opts = list(metrics_multi.options)
+                merged_m = list(dict.fromkeys(m_opts + sorted(extra_pct)))
+                metrics_multi.options = merged_m
 
             _state["df"] = df
             _state["loaded"] = True
@@ -1134,38 +1068,6 @@ def create_sweep_explorer_ui() -> pn.viewable.Viewable:
             logger.error("Failed to load sweep data: %s", e, exc_info=True)
             load_status.object = f"**Error:** {e}"
             _state["load_summary"] = load_status.object
-
-    def _load_from_files() -> pd.DataFrame:
-        data_dir = data_dir_input.value.strip()
-        return load_sweep_data(data_dir)
-
-    def _load_from_database() -> pd.DataFrame:
-        from panel_app.helpers import get_db_connection
-        from study_query_llm.db.raw_call_repository import RawCallRepository
-        from study_query_llm.services.sweep_query_service import SweepQueryService
-
-        db = get_db_connection()
-        with db.session_scope() as session:
-            repo = RawCallRepository(session)
-            svc = SweepQueryService(repo)
-            scope_id = sweep_select.value  # None means "All"
-            if _is_mcq():
-                df = svc.get_mcq_metrics_df(mcq_request_id=scope_id)
-                extra_pct = [
-                    c
-                    for c in df.columns
-                    if c.startswith("pct_") and c not in MCQ_METRICS
-                ]
-                if extra_pct:
-                    cur = list(y_axis_sel.options)
-                    merged = list(dict.fromkeys(cur + sorted(extra_pct)))
-                    y_axis_sel.options = merged
-                    m_opts = list(metrics_multi.options)
-                    merged_m = list(dict.fromkeys(m_opts + sorted(extra_pct)))
-                    metrics_multi.options = merged_m
-            else:
-                df = svc.get_sweep_metrics_df(clustering_sweep_id=scope_id)
-        return df
 
     # --- Bin edges change callback ---
     def _update_bin_dim_options(event=None):

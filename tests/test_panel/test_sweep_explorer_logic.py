@@ -88,3 +88,10 @@ def test_build_figure_bars_returns_figure():
     fig = build_figure_bars(long_df, "k", None, None, "Mean", plot_height=400)
     assert fig.layout.height == 400
     assert len(fig.data) >= 1
+
+
+def test_create_sweep_explorer_perspective_ui_returns_viewable():
+    from panel_app.views.sweep_explorer_perspective import create_sweep_explorer_perspective_ui
+
+    ui = create_sweep_explorer_perspective_ui()
+    assert ui is not None

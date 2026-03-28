@@ -42,6 +42,7 @@ from panel_app.views.analytics import create_analytics_ui
 from panel_app.views.groups import create_groups_ui
 from panel_app.views.embeddings import create_embeddings_ui
 from panel_app.views.sweep_explorer import create_sweep_explorer_ui
+from panel_app.views.sweep_explorer_perspective import create_sweep_explorer_perspective_ui
 
 # Setup logging
 setup_logging()
@@ -66,6 +67,7 @@ if _is_notebook:
 # Configure Panel extensions
 pn.extension(
     'plotly',
+    'perspective',
     design='material',
     sizing_mode='stretch_width',
     raw_css=_extra_css,
@@ -125,6 +127,7 @@ def create_dashboard() -> pn.viewable.Viewable:
     groups_tab = create_groups_ui()
     embeddings_tab = create_embeddings_ui()
     sweep_explorer_tab = create_sweep_explorer_ui()
+    sweep_explorer_perspective_tab = create_sweep_explorer_perspective_ui()
 
     tabs = pn.Tabs(
         ("Inference", inference_tab),
@@ -132,6 +135,7 @@ def create_dashboard() -> pn.viewable.Viewable:
         ("Embeddings", embeddings_tab),
         ("Groups", groups_tab),
         ("Sweep Explorer", sweep_explorer_tab),
+        ("Sweep Explorer (Perspective)", sweep_explorer_perspective_tab),
         sizing_mode='stretch_width',
         # Lazy tabs can leave some panes blank until visited; render all up front.
         dynamic=False,

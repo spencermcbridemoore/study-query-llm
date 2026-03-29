@@ -88,7 +88,6 @@ def _parent_scope_id_by_child_run(
         .filter(
             GroupLink.child_group_id.in_(run_ids),
             GroupLink.link_type == "contains",
-            Parent.deleted_at.is_(None),
             Parent.group_type.in_(allowed_parent_types),
         )
         .all()
@@ -125,7 +124,6 @@ class SweepQueryService:
             session.query(Group)
             .filter(
                 Group.group_type == "clustering_sweep",
-                Group.deleted_at.is_(None),
             )
             .order_by(Group.created_at.desc())
             .all()
@@ -235,12 +233,10 @@ class SweepQueryService:
             query = session.query(Group).filter(
                 Group.group_type == "clustering_run",
                 Group.id.in_(run_ids),
-                Group.deleted_at.is_(None),
             )
         else:
             query = session.query(Group).filter(
                 Group.group_type == "clustering_run",
-                Group.deleted_at.is_(None),
                 sa_text("metadata_json->>'algorithm' LIKE :alg"),
             ).params(alg="cosine_kllmeans%")
         if dataset:
@@ -319,7 +315,6 @@ class SweepQueryService:
             session.query(Group)
             .filter(
                 Group.id.in_(step_ids),
-                Group.deleted_at.is_(None),
             )
             .all()
         )
@@ -425,7 +420,6 @@ class SweepQueryService:
                 .filter(
                     Group.group_type == GROUP_TYPE_MCQ_RUN,
                     Group.id.in_(run_ids),
-                    Group.deleted_at.is_(None),
                 )
                 .all()
             )
@@ -434,7 +428,6 @@ class SweepQueryService:
                 session.query(Group)
                 .filter(
                     Group.group_type == GROUP_TYPE_MCQ_RUN,
-                    Group.deleted_at.is_(None),
                 )
                 .order_by(Group.id.asc())
                 .all()
@@ -491,7 +484,6 @@ class SweepQueryService:
             session.query(Group)
             .filter(
                 Group.group_type == "clustering_run",
-                Group.deleted_at.is_(None),
                 sa_text("metadata_json->>'algorithm' LIKE :alg"),
             )
             .params(alg="cosine_kllmeans%")

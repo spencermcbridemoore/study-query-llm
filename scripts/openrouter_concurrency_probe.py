@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import random
 import statistics
 import sys
 import time
@@ -59,6 +60,7 @@ async def _run_phase(
     prompt: str,
     max_tokens: int,
     temperature: float,
+    max_tokens_max: Optional[int] = None,
 ) -> PhaseResult:
     sem = asyncio.Semaphore(max(1, concurrency))
     latencies_ok: List[float] = []
@@ -67,12 +69,15 @@ async def _run_phase(
     async def one(i: int) -> None:
         nonlocal latencies_ok, errors
         async with sem:
+            mt = int(max_tokens)
+            if max_tokens_max is not None and int(max_tokens_max) >= mt:
+                mt = random.randint(mt, int(max_tokens_max))
             t0 = time.perf_counter()
             try:
                 resp = await provider.complete(
                     prompt,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_tokens=mt,
                 )
                 dt_ms = (time.perf_counter() - t0) * 1000.0
                 if getattr(resp, "latency_ms", None) is not None:
@@ -126,9 +131,13 @@ async def _amain(args: argparse.Namespace) -> int:
 
     results: List[PhaseResult] = []
     for conc, nreq in phases:
+        if int(args.max_tokens_max) > int(args.max_tokens):
+            tok_hdr = f"{int(args.max_tokens)}-{int(args.max_tokens_max)} (random per request)"
+        else:
+            tok_hdr = str(int(args.max_tokens))
         print(
             f"\n[PHASE] concurrency={conc} requests={nreq} "
-            f"prompt={args.prompt[:40]!r} max_tokens={args.max_tokens}",
+            f"prompt={args.prompt[:40]!r} max_tokens={tok_hdr}",
             flush=True,
         )
         pr = await _run_phase(
@@ -138,6 +147,7 @@ async def _amain(args: argparse.Namespace) -> int:
             prompt=args.prompt,
             max_tokens=int(args.max_tokens),
             temperature=float(args.temperature),
+            max_tokens_max=int(args.max_tokens_max) if int(args.max_tokens_max) > 0 else None,
         )
         results.append(pr)
         mean_s = f"{pr.latency_ms_mean:.1f}" if pr.latency_ms_mean is not None else "n/a"
@@ -154,6 +164,11 @@ async def _amain(args: argparse.Namespace) -> int:
 
     out_payload: Dict[str, Any] = {
         "model": model,
+        "max_tokens_range": (
+            [int(args.max_tokens), int(args.max_tokens_max)]
+            if int(args.max_tokens_max) > int(args.max_tokens)
+            else int(args.max_tokens)
+        ),
         "phases": [asdict(r) for r in results],
     }
     if args.json_out:
@@ -206,6 +221,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--prompt", type=str, default="Reply with exactly: OK")
     p.add_argument("--max-tokens", type=int, default=4)
+    p.add_argument(
+        "--max-tokens-max",
+        type=int,
+        default=0,
+        help="If > --max-tokens, each request picks a random cap in [max-tokens, max-tokens-max].",
+    )
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument(
         "--json-out",

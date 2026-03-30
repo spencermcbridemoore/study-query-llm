@@ -33,17 +33,12 @@ from study_query_llm.config import Config
 from study_query_llm.providers.factory import ProviderFactory
 
 # Models to verify before expanding mcq_sweep_highschool_college_20q_*_openrouter configs.
-# OpenRouter /v1/models (for a normal API key) does not expose qwen3-0.6b / 1.7b / 4b —
-# those ids return 404. Closest available Qwen line is qwen3.5-* (verified against API list).
 DEFAULT_MODEL_IDS: List[str] = [
     "allenai/olmo-3.1-32b-instruct",
     "deepseek/deepseek-v3.2",
     "deepseek/deepseek-r1-0528",
-    "qwen/qwen3.5-9b",
-    "qwen/qwen3.5-flash-02-23",
     "qwen/qwen3-8b",
     "qwen/qwen3-14b",
-    "qwen/qwen3.5-27b",
     "qwen/qwen3-32b",
 ]
 

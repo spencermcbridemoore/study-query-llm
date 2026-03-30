@@ -1,0 +1,27 @@
+{
+  "name": "highschool_college_20q_3_4_5_6_options_50samples_openrouter_6models",
+  "provider": "openrouter",
+  "parameter_filter": {
+    "level": ["high school", "college"],
+    "subject": ["math", "chemistry", "physics", "biology", "economics", "sociology", "psychology"],
+    "options_per_question": [3, 4, 5, 6],
+    "questions_per_test": [20],
+    "label_style": ["upper"],
+    "spread_correct_answer_uniformly": [false]
+  },
+  "llms": [
+    "allenai/olmo-3.1-32b-instruct",
+    "deepseek/deepseek-v3.2",
+    "deepseek/deepseek-r1-0528",
+    "qwen/qwen3-8b",
+    "qwen/qwen3-14b",
+    "qwen/qwen3-32b"
+  ],
+  "samples_per_combo": 50,
+  "concurrency": 50,
+  "cell_concurrency": 50,
+  "verify_deployments": true,
+  "temperature": 0.7,
+  "max_tokens": 4000,
+  "progress_every": 10
+}

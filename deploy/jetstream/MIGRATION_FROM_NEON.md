@@ -67,6 +67,12 @@ docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqll
 
 Verify the app health endpoint and spot-check data in the DB.
 
+**Smoke test script** (containers, `/health`, `vector` extension, row counts):
+
+```bash
+cd deploy/jetstream && chmod +x jetstream_verify_stack.sh && ./jetstream_verify_stack.sh
+```
+
 ## Alternative: incremental row sync
 
 For **incremental** copy of v2 tables (not a full cluster-accurate backup), see `scripts/sync_from_online.py` and pass `--local-url` pointing at Jetstream Postgres if it is reachable from where you run the script. Use `pg_dump` / `pg_restore` when you need a **full** database copy.

@@ -30,6 +30,16 @@ def main() -> int:
     except Exception:
         host = ""
 
+    path = parsed.path or ""
+    if "sslmode" in path:
+        print(
+            "FAIL: DATABASE_URL puts sslmode in the path. Use a ? before query options, not : after the DB name.\n"
+            "  Wrong:  .../study_query_jetstream:sslmode=prefer\n"
+            "  Right:  .../study_query_jetstream?sslmode=prefer",
+            file=sys.stderr,
+        )
+        return 1
+
     if host in ("db", ""):
         print(
             "FAIL: DATABASE_URL host is %r - that only works inside Jetstream Docker.\n"
@@ -39,8 +49,13 @@ def main() -> int:
         )
         return 1
 
-    host_hint = url.split("@")[-1].split("?")[0] if "@" in url else url
-    print("Connecting to:", host_hint)
+    # Redacted: user@host:port/db (no password)
+    port = parsed.port
+    port_s = f":{port}" if port else ""
+    safe = f"{parsed.scheme}://{parsed.username or ''}:***@{host}{port_s}{path}"
+    if parsed.query:
+        safe += f"?{parsed.query}"
+    print("Connecting to:", safe)
     try:
         engine = create_engine(url, pool_pre_ping=True)
         with engine.connect() as conn:

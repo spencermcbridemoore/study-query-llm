@@ -63,14 +63,27 @@ def _run_password_tunnel(
         f"Point DATABASE_URL at postgresql://USER:PASS@127.0.0.1:{local_port}/DB?sslmode=prefer",
         flush=True,
     )
-    tunnel = SSHTunnelForwarder(
-        (host, ssh_port),
-        ssh_username=user,
-        ssh_password=password,
-        remote_bind_address=("127.0.0.1", 5432),
-        local_bind_address=("127.0.0.1", local_port),
-    )
-    tunnel.start()
+    try:
+        tunnel = SSHTunnelForwarder(
+            (host, ssh_port),
+            ssh_username=user,
+            ssh_password=password,
+            remote_bind_address=("127.0.0.1", 5432),
+            local_bind_address=("127.0.0.1", local_port),
+            allow_agent=False,
+            host_pkey_directories=[],
+        )
+        tunnel.start()
+    except AttributeError as e:
+        if "DSSKey" in str(e) or "paramiko" in str(e).lower():
+            print(
+                "ERROR: sshtunnel is incompatible with paramiko 4.x (DSSKey removed).\n"
+                "  pip install 'paramiko>=3.4,<4'\n"
+                "  Or: pip install -e \".[jetstream-tunnel]\"",
+                file=sys.stderr,
+            )
+            return 1
+        raise
     print("Tunnel up. Press Ctrl+C to stop.", flush=True)
     try:
         while True:

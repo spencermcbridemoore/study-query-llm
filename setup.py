@@ -38,6 +38,8 @@ setup(
     extras_require={
         "jetstream-tunnel": [
             "sshtunnel>=0.4.0",
+            # sshtunnel 0.4.x uses paramiko.DSSKey; removed in paramiko 4.x
+            "paramiko>=3.4,<4",
         ],
         "dev": [
             "pytest>=7.0.0",

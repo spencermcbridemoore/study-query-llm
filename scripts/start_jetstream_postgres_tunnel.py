@@ -4,7 +4,7 @@ Open an SSH local port forward so your PC can reach Jetstream Postgres on VM 127
 
 Requires OpenSSH (`ssh` on PATH). Add to .env:
 
-  JETSTREAM_SSH_HOST=your-instance.xxx000000.projects.jetstream-cloud.org
+  JETSTREAM_SSH_HOST=<VM public IPv4 or DNS name>
   JETSTREAM_SSH_USER=exouser
   JETSTREAM_SSH_LOCAL_PORT=5433
 

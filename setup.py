@@ -36,6 +36,9 @@ setup(
         "langgraph>=0.2.0",
     ],
     extras_require={
+        "jetstream-tunnel": [
+            "sshtunnel>=0.4.0",
+        ],
         "dev": [
             "pytest>=7.0.0",
             "pytest-asyncio>=0.21.0",

@@ -136,6 +136,9 @@ data/
 # Backup directories
 backup*/
 
+# Full PostgreSQL migration dumps (pg_dump -Fc); treat as secrets
+pg_migration_dumps/
+
 # Debug logs
 .cursor/debug.log
 notebooks/.cursor/debug.log

@@ -22,11 +22,16 @@ as a 24/7 password-protected service on a Jetstream2 VM.
    `DATABASE_URL` on Jetstream must point to the Jetstream-local Postgres
    instance (or a dedicated remote DB), never to the local experiment database.
 
+## Local development (from your PC)
+
+To run tools against Jetstream Postgres while on your laptop, open an SSH tunnel and point the repo root `.env` at `127.0.0.1` — see **[LOCAL_DEV_TUNNEL.md](LOCAL_DEV_TUNNEL.md)**. That flow is separate from `.env.jetstream` on the VM.
+
 ## Directory Layout
 
 ```
 deploy/jetstream/
   README.md                         # This file
+  LOCAL_DEV_TUNNEL.md               # SSH tunnel from your PC to VM Postgres (127.0.0.1)
   .env.jetstream.example            # Template for VM runtime config
   docker-compose.jetstream.yml      # Compose stack (app + Postgres + Caddy)
   Caddyfile                         # HTTPS reverse proxy + basic auth

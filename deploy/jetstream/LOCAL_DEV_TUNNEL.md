@@ -56,6 +56,12 @@ Full env reference: docstring in `scripts/start_jetstream_postgres_tunnel.py` an
 
 The OpenStack “key pair” selected at **instance creation** is fixed in Horizon, but you can still add or replace keys on the VM by editing `~/.ssh/authorized_keys` for `exouser` when you have access. See Jetstream’s [Managing SSH keys from the CLI](https://docs.jetstream-cloud.org/ui/cli/managing-ssh-keys/).
 
+## Port clash with local Docker Postgres
+
+If both URLs use the same loopback host and port (including `127.0.0.1` vs `localhost`), only one process can listen. Either start the SSH tunnel first (so `127.0.0.1:5433` forwards to Jetstream), use a different tunnel local port (e.g. `5434`) and update `JETSTREAM_DATABASE_URL`, or stop the local Postgres container while testing Jetstream.
+
+To compare row counts, manifests, and Azure `db-backups` blobs: `python scripts/verify_db_backup_inventory.py` (repo root).
+
 ## Related
 
 - VM-side deployment and compose: [README.md](README.md) in this directory.

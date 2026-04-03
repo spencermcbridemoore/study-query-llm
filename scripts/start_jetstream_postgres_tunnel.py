@@ -14,8 +14,9 @@ Auth (pick one):
   - If unset: JETSTREAM_POSTGRES_PASSWORD is used for SSH (same secret as DB; override with JETSTREAM_SSH_PASSWORD if they differ)
   - JETSTREAM_SSH_KEY=C:\\Users\\you\\.ssh\\id_ed25519
   - JETSTREAM_SSH_KEY_PASSPHRASE=...  (optional; if set, uses sshtunnel so the key passphrase is not typed — same security caveats as .env secrets)
-  - Without passphrase in env: `ssh -i` (prompts once if the key is encrypted, unless ssh-agent has the key)
-  - Neither password nor key: interactive ssh
+  - Without passphrase in env: `ssh -i` with publickey-only (no fallback to Linux password prompt).
+    "Enter passphrase for key" means the PEM file is still encrypted — re-export unencrypted or `ssh-keygen -p -f <key>`.
+  - Neither password nor key: interactive ssh (will ask for account password)
 
 Optional: JETSTREAM_SSH_PORT=22
 Optional: JETSTREAM_SSH_DEBUG=1  (verbose paramiko/sshtunnel logs)
@@ -215,7 +216,18 @@ def _run_subprocess_ssh(
     spec = f"{local_port}:{remote_bind}"
     cmd = ["ssh", "-N", "-p", str(ssh_port), "-L", spec]
     if identity:
-        cmd.extend(["-i", identity])
+        # Avoid falling back to password auth when the key fails (confusing prompt).
+        # If the key file is still encrypted, OpenSSH will prompt for the key passphrase only.
+        cmd.extend(
+            [
+                "-i",
+                identity,
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "PreferredAuthentications=publickey",
+            ]
+        )
     cmd.append(f"{user}@{host}")
     print("Tunnel (leave this running):", " ".join(cmd), flush=True)
     print(
@@ -250,6 +262,10 @@ def main() -> int:
             "ERROR: Set JETSTREAM_SSH_HOST in .env to your Jetstream VM hostname or IP.",
             file=sys.stderr,
         )
+        return 1
+
+    if identity and not Path(identity).expanduser().is_file():
+        print(f"ERROR: JETSTREAM_SSH_KEY file not found: {identity}", file=sys.stderr)
         return 1
 
     # Key file + passphrase in .env: use sshtunnel (OpenSSH `ssh` cannot read passphrase from env).

@@ -48,6 +48,7 @@ echo "Copying dump into container ${CONTAINER}..."
 docker cp "$DUMP_PATH" "${CONTAINER}:${REMOTE}"
 
 echo "Running pg_restore (this may take a while)..."
+set +e
 docker exec \
   -e "PGPASSWORD=${POSTGRES_PASSWORD}" \
   "$CONTAINER" \
@@ -60,6 +61,13 @@ docker exec \
   --no-acl \
   --verbose \
   "$REMOTE"
+restore_rc=$?
+set -e
+if [[ "$restore_rc" -ne 0 ]]; then
+  echo "WARNING: pg_restore exited with status ${restore_rc}." >&2
+  echo "  This is common when Neon-only extensions (e.g. pg_session_jwt) are missing; data may still be OK." >&2
+  echo "  Review pg_restore output above. Continuing with cleanup." >&2
+fi
 
 echo "Removing dump from container..."
 docker exec "$CONTAINER" rm -f "$REMOTE"

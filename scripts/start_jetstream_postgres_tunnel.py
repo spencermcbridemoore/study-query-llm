@@ -11,8 +11,9 @@ Add to .env:
 Auth (pick one):
 
   - JETSTREAM_SSH_PASSWORD=...  (requires: pip install sshtunnel)
+  - If unset: JETSTREAM_POSTGRES_PASSWORD is used for SSH (same secret as DB; override with JETSTREAM_SSH_PASSWORD if they differ)
   - JETSTREAM_SSH_KEY=C:\\Users\\you\\.ssh\\id_ed25519  (passed to ssh -i; no extra package)
-  - Neither: interactive ssh (key in agent or type password when prompted)
+  - Neither password nor key: interactive ssh (key in agent or type password when prompted)
 
 Optional: JETSTREAM_SSH_PORT=22
 
@@ -47,7 +48,7 @@ def _run_password_tunnel(
         from sshtunnel import SSHTunnelForwarder  # type: ignore[import-untyped]
     except ImportError:
         print(
-            "ERROR: JETSTREAM_SSH_PASSWORD requires the sshtunnel package.\n"
+            "ERROR: SSH password auth requires the sshtunnel package.\n"
             "  pip install sshtunnel",
             file=sys.stderr,
         )
@@ -116,9 +117,9 @@ def main() -> int:
     user = (os.environ.get("JETSTREAM_SSH_USER") or "exouser").strip()
     local_port = int((os.environ.get("JETSTREAM_SSH_LOCAL_PORT") or "5433").strip())
     ssh_port = int((os.environ.get("JETSTREAM_SSH_PORT") or "22").strip())
-    password = os.environ.get("JETSTREAM_SSH_PASSWORD")
-    if password is not None:
-        password = password.strip()
+    ssh_pw = (os.environ.get("JETSTREAM_SSH_PASSWORD") or "").strip()
+    pg_pw = (os.environ.get("JETSTREAM_POSTGRES_PASSWORD") or "").strip()
+    password = ssh_pw or pg_pw
     identity = (os.environ.get("JETSTREAM_SSH_KEY") or "").strip() or None
 
     if not host:
@@ -127,6 +128,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    # Key-based ssh: prefer subprocess -i over password tunnel (including JETSTREAM_POSTGRES_PASSWORD fallback).
+    if identity:
+        return _run_subprocess_ssh(
+            host=host,
+            user=user,
+            local_port=local_port,
+            identity=identity,
+            ssh_port=ssh_port,
+        )
 
     if password:
         return _run_password_tunnel(
@@ -141,7 +152,7 @@ def main() -> int:
         host=host,
         user=user,
         local_port=local_port,
-        identity=identity,
+        identity=None,
         ssh_port=ssh_port,
     )
 

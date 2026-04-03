@@ -38,8 +38,10 @@ services:
     labels:
       - "com.sqllm.env=jetstream"
 
+  # pgvector-enabled Postgres (Neon dumps use CREATE EXTENSION vector).
+  # https://github.com/pgvector/pgvector
   db:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     container_name: sqllm-db
     restart: unless-stopped
     environment:

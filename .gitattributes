@@ -1,0 +1,2 @@
+# Shell scripts run on Linux (Jetstream); CRLF breaks shebangs (e.g. env: 'bash\r').
+*.sh text eol=lf

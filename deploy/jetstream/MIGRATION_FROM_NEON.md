@@ -46,6 +46,17 @@ scp pg_migration_dumps/neon_for_jetstream_*.dump user@jetstream-vm:~/migration.d
 
 ## Restore on the Jetstream VM
 
+**Full reset + restore (pgvector image, wipes DB volume):** after `git pull`, from `deploy/jetstream`:
+
+```bash
+chmod +x jetstream_pgvector_restore.sh restore_pg_dump_to_compose_db.sh
+./jetstream_pgvector_restore.sh ~/migration.dump
+```
+
+This uses `docker-compose.jetstream.yml` with **`pgvector/pgvector:pg17`** so `CREATE EXTENSION vector` from a Neon dump succeeds. `pg_session_jwt` may still error (Neon-only); that is expected.
+
+**Manual steps** (same result without the helper script):
+
 ```bash
 cd /path/to/study-query-llm/deploy/jetstream
 docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream stop app
@@ -62,4 +73,4 @@ For **incremental** copy of v2 tables (not a full cluster-accurate backup), see 
 
 ## Extensions (e.g. pgvector)
 
-Stock `postgres:17` may not include every extension Neon has. If `pg_restore` errors on `CREATE EXTENSION`, install the extension in the Jetstream image or adjust the dump; the application may fall back when optional extensions are missing.
+The Jetstream compose file uses **`pgvector/pgvector:pg17`** for `db` so `vector` matches Neon. **`pg_session_jwt`** is Neon-specific and will not install on self-hosted Postgres; restore may log 2 errors for it—safe to ignore unless you rely on Neon JWT features.

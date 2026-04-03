@@ -16,6 +16,7 @@ Auth (pick one):
   - Neither password nor key: interactive ssh (key in agent or type password when prompted)
 
 Optional: JETSTREAM_SSH_PORT=22
+Optional: JETSTREAM_SSH_DEBUG=1  (verbose paramiko/sshtunnel logs)
 
 Then set DATABASE_URL to 127.0.0.1:JETSTREAM_SSH_LOCAL_PORT (see .env.example).
 
@@ -27,6 +28,7 @@ Usage (leave running in a dedicated terminal):
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -34,6 +36,29 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+
+def _ssh_tunnel_troubleshooting() -> str:
+    return (
+        "SSH session failed (could not log in to the VM).\n"
+        "  1. Test manually:  ssh -v -p PORT USER@HOST\n"
+        "     You must get a shell or at least past authentication.\n"
+        "  2. JETSTREAM_POSTGRES_PASSWORD is the *database* password. The Linux account "
+        "(e.g. exouser) often has a *different* login password.\n"
+        "     Set JETSTREAM_SSH_PASSWORD to your actual SSH password if it differs.\n"
+        "  3. Horizon security group: allow TCP 22 from your current public IP.\n"
+        "  4. If the VM allows only public keys, set JETSTREAM_SSH_KEY to your private key path.\n"
+        "  5. Re-run with JETSTREAM_SSH_DEBUG=1 for detailed logs."
+    )
+
+
+def _maybe_enable_ssh_debug() -> None:
+    v = (os.environ.get("JETSTREAM_SSH_DEBUG") or "").strip().lower()
+    if v not in ("1", "true", "yes", "on"):
+        return
+    logging.basicConfig(level=logging.DEBUG)
+    for name in ("paramiko", "sshtunnel", "sshtunnel.SSHTunnelForwarder"):
+        logging.getLogger(name).setLevel(logging.DEBUG)
 
 
 def _run_password_tunnel(
@@ -44,8 +69,12 @@ def _run_password_tunnel(
     password: str,
     local_port: int,
 ) -> int:
+    _maybe_enable_ssh_debug()
     try:
-        from sshtunnel import SSHTunnelForwarder  # type: ignore[import-untyped]
+        from sshtunnel import (  # type: ignore[import-untyped]
+            BaseSSHTunnelForwarderError,
+            SSHTunnelForwarder,
+        )
     except ImportError:
         print(
             "ERROR: SSH password auth requires the sshtunnel package.\n"
@@ -84,6 +113,10 @@ def _run_password_tunnel(
             )
             return 1
         raise
+    except BaseSSHTunnelForwarderError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        print(_ssh_tunnel_troubleshooting(), file=sys.stderr)
+        return 1
     print("Tunnel up. Press Ctrl+C to stop.", flush=True)
     try:
         while True:

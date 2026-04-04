@@ -79,8 +79,10 @@ If you forgot the Panel login password or want to change it: **`Caddyfile` only 
 ```bash
 cd ~/app/deploy/jetstream   # your clone path
 chmod +x rotate_caddy_basic_auth.sh
-./rotate_caddy_basic_auth.sh
+./rotate_caddy_basic_auth.sh --generate
 ```
+
+`--generate` creates a long random password with Python’s `secrets`, **prints it once** in the terminal (save it to a password manager), then hashes it and updates Caddy. Run without flags to type a password interactively.
 
 This backs up `/etc/caddy/Caddyfile`, runs `caddy hash-password`, updates the hash line for user `admin` (override with `CADDY_AUTH_USER`), validates, and `systemctl reload caddy`. Copy the printed `CADDY_AUTH_HASH` into `.env.jetstream` on the VM if you keep credentials there for documentation.
 

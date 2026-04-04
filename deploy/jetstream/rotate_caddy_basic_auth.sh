@@ -98,27 +98,48 @@ path = Path(os.environ["CADDYFILE_PATH"])
 h = os.environ["HASH_LINE"].strip()
 user = os.environ["USER_NAME"].strip()
 text = path.read_text(encoding="utf-8")
-# CRLF / old Mac breaks ^/$ line matching in MULTILINE mode
+if text.startswith("\ufeff"):
+    text = text[1:]
 text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-# Line inside basic_auth / basicauth block: bcrypt, placeholder, or {$VAR}
-# Optional trailing # comment. Bcrypt MCF: $2[aby]$ then cost$ and body (no spaces).
-hash_tok = (
-    r"(?:\$2[aby]\$[^\s#]+"
-    r"|REPLACE_WITH_BCRYPT_HASH"
-    r"|\{\$[^}]+\})"
-)
-pat = re.compile(
-    "^(\s+)(" + re.escape(user) + r")(\s+)" + hash_tok + r"\s*(?:#.*)?$",
-    re.MULTILINE,
-)
+
+def _token_is_hash_or_placeholder(tok: str) -> bool:
+    if tok == "REPLACE_WITH_BCRYPT_HASH":
+        return True
+    if tok.startswith("{$") and "}" in tok:
+        return True
+    if tok.startswith("$2") and tok.count("$") >= 3 and len(tok) >= 20:
+        return True
+    return False
 
 
-def repl(m: re.Match) -> str:
-    return f"{m.group(1)}{m.group(2)}{m.group(3)}{h}"
+def _process_line(line: str) -> tuple[str, bool]:
+    if "#" in line:
+        idx = line.index("#")
+        main, tail = line[:idx], line[idx:]
+    else:
+        main, tail = line, ""
+    base = main.rstrip()
+    m = re.match(r"^(\s*)" + re.escape(user) + r"(\s+)(\S+)", base)
+    if not m:
+        m = re.match(r"^(\s*)[\"']" + re.escape(user) + r"[\"'](\s+)(\S+)", base)
+    if not m:
+        return line, False
+    if not _token_is_hash_or_placeholder(m.group(3)):
+        return line, False
+    new_main = m.group(1) + user + m.group(2) + h
+    return new_main + tail, True
 
 
-new_text, n = pat.subn(repl, text, count=0)
+lines = text.split("\n")
+out_lines = []
+n = 0
+for line in lines:
+    new_line, did = _process_line(line)
+    if did:
+        n += 1
+    out_lines.append(new_line)
+
 if n < 1:
     raise SystemExit(
         "No matching basic_auth line for user "
@@ -130,6 +151,10 @@ if n < 1:
         "or REPLACE_WITH_BCRYPT_HASH or {$SOME_ENV} inside the basicauth / basic_auth block.\n"
         "Check CADDY_AUTH_USER matches the username on that line."
     )
+
+new_text = "\n".join(out_lines)
+if text.endswith("\n"):
+    new_text += "\n"
 path.write_text(new_text, encoding="utf-8")
 print(f"Updated {n} hash line(s) for user {user!r}.")
 PY

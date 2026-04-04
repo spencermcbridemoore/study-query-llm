@@ -41,6 +41,7 @@ deploy/jetstream/
   PROVISION.md                      # VM provisioning checklist (manual Phase 1)
   build-and-push.sh                 # Image build + push helper script
   setup_boot_services.sh            # Enable Docker + compose + Caddy on boot (run on VM)
+  rotate_caddy_basic_auth.sh        # Set a new Caddy basic-auth password (run on VM)
 ```
 
 ## Quick Start (on Jetstream VM)
@@ -70,6 +71,18 @@ chmod +x setup_boot_services.sh
 # sudo systemctl daemon-reload
 # sudo systemctl enable --now study-query-llm
 ```
+
+## Rotate Caddy basic-auth password (on the VM)
+
+If you forgot the Panel login password or want to change it: **`Caddyfile` only stores a bcrypt hash** — you cannot recover the plaintext. Run (after `git pull`):
+
+```bash
+cd ~/app/deploy/jetstream   # your clone path
+chmod +x rotate_caddy_basic_auth.sh
+./rotate_caddy_basic_auth.sh
+```
+
+This backs up `/etc/caddy/Caddyfile`, runs `caddy hash-password`, updates the hash line for user `admin` (override with `CADDY_AUTH_USER`), validates, and `systemctl reload caddy`. Copy the printed `CADDY_AUTH_HASH` into `.env.jetstream` on the VM if you keep credentials there for documentation.
 
 ## References
 

@@ -98,23 +98,37 @@ path = Path(os.environ["CADDYFILE_PATH"])
 h = os.environ["HASH_LINE"].strip()
 user = os.environ["USER_NAME"].strip()
 text = path.read_text(encoding="utf-8")
+# CRLF / old Mac breaks ^/$ line matching in MULTILINE mode
+text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-# Line inside basicauth: whitespace, username, whitespace, bcrypt or placeholder
+# Line inside basic_auth / basicauth block: bcrypt, placeholder, or {$VAR}
+# Optional trailing # comment. Bcrypt MCF: $2[aby]$ then cost$ and body (no spaces).
+hash_tok = (
+    r"(?:\$2[aby]\$[^\s#]+"
+    r"|REPLACE_WITH_BCRYPT_HASH"
+    r"|\{\$[^}]+\})"
+)
 pat = re.compile(
-    r"^(\s+)(\S+)(\s+)(\$2[aby]\$[^\s]+|REPLACE_WITH_BCRYPT_HASH)\s*$",
+    "^(\s+)(" + re.escape(user) + r")(\s+)" + hash_tok + r"\s*(?:#.*)?$",
     re.MULTILINE,
 )
 
+
 def repl(m: re.Match) -> str:
-    if m.group(2) != user:
-        return m.group(0)
     return f"{m.group(1)}{m.group(2)}{m.group(3)}{h}"
+
 
 new_text, n = pat.subn(repl, text, count=0)
 if n < 1:
     raise SystemExit(
-        "No matching basicauth hash line found. Expected a line like:\n"
-        f"        {user} \$2a\$... or REPLACE_WITH_BCRYPT_HASH inside basicauth."
+        "No matching basic_auth line for user "
+        + repr(user)
+        + ". Expected one line like:\n"
+        "        "
+        + user
+        + " $2a$...   (bcrypt from caddy hash-password)\n"
+        "or REPLACE_WITH_BCRYPT_HASH or {$SOME_ENV} inside the basicauth / basic_auth block.\n"
+        "Check CADDY_AUTH_USER matches the username on that line."
     )
 path.write_text(new_text, encoding="utf-8")
 print(f"Updated {n} hash line(s) for user {user!r}.")

@@ -113,22 +113,50 @@ def _token_is_hash_or_placeholder(tok: str) -> bool:
     return False
 
 
+def _split_comment(line: str) -> tuple[str, str]:
+    if "#" not in line:
+        return line, ""
+    idx = line.index("#")
+    return line[:idx], line[idx:]
+
+
 def _process_line(line: str) -> tuple[str, bool]:
-    if "#" in line:
-        idx = line.index("#")
-        main, tail = line[:idx], line[idx:]
-    else:
-        main, tail = line, ""
+    main, tail = _split_comment(line)
     base = main.rstrip()
-    m = re.match(r"^(\s*)" + re.escape(user) + r"(\s+)(\S+)", base)
-    if not m:
-        m = re.match(r"^(\s*)[\"']" + re.escape(user) + r"[\"'](\s+)(\S+)", base)
+    # Case-insensitive username; optional quotes; whitespace or "=" before hash
+    pat_unquoted = (
+        r"(?i)^(\s*)"
+        + re.escape(user)
+        + r'(\s*=\s*|\s+)(\S+)'
+    )
+    pat_quoted = (
+        r"(?i)^(\s*)[\"']"
+        + re.escape(user)
+        + r"[\"'](\s*=\s*|\s+)(\S+)"
+    )
+    m = re.match(pat_unquoted, base) or re.match(pat_quoted, base)
     if not m:
         return line, False
-    if not _token_is_hash_or_placeholder(m.group(3)):
+    tok = m.group(3)
+    if not _token_is_hash_or_placeholder(tok):
         return line, False
     new_main = m.group(1) + user + m.group(2) + h
     return new_main + tail, True
+
+
+def _fallback_line(line: str) -> tuple[str, bool]:
+    """Any line with this user (word) and a bcrypt / placeholder token."""
+    main, tail = _split_comment(line)
+    if not re.search(r"(?i)\b" + re.escape(user) + r"\b", main):
+        return line, False
+    m = re.search(r"(\$2[aby]\$[^\s#]+)", main)
+    if not m:
+        m = re.search(r"(REPLACE_WITH_BCRYPT_HASH)", main)
+    if not m:
+        m = re.search(r"(\{\$[^}]+\})", main)
+    if not m:
+        return line, False
+    return main[: m.start(1)] + h + main[m.end(1) :] + tail, True
 
 
 lines = text.split("\n")
@@ -136,20 +164,29 @@ out_lines = []
 n = 0
 for line in lines:
     new_line, did = _process_line(line)
+    if not did:
+        new_line, did = _fallback_line(line)
     if did:
         n += 1
     out_lines.append(new_line)
 
 if n < 1:
+    import sys
+
+    print("No basic_auth credential line matched. Snippet of " + str(path) + " (for debugging):", file=sys.stderr)
+    for i, line in enumerate(lines[:40], 1):
+        low = line.lower()
+        if "basic" in low or "auth" in low or user.lower() in low or "$2" in line:
+            safe = line.rstrip()
+            if len(safe) > 120:
+                safe = safe[:117] + "..."
+            print(f"  {i}: {safe}", file=sys.stderr)
     raise SystemExit(
         "No matching basic_auth line for user "
         + repr(user)
-        + ". Expected one line like:\n"
-        "        "
-        + user
-        + " $2a$...   (bcrypt from caddy hash-password)\n"
-        "or REPLACE_WITH_BCRYPT_HASH or {$SOME_ENV} inside the basicauth / basic_auth block.\n"
-        "Check CADDY_AUTH_USER matches the username on that line."
+        + ". Expected a line with that username and a bcrypt hash from "
+        + "'caddy hash-password', or REPLACE_WITH_BCRYPT_HASH. "
+        + "See stderr for Caddyfile snippet. Set CADDY_AUTH_USER to match the file."
     )
 
 new_text = "\n".join(out_lines)

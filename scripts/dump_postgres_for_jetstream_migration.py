@@ -12,6 +12,12 @@ Usage:
     python scripts/dump_postgres_for_jetstream_migration.py \\
         --source-url "postgresql://user:pass@host/db?sslmode=require"
 
+  Local backup before cloning Jetstream → local:
+    python scripts/dump_postgres_for_jetstream_migration.py --from-local
+
+  Dump Jetstream (SSH tunnel must be up):
+    python scripts/dump_postgres_for_jetstream_migration.py --from-jetstream
+
 Output defaults to pg_migration_dumps/neon_for_jetstream_<timestamp>.dump (gitignored).
 """
 
@@ -73,16 +79,38 @@ def main() -> int:
         action="store_true",
         help="Print pg_dump command without running",
     )
+    parser.add_argument(
+        "--from-local",
+        action="store_true",
+        help="Use LOCAL_DATABASE_URL from .env; default output local_pre_jetstream_clone_<ts>.dump",
+    )
+    parser.add_argument(
+        "--from-jetstream",
+        action="store_true",
+        help="Use JETSTREAM_DATABASE_URL from .env (tunnel required); default output jetstream_for_local_<ts>.dump",
+    )
     args = parser.parse_args()
 
-    source = (
-        args.source_url
-        or os.environ.get("SOURCE_DATABASE_URL")
-        or os.environ.get("DATABASE_URL")
-    )
+    if args.from_local and args.from_jetstream:
+        print("ERROR: Use only one of --from-local or --from-jetstream.", file=sys.stderr)
+        return 1
+
+    if args.source_url:
+        source = args.source_url
+    elif args.from_local:
+        source = os.environ.get("LOCAL_DATABASE_URL") or ""
+    elif args.from_jetstream:
+        source = os.environ.get("JETSTREAM_DATABASE_URL") or ""
+    else:
+        source = (
+            os.environ.get("SOURCE_DATABASE_URL")
+            or os.environ.get("DATABASE_URL")
+            or ""
+        )
     if not source or not str(source).strip():
         print(
-            "ERROR: Set SOURCE_DATABASE_URL or DATABASE_URL in .env, or pass --source-url.",
+            "ERROR: Set SOURCE_DATABASE_URL or DATABASE_URL in .env, pass --source-url, "
+            "or use --from-local / --from-jetstream with the matching URL in .env.",
             file=sys.stderr,
         )
         return 1
@@ -90,11 +118,14 @@ def main() -> int:
     out_dir = _repo_root() / "pg_migration_dumps"
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SZ")
-    out_path = (
-        Path(args.output).resolve()
-        if args.output
-        else out_dir / f"neon_for_jetstream_{ts}.dump"
-    )
+    if args.output:
+        out_path = Path(args.output).resolve()
+    elif args.from_local:
+        out_path = out_dir / f"local_pre_jetstream_clone_{ts}.dump"
+    elif args.from_jetstream:
+        out_path = out_dir / f"jetstream_for_local_{ts}.dump"
+    else:
+        out_path = out_dir / f"neon_for_jetstream_{ts}.dump"
 
     cmd = [
         "pg_dump",
@@ -128,11 +159,18 @@ def main() -> int:
 
     size_mb = out_path.stat().st_size / (1024 * 1024)
     print(f"Done. File size: {size_mb:.2f} MiB", flush=True)
-    print(
-        "Next: copy the .dump to the Jetstream VM and run "
-        "deploy/jetstream/restore_pg_dump_to_compose_db.sh (see MIGRATION_FROM_NEON.md).",
-        flush=True,
-    )
+    if args.from_jetstream:
+        print(
+            "Next: restore into local Docker Postgres — see docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md "
+            "and scripts/restore_pg_dump_to_local_docker.py",
+            flush=True,
+        )
+    else:
+        print(
+            "Next: copy the .dump to the Jetstream VM and run "
+            "deploy/jetstream/restore_pg_dump_to_compose_db.sh (see MIGRATION_FROM_NEON.md).",
+            flush=True,
+        )
     return 0
 
 

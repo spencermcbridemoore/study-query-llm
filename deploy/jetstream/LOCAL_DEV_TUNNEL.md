@@ -66,3 +66,4 @@ To compare row counts, manifests, and Azure `db-backups` blobs: `python scripts/
 
 - VM-side deployment and compose: [README.md](README.md) in this directory.
 - Neon → Jetstream migration: [MIGRATION_FROM_NEON.md](MIGRATION_FROM_NEON.md).
+- Back up local Postgres, then clone Jetstream into local Docker: [LOCAL_DB_CLONE_FROM_JETSTREAM.md](../../docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md).

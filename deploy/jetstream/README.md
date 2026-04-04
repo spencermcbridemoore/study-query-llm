@@ -40,6 +40,7 @@ deploy/jetstream/
   RUNBOOK.md                        # Ops runbook (troubleshooting, backup, rollback)
   PROVISION.md                      # VM provisioning checklist (manual Phase 1)
   build-and-push.sh                 # Image build + push helper script
+  setup_boot_services.sh            # Enable Docker + compose + Caddy on boot (run on VM)
 ```
 
 ## Quick Start (on Jetstream VM)
@@ -58,10 +59,16 @@ docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream up -d
 sudo cp Caddyfile /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 
-# 5. (Optional) Install systemd unit for reboot persistence
-sudo cp systemd/study-query-llm.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now study-query-llm
+# 5. Reboot persistence (writes systemd unit for *this* clone path, enables Docker + stack)
+chmod +x setup_boot_services.sh
+./setup_boot_services.sh
+# Optional: also copy repo Caddyfile to /etc/caddy and enable Caddy
+# ./setup_boot_services.sh --with-caddyfile
+
+# Manual alternative (fixed path ~/app — edit unit if your clone differs):
+# sudo cp systemd/study-query-llm.service /etc/systemd/system/
+# sudo systemctl daemon-reload
+# sudo systemctl enable --now study-query-llm
 ```
 
 ## References

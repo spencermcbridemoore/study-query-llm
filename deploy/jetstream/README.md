@@ -84,7 +84,7 @@ chmod +x rotate_caddy_basic_auth.sh
 
 `--generate` creates a long random password with Python’s `secrets`, **prints it once** in the terminal (save it to a password manager), then hashes it and updates Caddy. Run without flags to type a password interactively.
 
-This backs up `/etc/caddy/Caddyfile`, runs `caddy hash-password`, updates the hash line for user `admin` (override with `CADDY_AUTH_USER`), validates, and `systemctl reload caddy`. Copy the printed `CADDY_AUTH_HASH` into `.env.jetstream` on the VM if you keep credentials there for documentation.
+It runs `caddy hash-password`, then updates the **bcrypt line for user `admin`** (override with `CADDY_AUTH_USER`) in **`/etc/caddy/Caddyfile` and any file reached by Caddy `import`**, with a per-file `.bak.<timestamp>` backup. Finally it runs `caddy validate` and `systemctl reload caddy`. If your main file is only `import ...`, credentials can live in an imported snippet — the script follows those paths. Copy the printed `CADDY_AUTH_HASH` into `.env.jetstream` on the VM if you keep credentials there for documentation.
 
 ## References
 

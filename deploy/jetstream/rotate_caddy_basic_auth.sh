@@ -90,17 +90,75 @@ export HASH_LINE="$RAW_HASH"
 export USER_NAME
 
 sudo -E python3 <<'PY'
+import glob
 import os
 import re
+import shutil
+import sys
+from datetime import datetime
 from pathlib import Path
 
 path = Path(os.environ["CADDYFILE_PATH"])
 h = os.environ["HASH_LINE"].strip()
 user = os.environ["USER_NAME"].strip()
-text = path.read_text(encoding="utf-8")
-if text.startswith("\ufeff"):
-    text = text[1:]
-text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _norm_text(raw: str) -> str:
+    t = raw
+    if t.startswith("\ufeff"):
+        t = t[1:]
+    return t.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def expand_import_paths(caddy_path: Path, text: str) -> list[Path]:
+    """Paths from `import <glob>` lines (same rules as Caddy: relative to this file's dir)."""
+    base = caddy_path.parent
+    out = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        if not s.lower().startswith("import "):
+            continue
+        arg = s[7:].strip()
+        if "#" in arg:
+            arg = arg.split("#")[0].strip()
+        if not arg:
+            continue
+        ptn = arg
+        if not os.path.isabs(ptn):
+            ptn = str((base / ptn).resolve())
+        for m in sorted(glob.glob(ptn, recursive=True)):
+            mp = Path(m)
+            if mp.is_file():
+                out.append(mp.resolve())
+    return out
+
+
+def collect_import_tree(entry: Path):
+    """BFS: entry Caddyfile + every file reachable via import (no cycles)."""
+    ordered = []
+    seen = set()
+    queue = [entry.resolve()]
+
+    while queue:
+        r = queue.pop(0)
+        if r in seen:
+            continue
+        if not r.is_file():
+            continue
+        seen.add(r)
+        p = Path(r)
+        ordered.append(p)
+        try:
+            txt = _norm_text(p.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        for child in expand_import_paths(p, txt):
+            if child.resolve() not in seen:
+                queue.append(child.resolve())
+
+    return ordered
 
 
 def _token_is_hash_or_placeholder(tok: str) -> bool:
@@ -123,11 +181,10 @@ def _split_comment(line: str) -> tuple[str, str]:
 def _process_line(line: str) -> tuple[str, bool]:
     main, tail = _split_comment(line)
     base = main.rstrip()
-    # Case-insensitive username; optional quotes; whitespace or "=" before hash
     pat_unquoted = (
         r"(?i)^(\s*)"
         + re.escape(user)
-        + r'(\s*=\s*|\s+)(\S+)'
+        + r"(\s*=\s*|\s+)(\S+)"
     )
     pat_quoted = (
         r"(?i)^(\s*)[\"']"
@@ -145,7 +202,6 @@ def _process_line(line: str) -> tuple[str, bool]:
 
 
 def _fallback_line(line: str) -> tuple[str, bool]:
-    """Any line with this user (word) and a bcrypt / placeholder token."""
     main, tail = _split_comment(line)
     if not re.search(r"(?i)\b" + re.escape(user) + r"\b", main):
         return line, False
@@ -159,41 +215,70 @@ def _fallback_line(line: str) -> tuple[str, bool]:
     return main[: m.start(1)] + h + main[m.end(1) :] + tail, True
 
 
-lines = text.split("\n")
-out_lines = []
-n = 0
-for line in lines:
-    new_line, did = _process_line(line)
-    if not did:
-        new_line, did = _fallback_line(line)
-    if did:
-        n += 1
-    out_lines.append(new_line)
+def transform_text(text: str) -> tuple[str, int]:
+    lines = text.split("\n")
+    out_lines = []
+    n = 0
+    for line in lines:
+        new_line, did = _process_line(line)
+        if not did:
+            new_line, did = _fallback_line(line)
+        if did:
+            n += 1
+        out_lines.append(new_line)
+    new_text = "\n".join(out_lines)
+    if text.endswith("\n"):
+        new_text += "\n"
+    return new_text, n
 
-if n < 1:
-    import sys
 
-    print("No basic_auth credential line matched. Snippet of " + str(path) + " (for debugging):", file=sys.stderr)
-    for i, line in enumerate(lines[:40], 1):
-        low = line.lower()
-        if "basic" in low or "auth" in low or user.lower() in low or "$2" in line:
-            safe = line.rstrip()
-            if len(safe) > 120:
-                safe = safe[:117] + "..."
-            print(f"  {i}: {safe}", file=sys.stderr)
+all_paths = collect_import_tree(path)
+ts = datetime.now().strftime("%Y%m%d%H%M%S")
+total = 0
+updated_files: list[str] = []
+
+for p in all_paths:
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"WARN: skip {p}: {e}", file=sys.stderr)
+        continue
+    text = _norm_text(raw)
+    new_text, n = transform_text(text)
+    if n < 1:
+        continue
+    bak = Path(str(p) + ".bak." + ts)
+    shutil.copy2(p, bak)
+    p.write_text(new_text, encoding="utf-8")
+    total += n
+    updated_files.append(str(p))
+
+if total < 1:
+    print("No basic_auth credential line matched in any file. Searched (import tree):", file=sys.stderr)
+    for fp in all_paths:
+        print(f"  {fp}", file=sys.stderr)
+    for fp in all_paths[:8]:
+        try:
+            lines = _norm_text(fp.read_text(encoding="utf-8")).split("\n")
+        except OSError as e:
+            print(f"  (could not read {fp}: {e})", file=sys.stderr)
+            continue
+        print(f"\n--- first 30 lines of {fp} ---", file=sys.stderr)
+        for i, line in enumerate(lines[:30], 1):
+            s = line.rstrip()
+            if len(s) > 140:
+                s = s[:137] + "..."
+            print(f"  {i}: {s}", file=sys.stderr)
     raise SystemExit(
         "No matching basic_auth line for user "
         + repr(user)
-        + ". Expected a line with that username and a bcrypt hash from "
-        + "'caddy hash-password', or REPLACE_WITH_BCRYPT_HASH. "
-        + "See stderr for Caddyfile snippet. Set CADDY_AUTH_USER to match the file."
+        + ". Put `username bcrypt_hash` inside basic_auth { } in the main Caddyfile or an imported file, "
+        + "or set CADDY_AUTH_USER to match. See stderr for file list and snippets."
     )
 
-new_text = "\n".join(out_lines)
-if text.endswith("\n"):
-    new_text += "\n"
-path.write_text(new_text, encoding="utf-8")
-print(f"Updated {n} hash line(s) for user {user!r}.")
+print(f"Updated {total} hash line(s) for user {user!r} in:")
+for u in updated_files:
+    print(f"  {u}")
 PY
 
 sudo caddy validate --config "$CADDYFILE"

@@ -110,7 +110,7 @@ def _norm_text(raw: str) -> str:
     return t.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def expand_import_paths(caddy_path: Path, text: str) -> list[Path]:
+def expand_import_paths(caddy_path: Path, text: str):
     """Paths from `import <glob>` lines (same rules as Caddy: relative to this file's dir)."""
     base = caddy_path.parent
     out = []
@@ -235,7 +235,7 @@ def transform_text(text: str) -> tuple[str, int]:
 all_paths = collect_import_tree(path)
 ts = datetime.now().strftime("%Y%m%d%H%M%S")
 total = 0
-updated_files: list[str] = []
+updated_files = []
 
 for p in all_paths:
     try:
@@ -253,6 +253,18 @@ for p in all_paths:
     total += n
     updated_files.append(str(p))
 
+def _looks_like_stock_package_caddy(text: str) -> bool:
+    """Debian/Ubuntu default Caddyfile: file_server + /usr/share/caddy, no basicauth."""
+    low = text.lower()
+    if "file_server" not in low:
+        return False
+    if "/usr/share/caddy" not in text and "usr/share/caddy" not in text:
+        return False
+    if "basicauth" in low or "basic_auth" in low:
+        return False
+    return True
+
+
 if total < 1:
     print("No basic_auth credential line matched in any file. Searched (import tree):", file=sys.stderr)
     for fp in all_paths:
@@ -269,11 +281,32 @@ if total < 1:
             if len(s) > 140:
                 s = s[:137] + "..."
             print(f"  {i}: {s}", file=sys.stderr)
+
+    extra = ""
+    if len(all_paths) == 1:
+        try:
+            only = _norm_text(Path(all_paths[0]).read_text(encoding="utf-8"))
+            if _looks_like_stock_package_caddy(only):
+                extra = (
+                    "\nThis looks like the default Caddy **package** Caddyfile (static site on :80 only). "
+                    "Basic auth and the Panel reverse proxy were never configured.\n\n"
+                    "Fix: install the project template, then edit your domain (and optionally run this script again):\n"
+                    "  cd /path/to/study-query-llm/deploy/jetstream\n"
+                    "  chmod +x install_panel_caddyfile.sh && ./install_panel_caddyfile.sh\n"
+                    "  sudo nano /etc/caddy/Caddyfile    # set YOUR_DOMAIN to your Jetstream hostname\n"
+                    "  ./rotate_caddy_basic_auth.sh --generate   # or paste caddy hash-password output by hand\n"
+                    "  sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy\n\n"
+                    "See: deploy/jetstream/README.md (First-time Caddy on the VM).\n"
+                )
+        except OSError:
+            pass
+
     raise SystemExit(
         "No matching basic_auth line for user "
         + repr(user)
-        + ". Put `username bcrypt_hash` inside basic_auth { } in the main Caddyfile or an imported file, "
+        + ". Put `username bcrypt_hash` inside basicauth { } (or basic_auth { }) in the Caddyfile or an imported file, "
         + "or set CADDY_AUTH_USER to match. See stderr for file list and snippets."
+        + extra
     )
 
 print(f"Updated {total} hash line(s) for user {user!r} in:")

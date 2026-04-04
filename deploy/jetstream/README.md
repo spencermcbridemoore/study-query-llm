@@ -42,6 +42,7 @@ deploy/jetstream/
   build-and-push.sh                 # Image build + push helper script
   setup_boot_services.sh            # Enable Docker + compose + Caddy on boot (run on VM)
   rotate_caddy_basic_auth.sh        # Set a new Caddy basic-auth password (run on VM)
+  install_panel_caddyfile.sh        # Replace stock package Caddyfile with Panel + HTTPS template
 ```
 
 ## Quick Start (on Jetstream VM)
@@ -70,6 +71,21 @@ chmod +x setup_boot_services.sh
 # sudo cp systemd/study-query-llm.service /etc/systemd/system/
 # sudo systemctl daemon-reload
 # sudo systemctl enable --now study-query-llm
+```
+
+## First-time Caddy on the VM (replace the default package file)
+
+The Debian/Ubuntu **Caddy** package ships a **default** `/etc/caddy/Caddyfile` that only serves static files on **`:80`** from `/usr/share/caddy`. It has **no** HTTPS for your hostname, **no** `basicauth`, and **no** `reverse_proxy` to the Panel — you must replace it before the Panel is reachable on the public URL described in this README.
+
+From your repo clone on the VM:
+
+```bash
+cd ~/app/deploy/jetstream   # your path
+chmod +x install_panel_caddyfile.sh
+./install_panel_caddyfile.sh
+sudo nano /etc/caddy/Caddyfile   # set YOUR_DOMAIN to your Jetstream DNS name
+./rotate_caddy_basic_auth.sh --generate   # writes bcrypt + reloads Caddy, or paste hash from caddy hash-password
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
 
 ## Rotate Caddy basic-auth password (on the VM)

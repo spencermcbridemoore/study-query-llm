@@ -1,5 +1,12 @@
 # Plot Organization - February 16, 2026
 
+Status: historical  
+Owner: experimentation-maintainers  
+Last reviewed: 2026-04-06  
+Current conventions: `docs/living/PLOT_CONVENTIONS.md`
+
+This file preserves the dated reorganization narrative for plots.
+
 ## Folder Structure
 
 Organized `experimental_results/plots/` into three subfolders:

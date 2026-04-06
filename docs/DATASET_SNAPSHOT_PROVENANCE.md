@@ -1,5 +1,9 @@
 # Dataset Snapshot Provenance
 
+Status: living  
+Owner: data-maintainers  
+Last reviewed: 2026-04-06
+
 This document defines conventions for storing frozen sampled datasets using existing
 `Group` + `CallArtifact` entities (no new DB table).
 

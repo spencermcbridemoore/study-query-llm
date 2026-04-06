@@ -1,5 +1,13 @@
 # Implementation Plan - Study Query LLM
 
+Status: historical-roadmap  
+Owner: documentation-maintainers  
+Last reviewed: 2026-04-06  
+Current-state reference: `docs/living/CURRENT_STATE.md`
+
+This document preserves phased implementation chronology and roadmap context.
+Use `docs/living/CURRENT_STATE.md` for authoritative "what currently exists/works".
+
 ## Overview
 
 This document outlines the phased implementation plan for building the Study-Query-LLM application. The approach is **bottom-up and incremental**, where each phase produces a testable, working component before moving to the next.

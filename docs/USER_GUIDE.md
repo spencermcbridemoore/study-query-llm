@@ -1,16 +1,23 @@
 # User Guide - Study Query LLM
 
+Status: living  
+Owner: documentation-maintainers  
+Last reviewed: 2026-04-06
+
+This guide is v2-first (`RawCallRepository` / v2 schema) for current usage.
+Legacy v1 setup notes are preserved in `docs/history/USER_GUIDE_V1_LEGACY.md`.
+
 ## Overview
 
-Study Query LLM is a web application for running LLM inference experiments across multiple providers (Azure OpenAI, OpenAI, Hyperbolic) and analyzing the results. All inference runs are automatically logged to a database for later analysis.
+Study Query LLM is a web application for running LLM inference experiments and analyzing results stored in the v2 database model (`raw_calls` + grouping/artifacts).
 
 ## Getting Started
 
 ### Prerequisites
 
 - Python 3.10 or higher
-- API keys for at least one LLM provider (Azure OpenAI, OpenAI, or Hyperbolic)
-- SQLite (included with Python) or PostgreSQL database
+- API keys for at least one configured provider
+- PostgreSQL for v2 workflow (SQLite/v1 usage is legacy context)
 
 ### Installation
 
@@ -35,14 +42,9 @@ Study Query LLM is a web application for running LLM inference experiments acros
    
    Create a `.env` file in the project root:
    ```bash
-   # Database (SQLite for development, PostgreSQL for production)
-   # V1 (Legacy) - SQLite database
-   DATABASE_URL=sqlite:///study_query_llm.db
-   
-   # V2 (PostgreSQL) - New immutable capture schema with grouping support
-   # Uncomment to use v2 schema:
-   # DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm_v2
-   # To enable pgvector for embedding vectors: CREATE EXTENSION vector;
+   # Database (v2 recommended)
+   DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm_v2
+   # Optional for embeddings: CREATE EXTENSION vector;
    
    # Azure OpenAI
    AZURE_OPENAI_API_KEY=your-azure-api-key
@@ -63,24 +65,17 @@ Study Query LLM is a web application for running LLM inference experiments acros
    HYPERBOLIC_ENDPOINT=https://api.hyperbolic.xyz
    ```
 
-5. **Initialize the database**
-   
-   **For V1 (SQLite) schema:**
-   ```bash
-   python -c "from study_query_llm.db.connection import DatabaseConnection; from study_query_llm.config import config; db = DatabaseConnection(config.database.connection_string); db.init_db()"
-   ```
-   
-   **For V2 (PostgreSQL) schema:**
+5. **Initialize the database (v2)**
+
    ```bash
    python -c "from study_query_llm.db.connection_v2 import DatabaseConnectionV2; import os; db = DatabaseConnectionV2(os.getenv('DATABASE_URL')); db.init_db()"
    ```
-   
-   **Migrating from V1 to V2:**
-   ```bash
-   LEGACY_DATABASE_URL=sqlite:///study_query_llm.db \
-   DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm_v2 \
-   python scripts/migrate_v1_to_v2.py
-   ```
+
+   **If you are migrating existing v1 data into v2:**
+   Use the currently supported migration utilities documented in `scripts/README.md`
+   (the original one-time `migrate_v1_to_v2.py` script is archival context).
+
+   For intentionally legacy v1-only workflows, see `docs/history/USER_GUIDE_V1_LEGACY.md`.
 
 ### Running the Application
 
@@ -100,7 +95,7 @@ The Inference tab allows you to run LLM inference experiments.
 #### Running an Inference
 
 1. **Select a Provider**
-   - Choose from the available providers (Azure, OpenAI, Hyperbolic)
+   - Choose from configured providers (for example Azure and OpenAI-compatible endpoints)
    - Providers with configured API keys will appear in the dropdown
 
 2. **Load Deployments (Azure only)**
@@ -325,7 +320,8 @@ setup_logging(level=logging.DEBUG)
 ## Support
 
 For issues, questions, or contributions:
-- Check the [Architecture Documentation](ARCHITECTURE.md)
-- Review the [Implementation Plan](IMPLEMENTATION_PLAN.md)
+- Start with the [Documentation Index](README.md)
+- Check the [Current Architecture](living/ARCHITECTURE_CURRENT.md)
+- Review [Current State](living/CURRENT_STATE.md)
 - Open an issue on the repository
 

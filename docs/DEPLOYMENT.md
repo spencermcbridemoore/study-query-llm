@@ -1,5 +1,9 @@
 # Docker Deployment Guide
 
+Status: runbook  
+Owner: ops-maintainers  
+Last reviewed: 2026-04-06
+
 This guide explains how to containerize and run Study Query LLM by using the
 multi-stage `Dockerfile` and `docker-compose.yml` that ship with the repo.
 
@@ -24,7 +28,7 @@ docker build -t study-query-llm:test --build-arg RUN_TESTS=1 .
 
 | Arg | Default | Description |
 | --- | --- | --- |
-| `RUN_TESTS` | `0` | When set to `1`, runs `pytest tests/test_e2e_verification.py` (falls back to `tests/test_phase_1_1.py` if data is missing). |
+| `RUN_TESTS` | `0` | When set to `1`, runs `pytest test_e2e_verification.py` (falls back to `pytest test_phase_1_1.py` if data is missing). |
 
 ## 3. Run with `docker run`
 

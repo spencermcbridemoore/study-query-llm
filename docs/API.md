@@ -1,5 +1,13 @@
 # API Documentation - Study Query LLM
 
+Status: deprecated  
+Owner: documentation-maintainers  
+Last reviewed: 2026-04-06  
+Replaced by: `docs/living/API_CURRENT.md`
+
+This file is retained for historical compatibility context and may include stale v1-era examples.
+Use `docs/living/API_CURRENT.md` for current implementation surfaces.
+
 This document provides reference documentation for the programmatic API of Study Query LLM.
 
 ## Table of Contents

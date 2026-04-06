@@ -1,5 +1,9 @@
 # Google Colab Setup Guide
 
+Status: runbook  
+Owner: experimentation-maintainers  
+Last reviewed: 2026-04-06
+
 This guide explains how to run Study Query LLM in Google Colab.
 
 ## Quick Start

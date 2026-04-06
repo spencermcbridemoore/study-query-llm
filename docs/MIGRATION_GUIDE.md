@@ -1,5 +1,12 @@
 # Migration Guide: Test Scripts to Pytest
 
+Status: deprecated  
+Owner: documentation-maintainers  
+Last reviewed: 2026-04-06  
+Replaced by: `CONTRIBUTING.md` + `docs/TESTING_CHECKLIST.md`
+
+This migration guide is retained as historical context for an earlier test-structure transition.
+
 This guide explains how to migrate from the old test scripts to the new pytest-based test suite.
 
 ## Quick Start

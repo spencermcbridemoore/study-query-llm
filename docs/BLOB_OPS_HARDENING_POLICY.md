@@ -1,5 +1,9 @@
 # Blob Ops Hardening Policy (Phase 2)
 
+Status: runbook  
+Owner: artifact-pipeline-maintainers  
+Last reviewed: 2026-04-06
+
 This document defines Phase 2 operational policy for blob-backed artifacts.
 
 ## 1) Environment and container routing policy

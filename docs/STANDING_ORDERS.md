@@ -1,26 +1,29 @@
 # Standing Orders for Development
 
+Status: living  
+Owner: documentation-maintainers  
+Last reviewed: 2026-04-06
+
 This document establishes consistent practices for all development work on this project, ensuring that multiple developers (human or AI) maintain consistency in planning, implementation, and documentation.
 
 ## Planning Consistency
 
 ### Primary Source of Truth
-- **`docs/IMPLEMENTATION_PLAN.md`** is the authoritative source for:
-  - What has been implemented (✅)
-  - What is partially complete (⚠️)
-  - What is planned but not started (⬜)
-  - Current development phase and next steps
+- **`docs/living/CURRENT_STATE.md`** is authoritative for "what currently exists/works."
+- **`docs/living/ARCHITECTURE_CURRENT.md`** is authoritative for current architecture.
+- **`docs/IMPLEMENTATION_PLAN.md`** and **`docs/ARCHITECTURE.md`** are historical/roadmap context unless explicitly updated as current.
+- **`docs/review/DOC_PARITY_LEDGER.md`** is the evidence ledger for doc-to-code parity claims.
 
 ### Before Starting Work
-1. **Always check `IMPLEMENTATION_PLAN.md`** for current phase status
+1. **Always check `docs/living/CURRENT_STATE.md`** for current capabilities
 2. Verify your work aligns with the documented phases
 3. Check if similar functionality already exists
-4. Review `ARCHITECTURE.md` to understand design patterns
+4. Review `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns
 
 ### After Completing Work
-1. **Immediately update status markers** in `IMPLEMENTATION_PLAN.md`
-2. Update `README.md` status section if a phase completes
-3. Update relevant documentation (ARCHITECTURE.md, API.md) if design changed
+1. **Immediately update living docs** that changed (`CURRENT_STATE`, current architecture/API, runbooks as needed)
+2. Update `docs/review/DOC_PARITY_LEDGER.md` when significant claims change
+3. Update historical docs only when preserving chronology/context
 4. Ensure tests are written and passing
 
 ### Plan File Management (Cursor-specific)
@@ -58,29 +61,32 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 ### Documentation Sync Process
 
 **When completing a phase/step:**
-1. Update status in `IMPLEMENTATION_PLAN.md` (✅/⚠️/⬜)
-2. Update `README.md` status section if applicable
+1. Update `docs/living/CURRENT_STATE.md` if behavior/capabilities changed
+2. Update `docs/review/DOC_PARITY_LEDGER.md` if claim parity changed
 3. Add/update relevant docstrings in code
-4. Update `ARCHITECTURE.md` if design changed
+4. Update `docs/living/ARCHITECTURE_CURRENT.md` if design changed
 
 **When adding new features:**
 1. Check if it fits existing phases or needs new phase
-2. Document in `IMPLEMENTATION_PLAN.md` with appropriate status
-3. Update `ARCHITECTURE.md` if architectural change
-4. Update `README.md` features list
-5. Update `API.md` if public API changed
+2. Document in `docs/living/CURRENT_STATE.md` and route from `docs/README.md`
+3. Update `docs/living/ARCHITECTURE_CURRENT.md` if architectural change
+4. Update `README.md` features list when user-facing behavior changes
+5. Update `docs/living/API_CURRENT.md` if public API changed
 
 **When changing architecture:**
-1. Update `ARCHITECTURE.md` with new patterns/decisions
-2. Update `IMPLEMENTATION_PLAN.md` if phases affected
+1. Update `docs/living/ARCHITECTURE_CURRENT.md` with new patterns/decisions
+2. Update `docs/living/CURRENT_STATE.md` if capability boundaries changed
 3. Update code docstrings to reflect changes
-4. Update `README.md` if user-facing changes
+4. Update `README.md`/`docs/README.md` routing if user-facing doc entrypoints changed
 
 ### Documentation Files
-- **`docs/IMPLEMENTATION_PLAN.md`**: Phased roadmap and status tracking
-- **`docs/ARCHITECTURE.md`**: System design, layer responsibilities, patterns
-- **`docs/API.md`**: Programmatic API reference
-- **`docs/USER_GUIDE.md`**: End-user documentation
+- **`docs/README.md`**: Documentation routing and taxonomy
+- **`docs/living/CURRENT_STATE.md`**: Authoritative current capabilities
+- **`docs/living/ARCHITECTURE_CURRENT.md`**: Current architecture reference
+- **`docs/living/API_CURRENT.md`**: Current API quick reference
+- **`docs/USER_GUIDE.md`**: End-user guide (v2-first)
+- **`docs/IMPLEMENTATION_PLAN.md`**: Historical phased roadmap
+- **`docs/ARCHITECTURE.md`**: Historical architecture narrative
 - **`README.md`**: Project overview and quickstart
 - **`SECURITY.md`**: Security guidelines
 - **`CONTRIBUTING.md`**: Contributor guidelines
@@ -108,7 +114,7 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 ### Schema Usage Rules
 - **Always use v2 schema for new features**
 - v2 schema includes: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `EmbeddingVector`, `GroupLink`
-- Migration from v1 to v2: Use `scripts/migrate_v1_to_v2.py`
+- Migration from v1 to v2: follow currently supported migration tooling in `scripts/README.md`
 
 ### Method Definitions and Provenance
 - **Whenever possible, register methods in the methods table** (`method_definitions`) and record results in `analysis_results`, rather than encoding "which method" only as new group types, link types, or free-form metadata in `groups.metadata_json`.
@@ -176,7 +182,7 @@ study-query-llm/
 
 ## Key Principles
 
-1. **Single Source of Truth**: `IMPLEMENTATION_PLAN.md` for status, `ARCHITECTURE.md` for design
+1. **Single Source of Truth (Current)**: `docs/living/CURRENT_STATE.md` for status and `docs/living/ARCHITECTURE_CURRENT.md` for design
 2. **Documentation Sync**: Keep all docs in sync with code changes
 3. **Test First**: Write tests for all new components
 4. **Incremental Development**: Build and test each component before moving to next
@@ -185,15 +191,16 @@ study-query-llm/
 ## Quick Reference
 
 ### Status Update Checklist
-- [ ] Update `IMPLEMENTATION_PLAN.md` status markers
+- [ ] Update `docs/living/CURRENT_STATE.md` if current behavior changed
+- [ ] Update `docs/review/DOC_PARITY_LEDGER.md` for changed doc claims
 - [ ] Update `README.md` if phase completed
-- [ ] Update relevant documentation (ARCHITECTURE.md, API.md)
+- [ ] Update relevant documentation (`docs/living/ARCHITECTURE_CURRENT.md`, `docs/living/API_CURRENT.md`, runbooks)
 - [ ] Add/update code docstrings
 - [ ] Ensure tests pass
 
 ### Before Starting Work
-- [ ] Check `IMPLEMENTATION_PLAN.md` for current status
-- [ ] Review `ARCHITECTURE.md` for design patterns
+- [ ] Check `docs/living/CURRENT_STATE.md` for current status
+- [ ] Review `docs/living/ARCHITECTURE_CURRENT.md` for design patterns
 - [ ] Verify no duplicate functionality exists
 - [ ] Plan test strategy
 

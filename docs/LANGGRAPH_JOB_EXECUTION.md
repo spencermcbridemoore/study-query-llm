@@ -1,5 +1,9 @@
 # LangGraph Job Execution
 
+Status: runbook  
+Owner: orchestration-maintainers  
+Last reviewed: 2026-04-06
+
 ## Architecture boundary
 
 - **DB `orchestration_jobs` table:** Outer control plane. Handles claim, lease, complete, fail. One row = one unit of work.

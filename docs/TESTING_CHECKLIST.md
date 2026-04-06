@@ -1,5 +1,11 @@
 # End-to-End Testing Checklist
 
+Status: runbook  
+Owner: qa-maintainers  
+Last reviewed: 2026-04-06
+
+Note: `test_e2e_verification.py` validates legacy v1 repository paths. For v2-focused validation, also verify Panel analytics and `raw_calls` population directly.
+
 ## Pre-Test Setup ✓
 - [x] Database initialized
 - [x] .env file configured with Azure deployment (gpt-4o)

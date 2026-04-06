@@ -1,5 +1,9 @@
 # Sweep Migration Runbook
 
+Status: runbook  
+Owner: sweep-ops-maintainers  
+Last reviewed: 2026-04-06
+
 This runbook performs targeted migration and hardening for request-driven sweep execution.
 
 **CLI-first (recommended):** Long-running orchestration is available as `python -m study_query_llm.cli …` with the same flags as the legacy `scripts/run_*.py` wrappers. Examples below show both forms; behavior is equivalent because wrappers delegate to `src/study_query_llm/…` runtime modules.
@@ -8,7 +12,7 @@ This runbook performs targeted migration and hardening for request-driven sweep 
 
 Complete this checklist before any Phase 2 behavior changes:
 
-- Confirm [docs/PHASE1_5_VERIFICATION.md](docs/PHASE1_5_VERIFICATION.md) is green.
+- Review [docs/PHASE1_5_VERIFICATION.md](docs/PHASE1_5_VERIFICATION.md) as historical baseline and re-run equivalent gates in your environment.
 - Confirm lane and auth policy:
   - `ARTIFACT_RUNTIME_ENV` is explicitly set (`dev`, `stage`, or `prod`).
   - `ARTIFACT_AUTH_MODE` matches lane policy (`connection_string` for local dev, `managed_identity` for hosted lanes).

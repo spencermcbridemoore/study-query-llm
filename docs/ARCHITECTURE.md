@@ -1,5 +1,13 @@
 # Study-Query-LLM Architecture
 
+Status: historical  
+Owner: documentation-maintainers  
+Last reviewed: 2026-04-06  
+Current architecture: `docs/living/ARCHITECTURE_CURRENT.md`
+
+This file preserves historical architecture narrative and migration context.
+For current v2-first architecture, use `docs/living/ARCHITECTURE_CURRENT.md`.
+
 ## Overview
 
 This project is a Panel-based web application for running LLM inference experiments across multiple providers (Azure, OpenAI, Hyperbolic, etc.) and analyzing the results stored in a PostgreSQL database via Langfuse.

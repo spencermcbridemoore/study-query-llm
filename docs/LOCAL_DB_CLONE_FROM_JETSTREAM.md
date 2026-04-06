@@ -1,5 +1,9 @@
 # Clone Jetstream Postgres into local Docker
 
+Status: runbook  
+Owner: data-ops-maintainers  
+Last reviewed: 2026-04-06
+
 This runbook backs up your **current local** Docker Postgres, then replaces it with a **full copy of Jetstream’s** database (same idea as [`deploy/jetstream/MIGRATION_FROM_NEON.md`](../deploy/jetstream/MIGRATION_FROM_NEON.md), but **source = Jetstream**, **target = local**).
 
 ## Prerequisites

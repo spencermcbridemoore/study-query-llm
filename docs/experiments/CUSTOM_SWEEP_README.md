@@ -1,5 +1,11 @@
 # Custom Sweep: Full Categories, Extended K Range
 
+Status: historical  
+Owner: experimentation-maintainers  
+Last reviewed: 2026-04-06
+
+This document captures a specific dated experiment configuration.
+
 ## Configuration
 
 This sweep tests clustering performance with:

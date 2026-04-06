@@ -3,14 +3,13 @@
 ## Development Process
 
 ### 1. Check Current Status
-Before starting any work, review `docs/IMPLEMENTATION_PLAN.md` to understand:
-- What phases are complete (✅)
-- What's partially implemented (⚠️)
-- What's planned but not started (⬜)
-- Current development phase and next steps
+Before starting any work, review:
+- `docs/living/CURRENT_STATE.md` for current capabilities
+- `docs/living/ARCHITECTURE_CURRENT.md` for current architecture
+- `docs/IMPLEMENTATION_PLAN.md` for historical phase context
 
 ### 2. Follow Architecture
-Adhere to patterns documented in `docs/ARCHITECTURE.md`:
+Adhere to patterns documented in `docs/living/ARCHITECTURE_CURRENT.md`:
 - Bottom-up, incremental development
 - Layered architecture (Provider → Service → Repository → Database)
 - Dependency injection (no global state)
@@ -25,32 +24,30 @@ All new code must have tests:
 
 ### 4. Update Documentation
 Keep documentation in sync with code changes:
-- **IMPLEMENTATION_PLAN.md**: Update status markers when completing work
-- **ARCHITECTURE.md**: Update if design patterns change
+- **docs/living/CURRENT_STATE.md**: Update current capability status
+- **docs/living/ARCHITECTURE_CURRENT.md**: Update if current design patterns change
 - **README.md**: Update status section when phases complete
-- **API.md**: Update if public APIs change
+- **docs/living/API_CURRENT.md**: Update if public APIs change
 - Add docstrings to all public classes and functions
 
 ### 5. Update Status
-When completing work, update `docs/IMPLEMENTATION_PLAN.md`:
-- ✅ Implemented - Mark complete
-- ⚠️ Partially implemented - Note what's missing
-- ⬜ Not implemented - Leave as-is until started
+When completing work, update:
+- `docs/living/CURRENT_STATE.md` for current behavior changes
+- `docs/review/DOC_PARITY_LEDGER.md` for major documentation-claim changes
+- `docs/IMPLEMENTATION_PLAN.md` only for historical/roadmap chronology
 
 ## Status Markers in IMPLEMENTATION_PLAN.md
 
-- ✅ **Implemented** - Feature is complete and tested
-- ⚠️ **Partially implemented** - Feature exists but missing some components
-- ⬜ **Not implemented** - Planned but not yet started
+`docs/IMPLEMENTATION_PLAN.md` is maintained as historical phased context.
 
 ## Code Review Checklist
 
 Before submitting changes, verify:
 - [ ] Tests pass (`pytest`)
-- [ ] Documentation updated (IMPLEMENTATION_PLAN.md, relevant docs)
-- [ ] IMPLEMENTATION_PLAN.md status markers updated
+- [ ] Documentation updated (`docs/living/*`, runbooks, relevant docs)
+- [ ] Parity-sensitive claims updated in `docs/review/DOC_PARITY_LEDGER.md`
 - [ ] No secrets committed (check for API keys, credentials)
-- [ ] Follows architecture patterns (see ARCHITECTURE.md)
+- [ ] Follows architecture patterns (see `docs/living/ARCHITECTURE_CURRENT.md`)
 - [ ] Uses v2 database schema for new features
 - [ ] File operations use `encoding='utf-8'` (Windows compatibility)
 
@@ -87,7 +84,7 @@ study-query-llm/
 3. Implement business logic methods
 4. Add unit tests in `tests/test_services/`
 5. Integrate with GUI if needed
-6. Update IMPLEMENTATION_PLAN.md
+6. Update `docs/living/CURRENT_STATE.md` and related living docs; update `docs/IMPLEMENTATION_PLAN.md` only for historical roadmap context
 
 ### Adding Database Queries
 1. Add method to appropriate repository (`raw_call_repository.py` for v2)
@@ -137,7 +134,7 @@ pytest -m "not requires_api"
 
 ## Getting Help
 
-- Check `docs/ARCHITECTURE.md` for design patterns
-- Review `docs/IMPLEMENTATION_PLAN.md` for current status
-- See `docs/API.md` for API reference
+- Check `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns
+- Review `docs/living/CURRENT_STATE.md` for current status
+- See `docs/living/API_CURRENT.md` for current API reference
 - Check existing tests for examples

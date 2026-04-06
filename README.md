@@ -1,6 +1,6 @@
 # Study Query LLM
 
-A Panel-based web application for running LLM inference experiments across multiple providers (Azure OpenAI, OpenAI, Hyperbolic) and analyzing the results stored in a PostgreSQL database with Langfuse integration.
+A Panel-based web application for running LLM inference experiments across multiple providers and analyzing results in a PostgreSQL-backed v2 schema.
 
 ## Overview
 
@@ -20,39 +20,31 @@ The project follows a clean, layered architecture:
 GUI (Panel) → Services (Business Logic) → Providers (LLM APIs) + Repository (Database)
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+See [docs/living/ARCHITECTURE_CURRENT.md](docs/living/ARCHITECTURE_CURRENT.md) for current architecture and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for historical context.
 
 ## Implementation Status
 
-**Current Status:** ✅ **Production Ready** - All core features implemented and tested
+**Current status references:**
 
-### Completed Phases
-- ✅ **Phase 1:** LLM Provider Abstraction Layer (Azure, OpenAI, Hyperbolic)
-- ✅ **Phase 1.5:** Provider Factory
-- ✅ **Phase 2:** Business Logic Layer (retry, preprocessing, batch/sampling)
-- ✅ **Phase 3:** Database Layer (SQLAlchemy, repository pattern)
-- ✅ **Phase 4:** Analytics/Study Service
-- ✅ **Phase 5:** GUI Integration (Panel web interface)
-- ✅ **Phase 6.1:** Error Handling and Logging
-- ✅ **Phase 6.2:** Unit Tests (112 tests passing)
+- Current capabilities and defaults: [docs/living/CURRENT_STATE.md](docs/living/CURRENT_STATE.md)
+- Documentation parity evidence: [docs/review/DOC_PARITY_LEDGER.md](docs/review/DOC_PARITY_LEDGER.md)
+- Historical phased implementation narrative: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 
-### Current Features
-- Multi-provider LLM support (Azure OpenAI, OpenAI, Hyperbolic)
+### Current Feature Snapshot
+- Multi-provider chat/embedding workflows (including Azure and OpenAI-compatible endpoints)
 - Automatic inference logging to database
 - Analytics dashboard with provider comparison
 - Batch and sampling inference support
 - Retry logic with exponential backoff
 - Prompt preprocessing
 - Comprehensive error handling and logging
-- Full test coverage (112 tests)
-
-See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the complete implementation plan.
+- Sweep/job orchestration CLI and runbook workflows
 
 ## Installation
 
 ### Prerequisites
 - Python 3.10+
-- PostgreSQL (or SQLite for development)
+- PostgreSQL (v2 default; SQLite legacy compatibility still exists)
 - API keys for LLM providers you want to use
 
 ### Setup
@@ -86,8 +78,8 @@ pip install -e ".[dev]"
    
    Create a `.env` file in the project root:
    ```bash
-   # Database (SQLite for development, PostgreSQL for production)
-   DATABASE_URL=sqlite:///study_query_llm.db
+   # Database (v2 recommended)
+   DATABASE_URL=postgresql://user:password@localhost:5432/study_query_llm_v2
    
    # Azure OpenAI
    AZURE_OPENAI_API_KEY=your-azure-api-key
@@ -104,10 +96,12 @@ pip install -e ".[dev]"
    HYPERBOLIC_ENDPOINT=https://api.hyperbolic.xyz
    ```
 
-4. **Initialize database**
+4. **Initialize database (v2)**
 ```bash
-python -c "from study_query_llm.db.connection import DatabaseConnection; from study_query_llm.config import config; db = DatabaseConnection(config.database.connection_string); db.init_db()"
+python -c "from study_query_llm.db.connection_v2 import DatabaseConnectionV2; import os; db = DatabaseConnectionV2(os.getenv('DATABASE_URL')); db.init_db()"
 ```
+
+   For legacy v1-only initialization, see `docs/history/USER_GUIDE_V1_LEGACY.md`.
 
 ### Docker (Optional)
 
@@ -206,7 +200,7 @@ pytest --cov=study_query_llm tests/
 pytest tests/test_providers/test_azure.py
 ```
 
-**Test Coverage:** 112 tests covering providers, services, and database operations.
+Use CI and local `pytest` output as the canonical test-status source.
 
 ### Adding a New LLM Provider
 
@@ -216,19 +210,19 @@ pytest tests/test_providers/test_azure.py
 4. Update configuration
 5. Add tests
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
+See [docs/living/ARCHITECTURE_CURRENT.md](docs/living/ARCHITECTURE_CURRENT.md) for current details.
 
 ## Features
 
 ### Core Features
-- ✅ **Multi-provider LLM support** - Azure OpenAI, OpenAI, Hyperbolic
+- ✅ **Multi-provider LLM support** - Azure + OpenAI-compatible provider flows
 - ✅ **Automatic inference logging** - All runs saved to database
 - ✅ **Analytics dashboard** - Provider comparison, statistics, recent inferences
 - ✅ **Batch and sampling inference** - Run multiple prompts or sample the same prompt
 - ✅ **Retry logic** - Automatic retry with exponential backoff on transient errors
 - ✅ **Prompt preprocessing** - Whitespace cleaning, truncation, PII removal
 - ✅ **Error handling** - Comprehensive logging and graceful error handling
-- ✅ **Database support** - SQLite (development) and PostgreSQL (production)
+- ✅ **Database support** - v2 PostgreSQL-first with legacy compatibility paths retained
 
 ### Future Enhancements
 - [ ] Multi-turn conversation support
@@ -240,10 +234,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 ## Documentation
 
-- **[User Guide](docs/USER_GUIDE.md)** - Complete user guide with usage instructions and troubleshooting
-- **[Architecture](docs/ARCHITECTURE.md)** - System design, layer responsibilities, data flow
-- **[Implementation Plan](docs/IMPLEMENTATION_PLAN.md)** - Phased development roadmap with detailed steps
-- **[API Documentation](docs/API.md)** - Programmatic API reference
+- **[Docs Index](docs/README.md)** - Taxonomy and navigation (`living`, `runbooks`, `history`, `deprecated`)
+- **[Current State](docs/living/CURRENT_STATE.md)** - Authoritative "what exists/works now"
+- **[Current Architecture](docs/living/ARCHITECTURE_CURRENT.md)** - v2-first architecture reference
+- **[Current API Quick Reference](docs/living/API_CURRENT.md)** - Current factory/service/repository entrypoints
+- **[User Guide](docs/USER_GUIDE.md)** - v2-first user workflow
 
 ## Contributing
 
@@ -252,7 +247,7 @@ This project follows a bottom-up, incremental development approach. Each compone
 - Independent of layers above it
 - Composable with other components
 
-See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the current development phase and next steps.
+See [docs/living/CURRENT_STATE.md](docs/living/CURRENT_STATE.md) for current behavior and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for historical roadmap context.
 
 ## License
 

@@ -4,13 +4,15 @@
 Panel-based web application for running LLM inference experiments across multiple providers (Azure OpenAI, OpenAI, Hyperbolic) with PostgreSQL database and analytics.
 
 ## Current Work Status
-- **Active Work**: Analysis/Experimentation - `notebooks/pca_kllmeans_sweep.ipynb` (PCA/KLLMeans sweep analysis using completed Phase 7 features)
-- **Development Status**: See `docs/IMPLEMENTATION_PLAN.md` for feature implementation phase status
-- **Source of Truth**: `docs/IMPLEMENTATION_PLAN.md` tracks all implementation phases (✅ ⚠️ ⬜)
+- **Active Work**: Analysis/Experimentation workflows in `notebooks/` (including archived notebook variants)
+- **Development Status (current)**: See `docs/living/CURRENT_STATE.md`
+- **Historical roadmap context**: `docs/IMPLEMENTATION_PLAN.md` (phased chronology)
 
 ## Key Documentation
-- **Planning & Status**: `docs/IMPLEMENTATION_PLAN.md` - Phased roadmap and current status
-- **Architecture**: `docs/ARCHITECTURE.md` - System design and patterns (includes **Standalone sweep worker**: `python -m study_query_llm.cli sweep-worker` / `analyze`, `experiments/sweep_worker_main.py`)
+- **Docs Navigation**: `docs/README.md` - living/runbook/history/deprecated routing
+- **Current Status**: `docs/living/CURRENT_STATE.md`
+- **Current Architecture**: `docs/living/ARCHITECTURE_CURRENT.md`
+- **Historical Architecture**: `docs/ARCHITECTURE.md`
 - **Jetstream: PC → Postgres SSH tunnel** (local `DATABASE_URL` via forward): `deploy/jetstream/LOCAL_DEV_TUNNEL.md`
 - **Clone Jetstream DB into local Docker** (backup local, `pg_dump` Jetstream, restore): `docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`
 - **Coding Rules**: `.cursorrules` - Detailed technical conventions (Cursor-specific)
@@ -24,12 +26,12 @@ Panel-based web application for running LLM inference experiments across multipl
 ## Essential Constraints
 - Always use v2 database schema for new features (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`)
 - Follow bottom-up, incremental development approach
-- Update `docs/IMPLEMENTATION_PLAN.md` status markers when completing work
+- Update `docs/living/CURRENT_STATE.md` and `docs/review/DOC_PARITY_LEDGER.md` when current behavior/claims change
 - **MANDATORY: Stage and commit when completing features/tasks** - do not wait for user to ask
 - Never commit `.env` files or API keys (see `SECURITY.md`)
 - Use `encoding='utf-8'` for all Python file operations (Windows compatibility)
 
 ## Before Starting Work
-1. Check `docs/IMPLEMENTATION_PLAN.md` for current phase status
-2. Review `docs/ARCHITECTURE.md` for design patterns
+1. Check `docs/living/CURRENT_STATE.md` for current capability/status
+2. Review `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns
 3. See `.cursorrules` for detailed coding conventions

@@ -1,26 +1,27 @@
 # Study Query LLM - AI Assistant Rules
 
 ## Source of Truth
-- **Implementation Status**: Always check `docs/IMPLEMENTATION_PLAN.md` for current phase and status
-- **Architecture Decisions**: Refer to `docs/ARCHITECTURE.md` for design patterns and layer responsibilities
-- **Planning**: Update `IMPLEMENTATION_PLAN.md` when completing phases or adding new work
-- **Status Markers**: Use ✅ (implemented), ⚠️ (partial), ⬜ (not implemented) in IMPLEMENTATION_PLAN.md
+- **Implementation Status**: Always check `docs/living/CURRENT_STATE.md` for current behavior/capability status
+- **Architecture Decisions**: Refer to `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns and layer responsibilities
+- **Historical Roadmap**: `docs/IMPLEMENTATION_PLAN.md` is historical phased context
+- **Parity Evidence**: Use `docs/review/DOC_PARITY_LEDGER.md` for doc-claim verification status
 
 ## Code Style & Conventions
 - Use `encoding='utf-8'` in all Python file operations (open, read_text, write_text) for Windows compatibility
-- Follow bottom-up, incremental development approach (see IMPLEMENTATION_PLAN.md philosophy)
+- Follow bottom-up, incremental development approach (historical philosophy in `docs/IMPLEMENTATION_PLAN.md`)
 - Each component must be testable in isolation
 - Use async/await for all I/O operations (LLM API calls, database operations)
 - Services receive dependencies via constructor injection (no global state)
-- Follow repository pattern for database access (see ARCHITECTURE.md)
+- Follow repository pattern for database access (see `docs/living/ARCHITECTURE_CURRENT.md`)
 
 ## Documentation Requirements
-- Update `IMPLEMENTATION_PLAN.md` status markers (✅ ⚠️ ⬜) when completing work
+- Update `docs/living/CURRENT_STATE.md` when current behavior changes
+- Update `docs/review/DOC_PARITY_LEDGER.md` for major claim parity changes
 - Add docstrings to all public classes and functions
 - Update relevant docs when changing architecture or adding features:
-  - Architecture changes → update `docs/ARCHITECTURE.md`
-  - New features → update `docs/IMPLEMENTATION_PLAN.md` and `README.md`
-  - API changes → update `docs/API.md`
+  - Architecture changes → update `docs/living/ARCHITECTURE_CURRENT.md`
+  - New features → update `docs/living/CURRENT_STATE.md` and `README.md`
+  - API changes → update `docs/living/API_CURRENT.md`
 - Keep README.md status section current with implementation progress
 
 ## Testing Requirements
@@ -52,17 +53,17 @@
 - Documentation: `docs/` - All project documentation
 
 ## Database Schema
-- **v1 schema**: Legacy schema (see Phase 3 in IMPLEMENTATION_PLAN.md)
-- **v2 schema**: Current immutable schema (see Phase 7.1 in IMPLEMENTATION_PLAN.md)
+- **v1 schema**: Legacy schema (see Phase 3 in `docs/IMPLEMENTATION_PLAN.md`)
+- **v2 schema**: Current immutable schema (see Phase 7.1 in `docs/IMPLEMENTATION_PLAN.md`)
 - Always use v2 schema (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`) for new features
 - v2 schema includes: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `EmbeddingVector`, `GroupLink`
 
 ## Before Making Changes
-1. Check `IMPLEMENTATION_PLAN.md` for current phase status
-2. Verify architecture alignment with `ARCHITECTURE.md`
+1. Check `docs/living/CURRENT_STATE.md` for current status
+2. Verify architecture alignment with `docs/living/ARCHITECTURE_CURRENT.md`
 3. Check if similar functionality already exists
 4. Ensure tests exist or plan to add them
-5. Consider impact on existing phases/components
+5. Consider impact on both living docs and historical context docs
 
 ## Key Design Patterns
 - **Provider Layer**: Abstract base class `BaseLLMProvider` with standardized `ProviderResponse`
@@ -80,4 +81,4 @@
 ## Algorithm Development
 - Core algorithms in `src/study_query_llm/algorithms/` with minimal dependencies (numpy/scipy only)
 - Notebooks/scripts can use algorithms but algorithms should not depend on DB/LLM layers
-- Use provenance service for tracking algorithm runs (see Phase 7.8 in IMPLEMENTATION_PLAN.md)
+- Use provenance service for tracking algorithm runs (see Phase 7.8 in `docs/IMPLEMENTATION_PLAN.md`)

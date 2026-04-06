@@ -270,7 +270,18 @@ Sweep **requests** are typed (`sweep_type` in the v2 request record) and expande
 | `sweep_mcq_standalone.py` | One standalone MCQ run: invoke probe, persist `mcq_run` group + metadata via `mcq_run_persistence.py`. |
 | `SweepRequestService` | Request lifecycle, deliveries, analysis catalog state (`src/study_query_llm/services/sweep_request_service.py`). |
 
-**CLI entrypoint** (thin glue only): `python -m study_query_llm.cli` with subcommands `sweep-worker` / `worker` (same argv as `sweep_worker_main.main`) and `analyze` / `sweep-analyze` for MCQ analysis over delivered runs. See `src/study_query_llm/cli/__main__.py`. The script `scripts/run_local_300_2datasets_worker.py` remains a compatibility wrapper for supervisors that import symbols from the old path.
+**CLI entrypoint** (thin glue only): `python -m study_query_llm.cli`. See `src/study_query_llm/cli/__main__.py`.
+
+| Subcommand | Purpose |
+| ---------- | ------- |
+| `sweep-worker` / `worker` | Same argv as `sweep_worker_main.main` — claim/lease/completion for sweep requests. |
+| `analyze` / `sweep-analyze` | MCQ analysis over delivered runs. |
+| `jobs langgraph-worker` | LangGraph `orchestration_jobs` worker (implementation: `services/jobs/runtime_workers.py`). |
+| `jobs cached-supervisor` | Cached-job supervisor delegating to sweep worker entrypoints (`services/jobs/runtime_supervisors.py`). |
+| `sweep engine-supervisor` | Local 300 / 2-datasets engine supervisor (`runtime_supervisors.py`). |
+| `sweep run-bigrun` | 300-run bigrun sweep orchestration (`experiments/runtime_sweeps.py`). |
+
+**Scripts compatibility:** Operational entrypoints under `scripts/` (`run_langgraph_job_worker.py`, `run_cached_job_supervisor.py`, `run_local_300_2datasets_engine_supervisor.py`, `run_300_bigrun_sweep.py`) remain thin wrappers that delegate to the same runtime modules as the CLI—prefer the package CLI for new runbooks. Dataset loaders shared by sweeps live in `experiments/datasets.py`. The script `scripts/run_local_300_2datasets_worker.py` remains a compatibility wrapper for supervisors that import symbols from the old path.
 
 **Post-run analysis (MCQ):** `src/study_query_llm/analysis/mcq_from_run.py` implements metrics from persisted `metadata_json` (including `result_summary`); `mcq_analyze_request.py` walks `analysis_catalog` on a request and records `AnalysisResult` rows via `SweepRequestService`.
 

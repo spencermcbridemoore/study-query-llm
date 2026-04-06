@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 import subprocess
 import sys
@@ -112,10 +111,9 @@ def test_supervisor_engine_missing_count_filters_engine(monkeypatch):
 
 def test_supervisor_backoff_is_exponential_and_capped(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
-    module = importlib.import_module("scripts.run_local_300_2datasets_engine_supervisor")
-    module = importlib.reload(module)
+    from study_query_llm.services.jobs.runtime_supervisors import _backoff_seconds
 
-    assert module._backoff_seconds(5, 1, 60) == 5
-    assert module._backoff_seconds(5, 2, 60) == 10
-    assert module._backoff_seconds(5, 3, 60) == 20
-    assert module._backoff_seconds(5, 10, 60) == 60
+    assert _backoff_seconds(5, 1, 60) == 5
+    assert _backoff_seconds(5, 2, 60) == 10
+    assert _backoff_seconds(5, 3, 60) == 20
+    assert _backoff_seconds(5, 10, 60) == 60

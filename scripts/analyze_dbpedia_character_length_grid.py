@@ -24,7 +24,7 @@ _REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
 sys.path.insert(0, _REPO_ROOT)
 
-from scripts.run_experimental_sweep import load_dbpedia_full, load_yahoo_answers_full
+from study_query_llm.experiments.datasets import load_dbpedia_full, load_yahoo_answers_full
 from study_query_llm.services.embeddings import estimate_tokens
 
 from study_query_llm.utils.text_utils import flatten_prompt_dict as _flatten_prompt_dict, clean_texts as _clean_texts

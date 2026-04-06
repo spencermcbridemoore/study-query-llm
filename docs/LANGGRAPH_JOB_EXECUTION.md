@@ -8,7 +8,7 @@
 ## Flow
 
 1. Enqueue `langgraph_run` jobs via `RawCallRepository.enqueue_orchestration_job`.
-2. Worker (`run_langgraph_job_worker.py`) claims jobs, runs them via `LangGraphJobRunner`, completes or fails.
+2. Worker claims jobs, runs them via `LangGraphJobRunner`, completes or fails. Implementation: `study_query_llm.services.jobs.runtime_workers` (CLI: `python -m study_query_llm.cli jobs langgraph-worker`; compatibility script: `scripts/run_langgraph_job_worker.py`).
 3. Result artifact path is stored in `result_ref`.
 4. Method-level provenance is recorded in `analysis_results` for both success and failure (see [Method provenance](#method-provenance)).
 
@@ -64,6 +64,12 @@ When `payload.config.checkpoint` is truthy, the runner can capture lightweight c
 These appear in `result_json.checkpoint_refs` and in the output artifact metadata. Checkpoint capture is opt-in; when disabled, no checkpointer is used.
 
 ## Running the worker
+
+```bash
+python -m study_query_llm.cli jobs langgraph-worker --request-id <REQUEST_ID> --worker-id lg-worker-1 --idle-exit-seconds 60
+```
+
+Equivalent (thin wrapper):
 
 ```bash
 python scripts/run_langgraph_job_worker.py --request-id <REQUEST_ID> --worker-id lg-worker-1 --idle-exit-seconds 60

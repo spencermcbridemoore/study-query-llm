@@ -2,6 +2,8 @@
 
 This runbook performs targeted migration and hardening for request-driven sweep execution.
 
+**CLI-first (recommended):** Long-running orchestration is available as `python -m study_query_llm.cli …` with the same flags as the legacy `scripts/run_*.py` wrappers. Examples below show both forms; behavior is equivalent because wrappers delegate to `src/study_query_llm/…` runtime modules.
+
 ## Phase 2 Preflight Checklist (Blob Ops Hardening)
 
 Complete this checklist before any Phase 2 behavior changes:
@@ -80,13 +82,14 @@ Success condition:
 Single worker first:
 
 ```bash
-python scripts/run_300_bigrun_sweep.py --request-id <REQUEST_ID> --worker-id worker-1 --claim-lease-seconds 3600
+python -m study_query_llm.cli sweep run-bigrun --request-id <REQUEST_ID> --worker-id worker-1 --claim-lease-seconds 3600
+# equivalent: python scripts/run_300_bigrun_sweep.py --request-id <REQUEST_ID> ...
 ```
 
 Scale out only after stability:
 
 ```bash
-python scripts/run_300_bigrun_sweep.py --request-id <REQUEST_ID> --worker-id worker-2 --claim-lease-seconds 3600
+python -m study_query_llm.cli sweep run-bigrun --request-id <REQUEST_ID> --worker-id worker-2 --claim-lease-seconds 3600
 ```
 
 Start with one worker and monitor:
@@ -105,19 +108,20 @@ Use this mode for `local_300_2datasets` when running local TEI models on desktop
 Stage A (1 worker):
 
 ```bash
-python scripts/run_local_300_2datasets_engine_supervisor.py --request-id <REQUEST_ID> --workers 1
+python -m study_query_llm.cli sweep engine-supervisor --request-id <REQUEST_ID> --workers 1
+# equivalent: python scripts/run_local_300_2datasets_engine_supervisor.py ...
 ```
 
 Stage B (3 workers):
 
 ```bash
-python scripts/run_local_300_2datasets_engine_supervisor.py --request-id <REQUEST_ID> --workers 3
+python -m study_query_llm.cli sweep engine-supervisor --request-id <REQUEST_ID> --workers 3
 ```
 
 Stage C (up to 10 workers):
 
 ```bash
-python scripts/run_local_300_2datasets_engine_supervisor.py --request-id <REQUEST_ID> --workers 10
+python -m study_query_llm.cli sweep engine-supervisor --request-id <REQUEST_ID> --workers 10
 ```
 
 Safety knobs:
@@ -141,7 +145,7 @@ Use sharded mode when you need finer-grained parallel work units.
 Run supervisor in sharded mode:
 
 ```bash
-python scripts/run_local_300_2datasets_engine_supervisor.py --request-id <REQUEST_ID> --workers 3 --job-mode sharded
+python -m study_query_llm.cli sweep engine-supervisor --request-id <REQUEST_ID> --workers 3 --job-mode sharded
 ```
 
 Inspect jobs:
@@ -155,13 +159,16 @@ python scripts/check_orchestration_jobs.py --request-id <REQUEST_ID>
 **Architecture boundary:** The DB `orchestration_jobs` table is the outer control plane (claim/lease/complete/fail). Job runners (`JobRunnerFactory` by `job_type`) execute the work inside a claimed job. LangGraph is an in-job workflow runtime—one DB job = one LangGraph run. LangGraph handles internal branching/parallelism; the DB handles scheduling and durability.
 
 - **Job types:** `run_k_try`, `reduce_k`, `finalize_run` (sweep), `langgraph_run` (agentic).
-- **Workers:** Sweep workers use `run_local_300_2datasets_worker.py`; LangGraph jobs use `run_langgraph_job_worker.py`.
+- **Workers:** Sweep workers use `run_local_300_2datasets_worker.py` (or `python -m study_query_llm.cli sweep-worker`); LangGraph jobs use `python -m study_query_llm.cli jobs langgraph-worker` (wrapper: `scripts/run_langgraph_job_worker.py`).
 
 Run LangGraph worker:
 
 ```bash
-python scripts/run_langgraph_job_worker.py --request-id <REQUEST_ID> --worker-id lg-worker-1 --idle-exit-seconds 60
+python -m study_query_llm.cli jobs langgraph-worker --request-id <REQUEST_ID> --worker-id lg-worker-1 --idle-exit-seconds 60
+# equivalent: python scripts/run_langgraph_job_worker.py ...
 ```
+
+**Cached-job supervisor** (when used): `python -m study_query_llm.cli jobs cached-supervisor …` (wrapper: `scripts/run_cached_job_supervisor.py`).
 
 Enqueue `langgraph_run` jobs via `RawCallRepository.enqueue_orchestration_job` with `job_type="langgraph_run"` and `payload_json={"prompt": "..."}`.
 

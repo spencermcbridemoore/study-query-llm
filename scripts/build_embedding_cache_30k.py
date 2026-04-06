@@ -331,7 +331,7 @@ async def main():
     datasets = {}
 
     try:
-        from scripts.run_experimental_sweep import load_dbpedia_full
+        from study_query_llm.experiments.datasets import load_dbpedia_full
         texts_db, labels_db, _ = load_dbpedia_full(random_state=CACHE_SEED)
         datasets["dbpedia"] = (texts_db, labels_db)
         print(f"  dbpedia        : {len(texts_db)} texts")
@@ -339,7 +339,7 @@ async def main():
         print(f"  [WARN] Could not load dbpedia: {e}")
 
     try:
-        from scripts.run_experimental_sweep import load_yahoo_answers_full
+        from study_query_llm.experiments.datasets import load_yahoo_answers_full
         texts_ya, labels_ya, _ = load_yahoo_answers_full(random_state=CACHE_SEED)
         datasets["yahoo_answers"] = (texts_ya, labels_ya)
         print(f"  yahoo_answers  : {len(texts_ya)} texts")

@@ -38,9 +38,8 @@ from study_query_llm.experiments.sweep_io import get_output_dir
 from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 
 OUTPUT_DIR = get_output_dir()
+from study_query_llm.experiments.datasets import load_dbpedia_full, load_yahoo_answers_full
 from scripts.run_experimental_sweep import (
-    load_dbpedia_full,
-    load_yahoo_answers_full,
     run_single_sweep,
     LLM_SUMMARIZERS,
     EMBEDDING_DEPLOYMENT,

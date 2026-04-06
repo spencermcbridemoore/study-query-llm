@@ -874,6 +874,8 @@ Core Python modules live under `src/study_query_llm/` (providers, services, db, 
 - `tests/test_services/test_sweep_request_service.py`: create_request, compute_progress, idempotent record_delivery, fulfillment
 - `tests/test_scripts/test_run_300_bigrun_sweep_request_mode.py`: --create-request CLI, request flags
 
+**Operational CLI (scripts → src, compatibility wrappers):** Long-running workers and supervisors are implemented under `src/study_query_llm/services/jobs/runtime_workers.py`, `runtime_supervisors.py`, and `experiments/runtime_sweeps.py` (dataset loaders in `experiments/datasets.py`). Prefer `python -m study_query_llm.cli` subcommands `jobs langgraph-worker`, `jobs cached-supervisor`, `sweep engine-supervisor`, and `sweep run-bigrun`; legacy `scripts/run_*.py` entrypoints remain as thin delegators. See `docs/ARCHITECTURE.md` and `docs/SWEEP_MIGRATION_RUNBOOK.md`.
+
 ---
 
 ## Summary: Implementation Checklist

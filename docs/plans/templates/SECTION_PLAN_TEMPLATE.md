@@ -7,6 +7,7 @@
 - Step ID: `STEP-XX`
 - Plan title: `<title>`
 - Status: `draft | active | blocked | completed`
+- Execution mode: `draft_provisional | finalize_gated`
 - Last updated: `YYYY-MM-DD`
 - Source meta-plan: `docs/plans/MASTER_META_PLAN.md`
 
@@ -26,6 +27,12 @@ Only include assumptions listed in the master meta-plan.
 | Contract ID | Version | Why Needed |
 | --- | --- | --- |
 | `C-...` | `X.Y` | `<reason>` |
+
+## Contract Source Resolution
+
+| Contract ID | Selected Source | Why This Source Was Chosen |
+| --- | --- | --- |
+| `C-...` | `standalone_file | producer_step_output | master_seed_plus_template` | `<reason>` |
 
 ## Forbidden Dependencies
 
@@ -65,7 +72,8 @@ Only include assumptions listed in the master meta-plan.
 
 ## Failure And Rollback Behavior
 
-- If a required contract is missing or ambiguous, set status to `blocked` and request clarification.
+- In `draft_provisional`, if a required contract is missing or ambiguous, proceed with best-available source and log challenged assumptions.
+- In `finalize_gated`, if a required contract is missing or ambiguous, set status to `blocked` and request clarification.
 - If a contract change is breaking, publish a new major version and retain old contract references.
 - If overlap with another step is discovered, defer to producer ownership in the master step registry.
 

@@ -11,6 +11,7 @@ Use this when a task is too large to plan in a single document and needs isolate
 - `docs/plans/MASTER_META_PLAN.md`
 - `docs/plans/templates/STEP_EXECUTION_HEADER.md`
 - `docs/plans/templates/SECTION_PLAN_TEMPLATE.md`
+- `docs/plans/templates/STEP_STARTERS.md`
 
 ## Operating Model
 
@@ -21,6 +22,7 @@ Use this when a task is too large to plan in a single document and needs isolate
 2. Execute one step at a time.
 3. Generate one section plan output per step.
 4. Keep cross-step dependencies contract-based only.
+5. Default new-chat execution mode to `draft_provisional` for non-interactive drafting.
 
 ## Recommended Chat Strategy
 
@@ -40,9 +42,14 @@ Confirm `docs/plans/MASTER_META_PLAN.md` exists and includes:
 
 ### Step 2: Copy Header Into New Chat
 
-Use `docs/plans/templates/STEP_EXECUTION_HEADER.md` and fill in:
+Use either:
+- `docs/plans/templates/STEP_STARTERS.md` for prefilled step-specific starters, or
+- `docs/plans/templates/STEP_EXECUTION_HEADER.md` if you want to fill values manually.
+
+If filling manually, include:
 
 - `STEP-XX`
+- execution mode (`draft_provisional` by default)
 - allowed assumptions
 - required contracts
 - deliverable path
@@ -61,6 +68,10 @@ Before marking complete, verify:
 3. no sibling-step implementation details are required
 4. non-goals are explicit
 
+### Step 5: Reconcile For Finalization
+
+After drafting, rerun critical steps in `finalize_gated` mode if you need strict upstream contract closure.
+
 ## Naming Conventions
 
 - Step outputs: `docs/plans/STEP-XX_<short_name>.md`
@@ -76,6 +87,7 @@ Before marking complete, verify:
 
 ## Troubleshooting
 
-- Missing required contract: mark step `blocked` and request clarification.
+- Missing required contract in `draft_provisional`: continue using source precedence and mark assumptions as challenged.
+- Missing required contract in `finalize_gated`: mark step `blocked` and request clarification.
 - Ambiguous assumption: do not proceed until assumption is clarified and registered.
 - Scope drift: move out-of-scope items into non-goals and defer to another step.

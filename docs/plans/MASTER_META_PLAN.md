@@ -23,6 +23,7 @@ Establish one canonical planning framework that can generate many independent pl
 - `docs/STANDING_ORDERS.md` (documentation and consistency rules)
 - `docs/plans/README.md` (operator workflow for this planning system)
 - `docs/plans/templates/STEP_EXECUTION_HEADER.md` (copy-paste execution input)
+- `docs/plans/templates/STEP_STARTERS.md` (prefilled step-specific launch inputs)
 - `docs/plans/templates/SECTION_PLAN_TEMPLATE.md` (standard section plan output)
 
 ## Global Assumptions Registry
@@ -37,8 +38,9 @@ All section plans may rely on the assumptions below, and must not introduce hidd
 | `A-004` | Each section plan can be authored in a fresh chat with only the step header and master doc. | Enables chunked execution without full chat history. |
 | `A-005` | Contract IDs are stable and append-only; breaking changes require a new major contract version. | Preserves downstream validity and traceability. |
 | `A-006` | Section plans must include explicit non-goals and forbidden dependencies. | Reduces scope creep and hidden coupling. |
-| `A-007` | If a required contract is missing or ambiguous, the step must pause and request clarification before proceeding. | Avoids invalid plans generated from uncertain inputs. |
+| `A-007` | Execution mode controls blocking: `draft_provisional` proceeds with fallback semantics; `finalize_gated` blocks on unresolved contracts. | Enables non-interactive drafting while preserving quality gates. |
 | `A-008` | Clustering remains a specialization use case, not a separate planning architecture. | Aligns generic framework direction with current strategic goal. |
+| `A-009` | Default mode for new step runs is `draft_provisional` unless explicitly overridden in the step header. | Removes avoidable clarification loops in fresh chats. |
 
 ## Contract Registry Rules
 
@@ -67,6 +69,16 @@ Each active contract must include:
 5. `Schema` (required fields and optional fields)
 6. `Validation checks`
 7. `Backward compatibility policy`
+
+### Contract Source Precedence (Authoritative Resolution Order)
+
+When a step requires `C-*`, resolve the source in this exact order:
+
+1. Standalone contract file (if present), e.g. `docs/plans/contracts/C-XXX@MAJOR.MINOR.md`
+2. Producer step output document listed in this master registry
+3. Seed row in `## Seed Contracts For Step Bootstrapping` plus field scaffolding from `docs/plans/templates/SECTION_PLAN_TEMPLATE.md`
+
+If a higher-priority source is missing, proceed to the next source.
 
 ## Step Registry Rules
 
@@ -99,6 +111,53 @@ Each active contract must include:
 | `STEP-07` | Define panel orchestration/resource estimation UX plan | `A-001`..`A-007` | `C-002@1.0`, `C-005@1.0` | `docs/plans/STEP-07_panel_orchestration_ux.md` | Algorithm implementation internals |
 | `STEP-08` | Define cutover and risk policy plan | `A-001`..`A-008` | `C-001@1.0`..`C-006@1.0` | `docs/plans/STEP-08_cutover_risk_policy.md` | Introducing new core contracts |
 
+## Non-Interactive Execution Defaults
+
+These defaults are mandatory unless a step header explicitly overrides them.
+
+### Default Mode
+
+- Default step execution mode: `draft_provisional`
+- `draft_provisional` behavior:
+  - Do not block when required contracts only exist as seed semantics.
+  - Continue using contract source precedence and record interim interpretations.
+  - Record unresolved contract constraints in `Assumption Ledger` as `challenged`.
+- `finalize_gated` behavior:
+  - Block if required contracts cannot be resolved beyond seed semantics.
+  - Request clarification or wait for upstream step outputs.
+
+### Bootstrap Lifecycle Defaults (STEP-01)
+
+- Set `C-001@1.0` lifecycle state to `active`.
+- Keep `C-002@1.0` through `C-006@1.0` as `draft` placeholders owned by producer steps.
+
+### STEP-08 Depth Default
+
+- For `C-001@1.0` to `C-005@1.0`: allowed to use provisional upstream/seed semantics in `draft_provisional`.
+- For `C-006@1.0`: define full policy semantics in STEP-08 (sequencing, guardrails, rollback triggers, validation gates).
+
+## Step-Level Ambiguity Resolution Matrix
+
+Use these defaults to avoid interactive multiple-choice clarification loops.
+
+1. STEP-01 lifecycle handling:
+   - Default: set `C-001@1.0` to `active`; keep `C-002@1.0`..`C-006@1.0` as `draft`.
+2. STEP-02 `C-001@1.0` source:
+   - Prefer `STEP-01` output if available; otherwise use master seed semantics.
+3. STEP-03 (`C-001@1.0`, `C-002@1.0`) when standalone schema docs are absent:
+   - In `draft_provisional`, proceed using source precedence and log challenged assumptions.
+4. STEP-04 (`C-001@1.0`) when standalone schema doc is absent:
+   - In `draft_provisional`, infer minimal schema from seed row + section template and proceed.
+5. STEP-05 (`C-002@1.0`, `C-003@1.0`, `C-004@1.0`) baseline:
+   - In `draft_provisional`, proceed using best available upstream outputs, else seed semantics.
+6. STEP-06 (`C-002@1.0`, `C-004@1.0`) ambiguity handling:
+   - In `draft_provisional`, proceed and explicitly record interim interpretations + risks.
+7. STEP-07 (`C-002@1.0`, `C-005@1.0`) missing formal definitions:
+   - In `draft_provisional`, proceed with provisional contracts and mark risk in assumptions.
+8. STEP-08 basis/depth:
+   - `C-001@1.0`..`C-005@1.0`: allow provisional basis in `draft_provisional`.
+   - `C-006@1.0`: define full semantics now (do not leave only narrative placeholders).
+
 ## Seed Contracts For Step Bootstrapping
 
 These contracts are intentionally high-level and are refined by section plans.
@@ -122,6 +181,9 @@ Use the reusable step header template from `docs/plans/templates/STEP_EXECUTION_
 - forbidden dependency statement
 - deliverable path
 - definition of done block
+- execution mode (`draft_provisional` or `finalize_gated`)
+- contract source precedence statement
+- missing-contract policy statement aligned to execution mode
 
 If any of these are missing, the step is considered invalid and must not proceed.
 
@@ -137,7 +199,8 @@ A section plan is considered independent only if all checks pass:
 
 ## Failure and Rollback Policy
 
-- If a required contract is absent, mark status as blocked and request clarification.
+- In `draft_provisional`, unresolved contracts do not block drafting; capture them as challenged assumptions.
+- In `finalize_gated`, if a required contract is absent or ambiguous, mark status as blocked and request clarification.
 - If a contract becomes breaking, publish a new major version and keep prior version visible.
 - If two steps define overlapping contract ownership, ownership is resolved in favor of the step designated as producer in this master document.
 

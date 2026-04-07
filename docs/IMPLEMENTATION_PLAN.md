@@ -34,6 +34,13 @@ Every phase includes a "Test" section describing how to validate the component w
 ### Repo Layout Note
 Core Python modules live under `src/study_query_llm/` (providers, services, db, config). Panel UI lives in `panel_app/app.py`.
 
+### Planning Workflow For Large Refactors
+For multi-document, step-isolated planning workflows, use:
+- `docs/plans/MASTER_META_PLAN.md` (assumptions, contracts, step registry)
+- `docs/plans/README.md` (execution workflow)
+- `docs/plans/templates/STEP_EXECUTION_HEADER.md` (copy-paste fresh-chat header)
+- `docs/plans/templates/SECTION_PLAN_TEMPLATE.md` (standard section plan output)
+
 ---
 
 ## Phase 1: LLM Provider Abstraction Layer

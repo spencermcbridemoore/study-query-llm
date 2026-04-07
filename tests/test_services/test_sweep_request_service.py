@@ -16,8 +16,13 @@ from study_query_llm.services.provenance_service import (
 )
 from study_query_llm.services.sweep_request_service import SweepRequestService
 from study_query_llm.experiments.sweep_request_types import (
+    SWEEP_TYPE_CLUSTERING,
+    SWEEP_TYPE_MCQ,
     build_run_key,
+    build_mcq_run_key,
     expand_parameter_axes,
+    get_sweep_type_adapter,
+    list_registered_sweep_types,
     normalize_summarizer,
     targets_to_run_keys,
     RunTarget,
@@ -96,6 +101,55 @@ def test_targets_to_run_keys():
     assert len(keys) == 2
     assert keys[0] == "dbpedia_e1_s1_300_50runs"
     assert keys[1] == "yahoo_e2_s2_300_50runs"
+
+
+def test_list_registered_sweep_types_contains_expected():
+    """Registry includes clustering and mcq sweep types."""
+    types = set(list_registered_sweep_types())
+    assert SWEEP_TYPE_CLUSTERING in types
+    assert SWEEP_TYPE_MCQ in types
+
+
+def test_get_sweep_type_adapter_shapes():
+    """Adapters expose request/run/sweep group type contracts."""
+    clustering = get_sweep_type_adapter(SWEEP_TYPE_CLUSTERING)
+    assert clustering.request_group_type == "clustering_sweep_request"
+    assert clustering.run_group_type == "clustering_run"
+    assert clustering.sweep_group_type == "clustering_sweep"
+
+    mcq = get_sweep_type_adapter(SWEEP_TYPE_MCQ)
+    assert mcq.request_group_type == "mcq_sweep_request"
+    assert mcq.run_group_type == "mcq_run"
+    assert mcq.sweep_group_type == "mcq_sweep"
+
+
+def test_build_mcq_run_key_deterministic():
+    """MCQ run key includes tuple dimensions and is deterministic."""
+    key_1 = build_mcq_run_key(
+        deployment="gpt-4o-mini",
+        level="high school",
+        subject="physics",
+        options_per_question=5,
+        questions_per_test=20,
+        label_style="upper",
+        spread_correct_answer_uniformly=False,
+        samples_per_combo=50,
+        template_version="v1",
+    )
+    key_2 = build_mcq_run_key(
+        deployment="gpt-4o-mini",
+        level="high school",
+        subject="physics",
+        options_per_question=5,
+        questions_per_test=20,
+        label_style="upper",
+        spread_correct_answer_uniformly=False,
+        samples_per_combo=50,
+        template_version="v1",
+    )
+    assert key_1 == key_2
+    assert key_1.startswith("mcq_")
+    assert key_1.endswith("_v1")
 
 
 # ---------------------------------------------------------------------------

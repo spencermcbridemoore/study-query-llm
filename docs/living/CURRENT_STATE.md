@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-09
+Last reviewed: 2026-04-10
 
 ## Scope
 
@@ -12,7 +12,7 @@ This document is the canonical "what exists and works now" summary for the repos
 
 ### Runtime Surface
 
-- Panel application with inference + analytics views (`panel_app/`).
+- Panel application with inference, analytics, embeddings, groups, sweep explorers, and a **Storage / DB stats** tab (`panel_app/views/storage_stats.py`) for PostgreSQL size metrics (when using Postgres), v2 row counts, artifact storage configuration summary, optional capped Azure blob prefix usage probe, and pointers to the local DB clone runbook.
 - Package CLI entrypoint: `python -m study_query_llm.cli`.
 - Sweep/job workers and supervisors under `src/study_query_llm/services/jobs/` and `src/study_query_llm/experiments/`.
 

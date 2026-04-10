@@ -167,3 +167,40 @@ def test_requires_azure_storage_blob():
             AzureBlobStorageBackend(
                 connection_string="DefaultEndpointsProtocol=https;AccountName=test;..."
             )
+
+
+def test_estimate_prefix_blob_usage_sums_and_truncates(mock_blob_service):
+    """estimate_prefix_blob_usage sums sizes and stops at max_blobs."""
+    mock_service, mock_container, mock_blob = mock_blob_service
+    blobs = [MagicMock(size=100), MagicMock(size=200), MagicMock(size=50)]
+    mock_container.list_blobs.return_value = iter(blobs)
+
+    backend = AzureBlobStorageBackend(
+        connection_string="DefaultEndpointsProtocol=https;AccountName=test;..."
+    )
+
+    out = backend.estimate_prefix_blob_usage(max_blobs=10, max_seconds=30.0)
+    assert out["total_bytes"] == 350
+    assert out["blob_count"] == 3
+    assert out["truncated"] is False
+    mock_container.list_blobs.assert_called_once_with()
+
+    mock_container.reset_mock()
+    mock_container.list_blobs.return_value = iter(blobs)
+    out2 = backend.estimate_prefix_blob_usage(max_blobs=2, max_seconds=30.0)
+    assert out2["blob_count"] == 2
+    assert out2["truncated"] is True
+    assert out2["total_bytes"] == 300
+
+
+def test_estimate_prefix_blob_usage_uses_name_starts_with(mock_blob_service):
+    """When blob_prefix is set, list_blobs receives name_starts_with."""
+    mock_service, mock_container, mock_blob = mock_blob_service
+    mock_container.list_blobs.return_value = iter([])
+
+    backend = AzureBlobStorageBackend(
+        connection_string="DefaultEndpointsProtocol=https;AccountName=test;...",
+        blob_prefix="dev",
+    )
+    backend.estimate_prefix_blob_usage(max_blobs=5, max_seconds=30.0)
+    mock_container.list_blobs.assert_called_once_with(name_starts_with="dev")

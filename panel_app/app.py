@@ -43,6 +43,7 @@ from panel_app.views.groups import create_groups_ui
 from panel_app.views.embeddings import create_embeddings_ui
 from panel_app.views.sweep_explorer import create_sweep_explorer_ui
 from panel_app.views.sweep_explorer_perspective import create_sweep_explorer_perspective_ui
+from panel_app.views.storage_stats import create_storage_stats_ui
 
 # Setup logging
 setup_logging()
@@ -128,12 +129,14 @@ def create_dashboard() -> pn.viewable.Viewable:
     embeddings_tab = create_embeddings_ui()
     sweep_explorer_tab = create_sweep_explorer_ui()
     sweep_explorer_perspective_tab = create_sweep_explorer_perspective_ui()
+    storage_stats_tab = create_storage_stats_ui()
 
     tabs = pn.Tabs(
         ("Inference", inference_tab),
         ("Analytics", analytics_tab),
         ("Embeddings", embeddings_tab),
         ("Groups", groups_tab),
+        ("Storage / DB stats", storage_stats_tab),
         ("Sweep Explorer", sweep_explorer_tab),
         ("Sweep Explorer (Perspective)", sweep_explorer_perspective_tab),
         sizing_mode='stretch_width',

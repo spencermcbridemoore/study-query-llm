@@ -5,7 +5,8 @@ AzureBlobStorageBackend - store artifacts in Azure Blob Storage.
 from __future__ import annotations
 
 import os
-from typing import Optional
+import time
+from typing import Any, Optional
 
 from .protocol import StorageBackend
 
@@ -169,6 +170,45 @@ class AzureBlobStorageBackend:
         for blob in self._container_client.list_blobs():
             total += int(getattr(blob, "size", 0) or 0)
         return total
+
+    def estimate_prefix_blob_usage(
+        self,
+        *,
+        max_blobs: int = 50_000,
+        max_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """
+        Sum blob sizes under the configured blob prefix (or entire container if no prefix).
+
+        Stops after *max_blobs* blobs or *max_seconds* elapsed so listing huge containers
+        cannot block the caller indefinitely. If stopped early, ``truncated`` is True.
+        """
+        start = time.monotonic()
+        total = 0
+        count = 0
+        truncated = False
+        list_prefix = self._blob_prefix if self._blob_prefix else None
+        list_kwargs: dict[str, str] = {}
+        if list_prefix:
+            list_kwargs["name_starts_with"] = list_prefix
+
+        for blob in self._container_client.list_blobs(**list_kwargs):
+            total += int(getattr(blob, "size", 0) or 0)
+            count += 1
+            if count >= max_blobs:
+                truncated = True
+                break
+            if time.monotonic() - start >= max_seconds:
+                truncated = True
+                break
+
+        return {
+            "total_bytes": total,
+            "blob_count": count,
+            "truncated": truncated,
+            "elapsed_seconds": round(time.monotonic() - start, 3),
+            "list_prefix": list_prefix if list_prefix else "(entire container)",
+        }
 
     def read_from_uri(self, uri: str) -> bytes:
         """

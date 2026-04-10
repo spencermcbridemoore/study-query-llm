@@ -55,6 +55,16 @@ class DeploymentInfo:
             'embeddings', 'fine_tune', 'inference'.
         lifecycle_status: Lifecycle stage from Azure (e.g. 'generally-available', 'preview')
         created_at: Unix timestamp of model creation (if available)
+        context_length: Model context length / input token window if known.
+        input_modalities: Input modalities when provided by provider metadata.
+        output_modalities: Output modalities when provided by provider metadata.
+        tokenizer: Provider-reported tokenizer family if available.
+        instruct_type: Provider-reported instruct type if available.
+        pricing: Provider-reported pricing payload, if available.
+        per_request_limits: Provider-reported per-request limits payload, if available.
+        supported_parameters: Provider-reported supported parameter list.
+        default_parameters: Provider-reported default parameter values.
+        metadata: Extra provider-specific metadata fields not modeled explicitly.
     """
 
     id: str
@@ -62,6 +72,16 @@ class DeploymentInfo:
     capabilities: dict[str, bool] = field(default_factory=dict)
     lifecycle_status: Optional[str] = None
     created_at: Optional[int] = None
+    context_length: Optional[int] = None
+    input_modalities: list[str] = field(default_factory=list)
+    output_modalities: list[str] = field(default_factory=list)
+    tokenizer: Optional[str] = None
+    instruct_type: Optional[str] = None
+    pricing: dict[str, Any] = field(default_factory=dict)
+    per_request_limits: Optional[dict[str, Any]] = None
+    supported_parameters: list[str] = field(default_factory=list)
+    default_parameters: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def supports_chat(self) -> bool:

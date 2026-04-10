@@ -80,6 +80,17 @@ class ModelRegistry:
                     d.id: {
                         "capabilities": d.capabilities,
                         "lifecycle_status": d.lifecycle_status,
+                        "created_at": d.created_at,
+                        "context_length": d.context_length,
+                        "input_modalities": d.input_modalities,
+                        "output_modalities": d.output_modalities,
+                        "tokenizer": d.tokenizer,
+                        "instruct_type": d.instruct_type,
+                        "pricing": d.pricing,
+                        "per_request_limits": d.per_request_limits,
+                        "supported_parameters": d.supported_parameters,
+                        "default_parameters": d.default_parameters,
+                        "metadata": d.metadata,
                     }
                     for d in deployment_infos
                 },

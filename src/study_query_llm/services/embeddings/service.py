@@ -21,9 +21,11 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from collections import OrderedDict
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from openai import APIConnectionError, InternalServerError, RateLimitError
@@ -78,6 +80,7 @@ class EmbeddingService:
         singleflight_lease_seconds: int = 45,
         singleflight_wait_timeout_seconds: float = 90.0,
         singleflight_poll_seconds: float = 0.1,
+        model_registry_cache_path: Optional[Path] = None,
     ) -> None:
         self.repository = repository
         self.require_db_persistence = require_db_persistence
@@ -109,6 +112,12 @@ class EmbeddingService:
             str, Tuple[List[float], Optional[int]]
         ] = OrderedDict()
         self._inflight_by_cache_key: Dict[str, asyncio.Task[EmbeddingResponse]] = {}
+        self._model_registry_cache_path = (
+            Path(model_registry_cache_path)
+            if model_registry_cache_path is not None
+            else Path(".cache") / "available_models.json"
+        )
+        self._runtime_token_limits_cache: Dict[str, Optional[int]] = {}
 
     def _normalize_text(self, text: str) -> str:
         """Normalize text for validation (delegates to hashing module)."""
@@ -194,6 +203,19 @@ class EmbeddingService:
         if cache_key in self._deployment_limits_cache:
             return self._deployment_limits_cache[cache_key]
 
+        discovered_limit = self._load_discovered_max_tokens(
+            deployment=deployment,
+            provider=provider,
+        )
+        if discovered_limit is not None:
+            self._deployment_limits_cache[cache_key] = discovered_limit
+            logger.info(
+                "Loaded max tokens for %s from model registry cache: %s",
+                deployment,
+                discovered_limit,
+            )
+            return discovered_limit
+
         if deployment in DEPLOYMENT_MAX_TOKENS:
             limit = DEPLOYMENT_MAX_TOKENS[deployment]
             self._deployment_limits_cache[cache_key] = limit
@@ -211,6 +233,57 @@ class EmbeddingService:
             deployment,
         )
         return None
+
+    def _load_discovered_max_tokens(
+        self, *, deployment: str, provider: str
+    ) -> Optional[int]:
+        """Best-effort runtime lookup from ModelRegistry cache on disk."""
+        cache_key = f"{provider}:{deployment}"
+        if cache_key in self._runtime_token_limits_cache:
+            return self._runtime_token_limits_cache[cache_key]
+
+        path = self._model_registry_cache_path
+        if not path.exists():
+            self._runtime_token_limits_cache[cache_key] = None
+            return None
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            self._runtime_token_limits_cache[cache_key] = None
+            return None
+
+        provider_data = {}
+        if isinstance(payload, dict):
+            providers = payload.get("providers")
+            if isinstance(providers, dict):
+                provider_data = providers.get(str(provider).lower(), {}) or {}
+
+        model_details = provider_data.get("model_details", {})
+        if not isinstance(model_details, dict):
+            self._runtime_token_limits_cache[cache_key] = None
+            return None
+
+        detail = model_details.get(deployment, {})
+        if not isinstance(detail, dict):
+            self._runtime_token_limits_cache[cache_key] = None
+            return None
+
+        raw_limit = detail.get("context_length")
+        if raw_limit is None:
+            metadata = detail.get("metadata", {})
+            if isinstance(metadata, dict):
+                raw_limit = metadata.get("context_length")
+
+        try:
+            parsed = int(raw_limit)
+            limit = parsed if parsed > 0 else None
+        except (TypeError, ValueError):
+            limit = None
+
+        self._runtime_token_limits_cache[cache_key] = limit
+        return limit
 
     def validate_text_length(
         self, text: str, deployment: str, provider: str = "azure"

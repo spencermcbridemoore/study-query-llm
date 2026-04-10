@@ -157,6 +157,13 @@ class Config:
                 api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=os.getenv("OPENAI_MODEL", "gpt-4"),
             )
+        elif provider_name == "openrouter":
+            config = ProviderConfig(
+                name="openrouter",
+                api_key=os.getenv("OPENROUTER_API_KEY", ""),
+                endpoint=os.getenv("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1"),
+                model=os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b"),
+            )
         elif provider_name == "hyperbolic":
             config = ProviderConfig(
                 name="hyperbolic",
@@ -206,7 +213,15 @@ class Config:
             List of provider names with credentials set
         """
         available = []
-        for provider in ["azure", "openai", "hyperbolic", "huggingface", "local", "local_llm"]:
+        for provider in [
+            "azure",
+            "openai",
+            "openrouter",
+            "hyperbolic",
+            "huggingface",
+            "local",
+            "local_llm",
+        ]:
             try:
                 self.get_provider_config(provider)
                 available.append(provider)
@@ -290,6 +305,11 @@ def _get_provider_instructions(provider_name: str) -> str:
         "openai": """
   OPENAI_API_KEY=your-api-key
   OPENAI_MODEL=gpt-4
+        """,
+        "openrouter": """
+  OPENROUTER_API_KEY=your-openrouter-api-key
+  OPENROUTER_ENDPOINT=https://openrouter.ai/api/v1
+  OPENROUTER_MODEL=openai/gpt-oss-20b
         """,
         "hyperbolic": """
   HYPERBOLIC_API_KEY=your-api-key

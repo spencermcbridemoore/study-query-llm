@@ -4,9 +4,11 @@ Tests for EmbeddingService.
 Tests embedding generation, caching, deployment validation, retry logic, and DB persistence.
 """
 
-import pytest
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from study_query_llm.services.embeddings import (
     DEPLOYMENT_MAX_TOKENS,
@@ -476,6 +478,82 @@ def test_get_deployment_max_tokens(mock_provider):
     max_tokens_2 = service.get_deployment_max_tokens("text-embedding-3-small")
     assert max_tokens_1 == max_tokens_2 == 8191
     assert "azure:text-embedding-3-small" in service._deployment_limits_cache
+
+
+def test_get_deployment_max_tokens_uses_model_registry_context_length(
+    mock_provider, tmp_path
+):
+    """Dynamic model-registry context_length takes precedence when available."""
+    cache_path = tmp_path / "available_models.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "providers": {
+                    "openrouter": {
+                        "models": ["openai/text-embedding-3-small"],
+                        "model_details": {
+                            "openai/text-embedding-3-small": {
+                                "context_length": 8192,
+                                "capabilities": {"embeddings": True},
+                            }
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    service = EmbeddingService(
+        provider=mock_provider,
+        model_registry_cache_path=cache_path,
+    )
+
+    max_tokens = service.get_deployment_max_tokens(
+        "openai/text-embedding-3-small",
+        provider="openrouter",
+    )
+    assert max_tokens == 8192
+    assert (
+        service._deployment_limits_cache["openrouter:openai/text-embedding-3-small"]
+        == 8192
+    )
+
+
+def test_get_deployment_max_tokens_invalid_registry_limit_falls_back(
+    mock_provider, tmp_path
+):
+    """Non-positive discovered limits are ignored in favor of fallback logic."""
+    cache_path = tmp_path / "available_models.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "providers": {
+                    "openrouter": {
+                        "models": ["text-embedding-3-small"],
+                        "model_details": {
+                            "text-embedding-3-small": {
+                                "context_length": 0,
+                                "capabilities": {"embeddings": True},
+                            }
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    service = EmbeddingService(
+        provider=mock_provider,
+        model_registry_cache_path=cache_path,
+    )
+
+    max_tokens = service.get_deployment_max_tokens(
+        "text-embedding-3-small",
+        provider="openrouter",
+    )
+    assert max_tokens == 8191
 
 
 def test_estimate_tokens():

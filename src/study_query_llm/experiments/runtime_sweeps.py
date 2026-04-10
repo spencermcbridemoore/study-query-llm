@@ -276,7 +276,9 @@ async def main_bigrun_300_sweep(
 
     worker_id = worker_id or f"{os.environ.get('COMPUTERNAME', 'worker')}-{os.getpid()}"
 
-    db = DatabaseConnectionV2(database_url, enable_pgvector=True)
+    # SQLite has no pgvector extension; skip so init_db stays fast (CLI/tests).
+    use_pgvector = "sqlite" not in database_url.lower()
+    db = DatabaseConnectionV2(database_url, enable_pgvector=use_pgvector)
     db.init_db()
 
     if create_request:

@@ -92,9 +92,10 @@ class LocalDockerTEIManager:
             idle_timeout_seconds: Seconds of inactivity before the container
                 is automatically stopped. Defaults to 1800 (30 min). Call
                 ``ping()`` on each embedding request to reset the timer.
-            hf_cache_dir: Path on the host to mount as the HuggingFace model
-                cache inside the container. Defaults to the ``HF_CACHE_DIR``
-                environment variable, or ``~/.cache/huggingface`` if unset.
+            hf_cache_dir: Path on the host to mount read-write into the TEI
+                container at ``/data`` (HF model cache). Defaults to the
+                ``HF_CACHE_DIR`` environment variable, or ``~/.cache/huggingface``
+                if unset.
             gpu_device: Docker DeviceRequest count string. ``"all"`` passes all
                 GPUs; use ``"1"`` to pass a single GPU (useful if you have
                 multiple GPUs and want to reserve some).

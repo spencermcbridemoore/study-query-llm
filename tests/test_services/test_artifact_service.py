@@ -24,6 +24,12 @@ def db_connection():
     return db
 
 
+@pytest.fixture(autouse=True)
+def _force_local_artifact_storage_for_tests(monkeypatch):
+    """Tests use temp dirs and Path.exists(); isolate from developer azure_blob .env."""
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+
+
 @pytest.fixture
 def temp_artifact_dir():
     """Fixture for temporary artifact directory."""

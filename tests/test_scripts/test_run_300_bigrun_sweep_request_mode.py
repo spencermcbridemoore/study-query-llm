@@ -45,7 +45,8 @@ def test_create_request_cli_exits_success(temp_db_path):
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
-        timeout=30,
+        # Cold import of runtime_sweeps + dependency stack can exceed 30s on Windows CI.
+        timeout=120,
     )
 
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"

@@ -140,7 +140,8 @@ def test_start_mounts_hf_cache():
         volumes = docker_client.containers.run.call_args[1]["volumes"]
         resolved = str(Path(tmp).expanduser().resolve())
         assert resolved in volumes
-        assert volumes[resolved]["bind"] == "/root/.cache/huggingface"
+        # TEI image expects the HF cache at /data (see local_docker_tei manager).
+        assert volumes[resolved]["bind"] == "/data"
 
 
 def test_start_binds_port():

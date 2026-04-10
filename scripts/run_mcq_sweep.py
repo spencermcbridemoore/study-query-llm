@@ -210,6 +210,7 @@ async def run_sweep(
     sweep_name = sweep_config.get("name", "unknown")
     parameter_filter = sweep_config["parameter_filter"]
     llms = sweep_config["llms"]
+    provider_name = str(sweep_config.get("provider", "azure")).strip().lower() or "azure"
     samples_per_combo = sweep_config["samples_per_combo"]
     concurrency = concurrency_override or sweep_config.get("concurrency", 20)
     cell_concurrency = cell_concurrency_override or int(
@@ -230,6 +231,7 @@ async def run_sweep(
     out_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"[INFO] Sweep: {sweep_name}")
+    print(f"[INFO] Provider: {provider_name}")
     print(f"[INFO] LLMs: {len(llms)} ({', '.join(llms)})")
     print(f"[INFO] Samples per combo: {samples_per_combo}")
     print(f"[INFO] In-cell concurrency (parallel samples): {concurrency}")
@@ -298,7 +300,7 @@ async def run_sweep(
             )
         return 0
 
-    if verify_deployments:
+    if verify_deployments and provider_name == "azure":
         print("\n[INFO] Verifying Azure chat deployments (minimal completion each)...")
         bad = await verify_azure_chat_deployments(list(llms))
         if bad:
@@ -307,6 +309,11 @@ async def run_sweep(
                 print(f"  - {name!r}: {err}")
             return 1
         print(f"[INFO] All {len(llms)} deployment(s) responded OK.")
+    elif verify_deployments:
+        print(
+            f"\n[INFO] Deployment verification skipped for provider "
+            f"'{provider_name}' (Azure-only check)."
+        )
 
     # Execute tasks
     print(f"\n[INFO] Starting execution...")
@@ -367,6 +374,7 @@ async def run_sweep(
                     progress_every=progress_every,
                     level=level if isinstance(level, str) and level.strip() else None,
                     spread_correct_answer_uniformly=spread,
+                    provider_name=provider_name,
                 )
 
                 summary = details["summary"]

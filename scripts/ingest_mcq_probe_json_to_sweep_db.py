@@ -6,8 +6,9 @@ metadata shape as ``persist_mcq_probe_result`` (result_summary + probe_details).
 
 Usage:
   python scripts/ingest_mcq_probe_json_to_sweep_db.py \\
-    --sweep-name highschool_college_20q_3456_openrouter_oss20b \\
-    --json-glob "experimental_results/mcq_answer_position_probe/openai_gpt-oss-20b_*_q20_c*_n50_*.json"
+    --sweep-name my_sweep \\
+    --json-glob "experimental_results/mcq_answer_position_probe/foo_*_q20_c*_n50_*.json" \\
+    --json-glob "experimental_results/mcq_answer_position_probe/bar_*_q20_c*_n50_*.json"
 
 Idempotent: skips runs whose ``run_key`` already exists in the DB.
 """
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -39,6 +41,19 @@ from study_query_llm.services.provenance_service import GROUP_TYPE_MCQ_RUN, GROU
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _json_safe_for_db(value: Any) -> Any:
+    """PostgreSQL json/jsonb reject NaN/Infinity; normalize nested metadata for storage."""
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+    if isinstance(value, dict):
+        return {k: _json_safe_for_db(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_for_db(v) for v in value]
+    return value
 
 
 def _probe_details_from_file(path: Path) -> Dict[str, Any]:
@@ -89,27 +104,18 @@ def _run_metadata(
     }
 
 
-def _sort_key(path: Path) -> Tuple[str, str, int, str]:
-    """Stable ordering: level, subject, option count, filename."""
-    try:
-        data = _probe_details_from_file(path)
-        s = data.get("summary") or {}
-        level = str(s.get("level") or "")
-        subject = str(s.get("subject") or "")
-        labels = s.get("labels") or []
-        nopt = len(labels) if isinstance(labels, list) else 0
-        return (level, subject, nopt, path.name)
-    except Exception:
-        return ("", "", 0, path.name)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Ingest MCQ probe JSON files into mcq_sweep / mcq_run.")
     parser.add_argument("--sweep-name", required=True, help="Name for the parent mcq_sweep group")
     parser.add_argument(
         "--json-glob",
+        action="append",
+        dest="json_globs",
+        metavar="GLOB",
         required=True,
-        help="Glob under repo root (e.g. experimental_results/mcq_answer_position_probe/foo_*.json)",
+        help=(
+            "Glob under repo root (repeat flag for multiple patterns, e.g. one per OpenRouter model prefix)"
+        ),
     )
     parser.add_argument(
         "--description",
@@ -118,10 +124,16 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    pattern = args.json_glob.replace("\\", "/")
-    paths = sorted(PROJECT_ROOT.glob(pattern), key=_sort_key)
+    print("[INFO] Glob + scan starting (this can take a while with many files)...", flush=True)
+    paths_set: Dict[str, Path] = {}
+    for raw in args.json_globs:
+        pattern = raw.replace("\\", "/")
+        for p in PROJECT_ROOT.glob(pattern):
+            paths_set[str(p.resolve())] = p
+    print(f"[INFO] Matched {len(paths_set)} unique path(s); ordering by filename...", flush=True)
+    paths = sorted(paths_set.values(), key=lambda p: p.name.lower())
     if not paths:
-        print(f"[FATAL] No files matched: {pattern}", file=sys.stderr)
+        print(f"[FATAL] No files matched any glob: {args.json_globs}", file=sys.stderr)
         return 1
 
     db_url = os.environ.get("DATABASE_URL") or os.environ.get("NEON_DATABASE_URL")
@@ -129,8 +141,10 @@ def main() -> int:
         print("[FATAL] DATABASE_URL or NEON_DATABASE_URL must be set.", file=sys.stderr)
         return 1
 
+    print("[INFO] Connecting and initializing DB schema (Neon cold start can take 10–30s)...", flush=True)
     db = DatabaseConnectionV2(db_url, enable_pgvector=True)
     db.init_db()
+    print("[INFO] DB ready; checking which runs are new (one query per file)...", flush=True)
 
     from sqlalchemy import text as sa_text
     from study_query_llm.db.models_v2 import Group
@@ -139,7 +153,9 @@ def main() -> int:
     skipped = 0
 
     with db.session_scope() as session:
-        for path in paths:
+        for idx, path in enumerate(paths, start=1):
+            if idx == 1 or idx % 25 == 0 or idx == len(paths):
+                print(f"[INFO] Preflight {idx}/{len(paths)}: {path.name[:64]}...", flush=True)
             probe_details = _probe_details_from_file(path)
             summary = probe_details.get("summary")
             if not isinstance(summary, dict):
@@ -180,6 +196,10 @@ def main() -> int:
         print(f"[DONE] Nothing to ingest (skipped={skipped}, matched_files={len(paths)}).")
         return 0
 
+    print(
+        f"[INFO] Inserting {len(pending)} new run(s) under mcq_sweep (large JSON metadata per row can take several minutes)...",
+        flush=True,
+    )
     created_runs = 0
     sweep_id: int
 
@@ -193,7 +213,7 @@ def main() -> int:
             metadata_json={
                 "sweep_name": args.sweep_name,
                 "ingestion": "ingest_mcq_probe_json_to_sweep_db",
-                "json_glob": pattern,
+                "json_globs": list(args.json_globs),
                 "file_count": len(paths),
                 "ingested_run_count": len(pending),
                 "created_at": _now_iso(),
@@ -206,7 +226,7 @@ def main() -> int:
             run_id = repo.create_group(
                 group_type=GROUP_TYPE_MCQ_RUN,
                 name=f"mcq_run_{safe_name}",
-                metadata_json=meta,
+                metadata_json=_json_safe_for_db(meta),
             )
             grp = repo.get_group_by_id(run_id)
             if grp is not None:
@@ -223,7 +243,7 @@ def main() -> int:
                 position=pos,
             )
             created_runs += 1
-            print(f"[OK] {path.name} -> mcq_run id={run_id} ({run_key[:60]}...)")
+            print(f"[OK] {path.name} -> mcq_run id={run_id} ({run_key[:60]}...)", flush=True)
 
     print(
         f"\n[DONE] mcq_sweep id={sweep_id} name={args.sweep_name!r} "

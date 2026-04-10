@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import math
 import re
 import statistics
@@ -149,6 +150,7 @@ async def run_probe(
     *,
     level: Optional[str] = None,
     spread_correct_answer_uniformly: bool = False,
+    provider_name: str = "azure",
 ) -> dict:
     """Run MCQ answer-position probe; returns dict with summary, call_errors, parse_failures."""
     valid_labels = {label.upper() for label in labels}
@@ -175,11 +177,22 @@ async def run_probe(
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
     started_at = time.perf_counter()
 
-    with deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment):
+    provider_key = str(provider_name or "azure").strip().lower() or "azure"
+    provider_context = (
+        deployment_override("AZURE_OPENAI_DEPLOYMENT", deployment)
+        if provider_key == "azure"
+        else nullcontext()
+    )
+
+    with provider_context:
         fresh_config = Config()
-        if "azure" in fresh_config._provider_configs:
-            del fresh_config._provider_configs["azure"]
-        provider = ProviderFactory(fresh_config).create_chat_provider("azure", deployment)
+        if provider_key in fresh_config._provider_configs:
+            del fresh_config._provider_configs[provider_key]
+        if provider_key == "ollama" and "local_llm" in fresh_config._provider_configs:
+            del fresh_config._provider_configs["local_llm"]
+        provider = ProviderFactory(fresh_config).create_chat_provider(
+            provider_key, deployment
+        )
         service = InferenceService(
             provider=provider,
             repository=None,
@@ -330,6 +343,7 @@ async def run_probe(
         level_out = level.strip()
 
     summary = {
+        "provider": provider_key,
         "deployment": deployment,
         "subject": subject,
         "level": level_out,

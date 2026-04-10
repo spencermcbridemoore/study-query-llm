@@ -46,6 +46,7 @@ logger = get_logger(__name__)
 
 # Default artifact directory
 DEFAULT_ARTIFACT_DIR = "artifacts"
+DEFAULT_AZURE_BLOB_QUOTA_BYTES = 100 * 1024 * 1024 * 1024  # 100 GiB
 
 
 class ArtifactService:
@@ -218,6 +219,80 @@ class ArtifactService:
                 self._operation_counts[key],
             )
 
+    @staticmethod
+    def _resolve_azure_quota_bytes() -> int:
+        """
+        Resolve Azure blob hard quota from env, defaulting to 100 GiB.
+
+        Supported env vars:
+        - ARTIFACT_BLOB_MAX_BYTES
+        - ARTIFACT_BLOB_MAX_GB
+        """
+        raw_bytes = os.environ.get("ARTIFACT_BLOB_MAX_BYTES")
+        if raw_bytes and raw_bytes.strip():
+            try:
+                return max(0, int(raw_bytes))
+            except ValueError:
+                logger.warning(
+                    "Invalid ARTIFACT_BLOB_MAX_BYTES=%r; using default %s",
+                    raw_bytes,
+                    DEFAULT_AZURE_BLOB_QUOTA_BYTES,
+                )
+        raw_gb = os.environ.get("ARTIFACT_BLOB_MAX_GB")
+        if raw_gb and raw_gb.strip():
+            try:
+                return max(0, int(float(raw_gb) * 1024 * 1024 * 1024))
+            except ValueError:
+                logger.warning(
+                    "Invalid ARTIFACT_BLOB_MAX_GB=%r; using default %s",
+                    raw_gb,
+                    DEFAULT_AZURE_BLOB_QUOTA_BYTES,
+                )
+        return DEFAULT_AZURE_BLOB_QUOTA_BYTES
+
+    def _current_storage_usage_bytes(self) -> Optional[int]:
+        """Best-effort current storage usage bytes for quota enforcement."""
+        getter = getattr(self.storage, "get_total_bytes", None)
+        if callable(getter):
+            try:
+                return int(getter())
+            except Exception as e:
+                logger.warning("Failed to compute storage usage for quota checks: %s", e)
+                return None
+        return None
+
+    def _enforce_quota_before_write(
+        self,
+        *,
+        incoming_bytes: int,
+        artifact_type: str,
+        logical_path: str,
+    ) -> None:
+        """
+        Apply hard fail guardrail for Azure blob artifact writes.
+
+        The guard is intentionally fail-closed once usage can be computed and the
+        write would exceed configured quota.
+        """
+        backend_type = str(getattr(self.storage, "backend_type", "")).lower()
+        if backend_type != "azure_blob":
+            return
+        quota_bytes = self._resolve_azure_quota_bytes()
+        if quota_bytes <= 0:
+            raise RuntimeError("Azure artifact quota is configured to zero bytes.")
+        current_bytes = self._current_storage_usage_bytes()
+        if current_bytes is None:
+            # Fail-open if usage cannot be computed. We still log above so ops can fix.
+            return
+        projected = int(current_bytes) + int(incoming_bytes)
+        if projected > quota_bytes:
+            raise RuntimeError(
+                "Artifact quota exceeded for Azure blob storage: "
+                f"current_bytes={current_bytes}, incoming_bytes={incoming_bytes}, "
+                f"projected_bytes={projected}, quota_bytes={quota_bytes}, "
+                f"artifact_type={artifact_type}, logical_path={logical_path}"
+            )
+
     def _write_artifact_bytes(
         self,
         *,
@@ -228,6 +303,11 @@ class ArtifactService:
     ) -> str:
         started_at = time.perf_counter()
         try:
+            self._enforce_quota_before_write(
+                incoming_bytes=len(data),
+                artifact_type=artifact_type,
+                logical_path=logical_path,
+            )
             uri = self.storage.write(logical_path, data, content_type=content_type)
             self._record_storage_event(
                 operation="write",

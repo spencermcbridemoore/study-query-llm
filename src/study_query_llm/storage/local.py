@@ -110,6 +110,14 @@ class LocalStorageBackend:
         path = self._full_path(logical_path)
         return str(path.resolve())
 
+    def get_total_bytes(self) -> int:
+        """Return total bytes currently stored under base_dir."""
+        total = 0
+        for path in self.base_dir.rglob("*"):
+            if path.is_file():
+                total += int(path.stat().st_size)
+        return total
+
     def read_from_uri(self, uri: str) -> bytes:
         """
         Read data from a URI previously returned by get_uri().

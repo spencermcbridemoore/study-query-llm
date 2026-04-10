@@ -165,6 +165,36 @@ def test_store_dataset_snapshot_manifest(db_connection, temp_artifact_dir):
         assert len(loaded["entries"]) == 2
 
 
+def test_store_group_blob_artifact(db_connection, temp_artifact_dir):
+    """Layer-0 acquisition blobs linked to a dataset group."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        service = ArtifactService(repository=repo, artifact_dir=temp_artifact_dir)
+
+        group_id = repo.create_group(
+            group_type="dataset",
+            name="acquire_test",
+            description="Test acquisition",
+        )
+        payload = b"col1,col2\n1,2\n"
+        aid = service.store_group_blob_artifact(
+            group_id=group_id,
+            step_name="acquisition",
+            logical_filename="Student_Explanations_problem1.csv",
+            data=payload,
+            artifact_type="dataset_acquisition_file",
+            content_type="text/csv",
+            metadata={"relative_path": "Student_Explanations/problem1.csv"},
+        )
+        assert aid > 0
+        from study_query_llm.db.models_v2 import CallArtifact
+
+        art = session.query(CallArtifact).filter_by(id=aid).first()
+        assert art.artifact_type == "dataset_acquisition_file"
+        assert art.metadata_json["group_id"] == group_id
+        assert Path(art.uri).read_bytes() == payload
+
+
 def test_store_and_find_embedding_matrix(db_connection, temp_artifact_dir):
     """Test storing/reusing embedding_matrix artifact metadata."""
     with db_connection.session_scope() as session:

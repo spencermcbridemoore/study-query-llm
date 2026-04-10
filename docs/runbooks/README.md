@@ -24,6 +24,9 @@ Use runbooks for procedures that are executed step-by-step.
   - BANK77 bootstrap (snapshot + full embeddings + means):
     - full bootstrap: `python scripts/create_bank77_snapshot_and_embeddings.py --provider azure --embedding-engine text-embedding-3-large --require-azure-blob`
     - verify only: `python scripts/create_bank77_snapshot_and_embeddings.py --provider azure --embedding-engine text-embedding-3-large --verify-only --require-azure-blob`
+- Layer 0 download provenance (checksums + `acquisition.json`, optional Azure persist):
+  - contract: [`docs/DATASET_ACQUISITION_LAYER0.md`](../DATASET_ACQUISITION_LAYER0.md)
+  - runbook: [`docs/runbooks/record_dataset_download.md`](record_dataset_download.md)
 
 ## Policy Runbook
 

@@ -470,6 +470,71 @@ class ArtifactService:
 
         return artifact.id
 
+    def store_group_blob_artifact(
+        self,
+        group_id: int,
+        step_name: str,
+        logical_filename: str,
+        data: bytes,
+        artifact_type: str,
+        content_type: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Persist arbitrary bytes for a Group (e.g. layer-0 dataset acquisition files).
+
+        logical_filename must be unique within (group_id, step_name); path separators
+        are sanitized to avoid traversal issues.
+
+        Args:
+            group_id: Target Group ID (e.g. dataset group)
+            step_name: Folder segment under group_id (e.g. "acquisition")
+            logical_filename: Filename or flattened relative path (e.g. "problem1.csv")
+            data: Raw bytes to store
+            artifact_type: CallArtifact.artifact_type (e.g. dataset_acquisition_file)
+            content_type: Optional MIME type
+            metadata: Extra metadata_json merged into artifact record
+
+        Returns:
+            CallArtifact ID
+        """
+        safe_step = step_name.replace("/", "_").replace("\\", "_")
+        safe_file = str(logical_filename).replace("..", "_").replace("/", "_").replace("\\", "_")
+        if not safe_file.strip():
+            raise ValueError("logical_filename must be non-empty after sanitization")
+        logical_path = f"{group_id}/{safe_step}/{safe_file}"
+        uri = self._write_artifact_bytes(
+            logical_path=logical_path,
+            data=data,
+            artifact_type=artifact_type,
+            content_type=content_type,
+        )
+        byte_size = len(data)
+        artifact_metadata: Dict[str, Any] = {
+            "step_name": step_name,
+            "logical_filename": safe_file,
+        }
+        artifact_metadata.update(self._integrity_metadata(data))
+        if metadata:
+            artifact_metadata.update(metadata)
+
+        artifact_id = self._link_artifact_to_group(
+            group_id=group_id,
+            artifact_type=artifact_type,
+            uri=str(uri),
+            content_type=content_type,
+            byte_size=byte_size,
+            metadata_json=artifact_metadata,
+        )
+        logger.info(
+            "Stored group blob artifact: artifact_id=%s group_id=%s type=%s path=%s",
+            artifact_id,
+            group_id,
+            artifact_type,
+            logical_path,
+        )
+        return artifact_id
+
     def store_sweep_results(
         self,
         run_id: int,
@@ -951,7 +1016,12 @@ class ArtifactService:
             expected_byte_size=expected_byte_size,
         )
 
-        if artifact_type in ("sweep_results", "metrics", "dataset_snapshot_manifest"):
+        if artifact_type in (
+            "sweep_results",
+            "metrics",
+            "dataset_snapshot_manifest",
+            "dataset_acquisition_manifest",
+        ):
             return json.loads(data.decode("utf-8"))
 
         if artifact_type in ("cluster_labels", "pca_components", "embedding_matrix"):

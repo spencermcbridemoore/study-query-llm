@@ -7,6 +7,10 @@ Last reviewed: 2026-04-07
 This document defines conventions for storing frozen sampled datasets using existing
 `Group` + `CallArtifact` entities (no new DB table).
 
+## Related: layer 0 (download acquisition)
+
+Before building a `dataset_snapshot`, you can record **raw download provenance** (URLs, checksums, timestamps) as an on-disk `acquisition.json` bundle and optionally as `dataset` group artifacts. See [DATASET_ACQUISITION_LAYER0.md](DATASET_ACQUISITION_LAYER0.md) and `scripts/record_dataset_download.py`.
+
 ## Group Type
 
 - `group_type = "dataset_snapshot"`

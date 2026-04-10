@@ -98,6 +98,7 @@ dmypy.json
 *.csv
 !data/sample_data.csv
 *.xlsx
+*.npy
 *.json
 !package.json
 !tsconfig.json
@@ -119,6 +120,7 @@ Thumbs.db
 
 # Scratch outputs (procedural graphs, local experiments)
 scratch/out/
+artifacts/
 
 # Temporary plan files (session-specific)
 .plans/

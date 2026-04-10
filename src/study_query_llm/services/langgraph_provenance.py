@@ -128,6 +128,7 @@ def build_result_envelope(
 def record_langgraph_job_outcome(
     *,
     method_svc: Any,
+    provenanced_run_svc: Optional[Any],
     request_group_id: int,
     job_id: int,
     job_key: str,
@@ -138,7 +139,13 @@ def record_langgraph_job_outcome(
     state: Optional[Dict[str, Any]] = None,
     checkpoint_refs: Optional[Dict[str, Any]] = None,
 ) -> Optional[int]:
-    """Record langgraph job outcome to analysis_results. Best-effort; returns result_id or None."""
+    """
+    Record langgraph job outcome to compatibility + canonical execution surfaces.
+
+    Writes:
+    - compatibility: analysis_results (via MethodService.record_result)
+    - canonical: provenanced_runs (via ProvenancedRunService.record_analysis_execution)
+    """
     name, version = _resolve_method_identity(payload_json, job_key)
     method_id = _ensure_method_registered(method_svc, name, version)
     if method_id is None:
@@ -165,6 +172,30 @@ def record_langgraph_job_outcome(
             result_key=RESULT_KEY_JOB_OUTCOME,
             result_json=envelope,
         )
+        if provenanced_run_svc is not None:
+            run_status = "completed" if status == "completed" else "failed"
+            provenanced_run_svc.record_analysis_execution(
+                request_group_id=int(request_group_id),
+                source_group_id=int(request_group_id),
+                method_definition_id=int(method_id),
+                analysis_key=RESULT_KEY_JOB_OUTCOME,
+                analysis_run_key=f"{RESULT_KEY_JOB_OUTCOME}:{int(request_group_id)}:{int(job_id)}",
+                result_ref=result_ref,
+                config_json={
+                    "job_id": int(job_id),
+                    "job_key": str(job_key),
+                    "status": str(status),
+                },
+                metadata_json={
+                    "result_id": int(result_id),
+                    "execution_role": "analysis_execution",
+                    "analysis_key": RESULT_KEY_JOB_OUTCOME,
+                    "job_id": int(job_id),
+                    "job_key": str(job_key),
+                },
+                orchestration_job_id=int(job_id),
+                run_status=run_status,
+            )
         logger.debug("Recorded langgraph provenance: result_id=%s, job_id=%s", result_id, job_id)
         return result_id
     except Exception as e:

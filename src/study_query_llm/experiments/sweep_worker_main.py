@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Request-mode sweep worker: standalone run_key claims with lease semantics.
-
-Supports clustering and MCQ sweep requests; sharded mode is clustering-only.
-"""
+"""Request-mode sweep worker: run-key claims and orchestration job execution."""
 
 from __future__ import annotations
 
@@ -23,6 +20,7 @@ import numpy as np
 from datasets import load_dataset
 
 from study_query_llm.algorithms import SweepConfig, run_sweep
+from study_query_llm.analysis.mcq_analyze_request import run_mcq_analyses_for_request
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import SweepRunClaim
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -497,6 +495,82 @@ def run_one_run_k_try_job(
     return (job_id, result_ref, None)
 
 
+def run_one_mcq_run_job(
+    *,
+    job_snapshot: Dict[str, Any],
+    db: DatabaseConnectionV2,
+    worker_label: str,
+) -> Tuple[int, Optional[str], Optional[str]]:
+    """Execute one mcq_run orchestration job."""
+    payload = dict(job_snapshot.get("payload_json") or {})
+    job_id = int(job_snapshot["id"])
+    request_id = int(
+        job_snapshot.get("request_group_id")
+        or payload.get("request_id")
+        or 0
+    )
+    run_key = str(
+        payload.get("run_key")
+        or job_snapshot.get("base_run_key")
+        or job_snapshot.get("job_key")
+        or ""
+    )
+    if request_id <= 0:
+        return (job_id, None, "missing_request_group_id")
+    if not run_key:
+        return (job_id, None, "missing_run_key")
+
+    run_id, err = execute_mcq_standalone_run(
+        db=db,
+        request_id=request_id,
+        run_key=run_key,
+        target=payload,
+        worker_label=worker_label,
+    )
+    if err is not None:
+        return (job_id, None, err)
+    if run_id is None:
+        return (job_id, None, "persist_mcq_failed")
+    return (job_id, str(run_id), None)
+
+
+def run_one_analysis_run_job(
+    *,
+    job_snapshot: Dict[str, Any],
+    db: DatabaseConnectionV2,
+    worker_label: str,
+) -> Tuple[int, Optional[str], Optional[str]]:
+    """Execute one analysis_run orchestration job."""
+    del worker_label  # worker label is currently not needed by the analysis driver.
+    payload = dict(job_snapshot.get("payload_json") or {})
+    job_id = int(job_snapshot["id"])
+    request_id = int(
+        job_snapshot.get("request_group_id")
+        or payload.get("request_id")
+        or 0
+    )
+    analysis_key = str(payload.get("analysis_key") or "")
+    sweep_type = str(payload.get("sweep_type") or "").strip().lower()
+    if request_id <= 0:
+        return (job_id, None, "missing_request_group_id")
+    if not analysis_key:
+        return (job_id, None, "missing_analysis_key")
+    if sweep_type and sweep_type != SWEEP_TYPE_MCQ:
+        return (job_id, None, f"unsupported_analysis_sweep_type:{sweep_type}")
+    try:
+        report = run_mcq_analyses_for_request(
+            db,
+            request_id,
+            dry_run=False,
+            analysis_keys=[analysis_key],
+            orchestration_job_id=job_id,
+            skip_completed=True,
+        )
+    except Exception as exc:
+        return (job_id, None, str(exc)[:1000])
+    return (job_id, f"analysis:{analysis_key}:{len(report.get('recorded') or [])}", None)
+
+
 def worker_main_queued(
     request_id: int,
     worker_slot: int,
@@ -561,7 +635,8 @@ def _claim_next_sharded_job(
     request_id: int,
     worker_id: str,
     lease_seconds: int,
-    embedding_engine: Optional[str],
+    job_types: List[str],
+    filter_payload: Optional[Dict[str, Any]],
 ):
     with db.session_scope() as session:
         repo = RawCallRepository(session)
@@ -569,14 +644,15 @@ def _claim_next_sharded_job(
             worker_id=worker_id,
             lease_seconds=lease_seconds,
             request_group_id=request_id,
-            job_types=["run_k_try", "reduce_k", "finalize_run"],
-            filter_payload={"embedding_engine": embedding_engine} if embedding_engine else None,
+            job_types=job_types,
+            filter_payload=filter_payload,
         )
         if not job:
             return None
         # Detach-safe job snapshot (session closes after this function).
         return {
             "id": int(job.id),
+            "request_group_id": int(job.request_group_id),
             "job_type": str(job.job_type),
             "payload_json": dict(job.payload_json or {}),
             "seed_value": job.seed_value,
@@ -602,6 +678,20 @@ def _run_sharded_worker_loop(
 ) -> int:
     loaded = _load_datasets(repo_root)
     reducer = JobReducerService(db)
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        req = SweepRequestService(repo).get_request(request_id)
+    sweep_type = (req or {}).get("sweep_type") or SWEEP_TYPE_CLUSTERING
+    job_types = (
+        ["mcq_run", "analysis_run"]
+        if sweep_type == SWEEP_TYPE_MCQ
+        else ["run_k_try", "reduce_k", "finalize_run"]
+    )
+    filter_payload = (
+        {"embedding_engine": embedding_engine}
+        if embedding_engine and sweep_type == SWEEP_TYPE_CLUSTERING
+        else None
+    )
     started_at = time.time()
     last_work_at = started_at
     completed_leaf_jobs = 0
@@ -618,7 +708,8 @@ def _run_sharded_worker_loop(
             request_id=request_id,
             worker_id=worker_id,
             lease_seconds=claim_lease_seconds,
-            embedding_engine=embedding_engine,
+            job_types=job_types,
+            filter_payload=filter_payload,
         )
         claim_wait_seconds = time.perf_counter() - claim_started
         if not job:
@@ -629,7 +720,6 @@ def _run_sharded_worker_loop(
             time.sleep(5)
             continue
 
-        payload = job.get("payload_json") or {}
         job_type = job.get("job_type")
         job_id = int(job["id"])
         job_key = str(job.get("job_key"))
@@ -637,6 +727,8 @@ def _run_sharded_worker_loop(
             runner = create_job_runner(
                 job_type,
                 run_k_try_fn=run_one_run_k_try_job,
+                mcq_run_fn=run_one_mcq_run_job,
+                analysis_run_fn=run_one_analysis_run_job,
                 reducer=reducer,
             )
             context = JobRunContext(
@@ -850,7 +942,32 @@ def _run_standalone_worker_loop(
         repo = RawCallRepository(session)
         svc = SweepRequestService(repo)
         req = svc.get_request(request_id)
+        planned = svc.ensure_orchestration_jobs(request_id)
+        job_count = len(repo.list_orchestration_jobs(request_group_id=request_id))
     sweep_type = (req or {}).get("sweep_type") or SWEEP_TYPE_CLUSTERING
+    execution_mode = str((req or {}).get("execution_mode") or "standalone").lower()
+
+    # Standalone is modeled as an orchestration profile when planned jobs exist.
+    if job_count > 0:
+        print(
+            f"[{worker_id}] Routing standalone->orchestration jobs "
+            f"(mode={execution_mode}, planned_now={planned}, jobs={job_count})"
+        )
+        return _run_sharded_worker_loop(
+            request_id=request_id,
+            worker_id=worker_id,
+            worker_slot=worker_slot,
+            embedding_engine=embedding_engine,
+            tei_endpoint=tei_endpoint,
+            provider_label=provider_label,
+            embedding_provider_name=embedding_provider_name,
+            claim_lease_seconds=claim_lease_seconds,
+            max_runs=max_runs,
+            idle_exit_seconds=idle_exit_seconds,
+            force=force,
+            repo_root=repo_root,
+        )
+
     if sweep_type == SWEEP_TYPE_MCQ:
         return _run_mcq_standalone_worker_loop(
             request_id=request_id,
@@ -997,6 +1114,8 @@ def _run_clustering_standalone_worker_loop(
                     "embedding_provider": provider_label,
                     "summarizer": str(summarizer_key),
                     "n_restarts": N_RESTARTS,
+                    "request_group_id": int(request_id),
+                    "determinism_class": "pseudo_deterministic",
                     "k_min": K_MIN,
                     "k_max": K_MAX,
                     "entry_max": ENTRY_MAX,
@@ -1096,13 +1215,7 @@ def run_worker(
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         svc = SweepRequestService(repo)
-        req = svc.get_request(request_id)
-    sweep_type = (req or {}).get("sweep_type") or SWEEP_TYPE_CLUSTERING
-    if job_mode == "sharded" and sweep_type != SWEEP_TYPE_CLUSTERING:
-        raise ValueError(
-            "Sharded execution_mode is only supported for clustering sweeps; "
-            f"this request has sweep_type={sweep_type!r}"
-        )
+        svc.ensure_orchestration_jobs(request_id)
 
     from study_query_llm.services.worker_orchestrator import create_worker_orchestrator
 
@@ -1128,7 +1241,7 @@ def run_worker(
 
 def build_sweep_worker_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sweep request worker (clustering or MCQ standalone; sharded clustering only)."
+        description="Sweep request worker (clustering and MCQ, standalone or orchestration jobs)."
     )
     parser.add_argument("--request-id", type=int, required=True, help="Sweep request id")
     parser.add_argument("--worker-id", type=str, default=None, help="Worker identifier")

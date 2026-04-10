@@ -1,4 +1,4 @@
-"""Job runners for orchestration job types (run_k_try, reduce_k, finalize_run)."""
+"""Job runners for orchestration job types."""
 
 from __future__ import annotations
 
@@ -142,4 +142,76 @@ class FinalizeRunRunner:
             result_ref=str(run_id) if run_id is not None else None,
             error=None,
             db_updated_by_runner=True,
+        )
+
+
+class McqRunRunner:
+    """Runner for mcq_run jobs. Does not update DB; worker does."""
+
+    def __init__(self, run_fn: Callable[..., tuple]) -> None:
+        self._run_fn = run_fn
+
+    def run(self, job_snapshot: Dict[str, Any], context: JobRunContext) -> JobRunOutcome:
+        from .job_payload_models import (
+            parse_job_snapshot,
+            parse_mcq_run_payload,
+        )
+
+        try:
+            parse_job_snapshot(job_snapshot)
+            parse_mcq_run_payload(job_snapshot.get("payload_json") or {})
+        except ValidationError as e:
+            job_id = int(job_snapshot.get("id", 0))
+            return JobRunOutcome(
+                job_id=job_id,
+                result_ref=None,
+                error=f"payload_validation_error: {e}",
+                db_updated_by_runner=False,
+            )
+        job_id_out, result_ref_out, error_out = self._run_fn(
+            job_snapshot=job_snapshot,
+            db=context.db,
+            worker_label=f"orchestration-job-{int(job_snapshot.get('id', 0))}",
+        )
+        return JobRunOutcome(
+            job_id=job_id_out,
+            result_ref=result_ref_out,
+            error=error_out,
+            db_updated_by_runner=False,
+        )
+
+
+class AnalysisRunRunner:
+    """Runner for analysis_run jobs. Does not update DB; worker does."""
+
+    def __init__(self, run_fn: Callable[..., tuple]) -> None:
+        self._run_fn = run_fn
+
+    def run(self, job_snapshot: Dict[str, Any], context: JobRunContext) -> JobRunOutcome:
+        from .job_payload_models import (
+            parse_analysis_run_payload,
+            parse_job_snapshot,
+        )
+
+        try:
+            parse_job_snapshot(job_snapshot)
+            parse_analysis_run_payload(job_snapshot.get("payload_json") or {})
+        except ValidationError as e:
+            job_id = int(job_snapshot.get("id", 0))
+            return JobRunOutcome(
+                job_id=job_id,
+                result_ref=None,
+                error=f"payload_validation_error: {e}",
+                db_updated_by_runner=False,
+            )
+        job_id_out, result_ref_out, error_out = self._run_fn(
+            job_snapshot=job_snapshot,
+            db=context.db,
+            worker_label=f"orchestration-job-{int(job_snapshot.get('id', 0))}",
+        )
+        return JobRunOutcome(
+            job_id=job_id_out,
+            result_ref=result_ref_out,
+            error=error_out,
+            db_updated_by_runner=False,
         )

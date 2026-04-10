@@ -48,6 +48,44 @@ class LangGraphRunPayload(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class McqRunPayload(BaseModel):
+    """Payload for mcq_run jobs."""
+
+    run_key: str
+    deployment: str
+    level: str
+    subject: str
+    options_per_question: int = 4
+    questions_per_test: int = 20
+    label_style: str = "upper"
+    spread_correct_answer_uniformly: bool = False
+    samples_per_combo: int = 1
+    template_version: str = "v1"
+    concurrency: int = 8
+    temperature: float = 0.7
+    max_tokens: int = 900
+    progress_every: int = 0
+    determinism_class: str = "non_deterministic"
+
+    model_config = {"extra": "allow"}
+
+
+class AnalysisRunPayload(BaseModel):
+    """Payload for analysis_run jobs."""
+
+    request_id: int
+    sweep_type: str
+    analysis_key: str
+    scope: str = "run"
+    method_name: str = ""
+    method_version: str = "1.0"
+    required: bool = False
+    blocking: bool = False
+    result_keys: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "allow"}
+
+
 def parse_run_k_try_payload(payload_json: Dict[str, Any]) -> RunKTryPayload:
     """Parse and validate run_k_try payload. Raises ValidationError on invalid data."""
     return RunKTryPayload.model_validate(payload_json or {})
@@ -56,3 +94,13 @@ def parse_run_k_try_payload(payload_json: Dict[str, Any]) -> RunKTryPayload:
 def parse_langgraph_run_payload(payload_json: Dict[str, Any]) -> LangGraphRunPayload:
     """Parse and validate langgraph_run payload. Raises ValidationError on invalid data."""
     return LangGraphRunPayload.model_validate(payload_json or {})
+
+
+def parse_mcq_run_payload(payload_json: Dict[str, Any]) -> McqRunPayload:
+    """Parse and validate mcq_run payload. Raises ValidationError on invalid data."""
+    return McqRunPayload.model_validate(payload_json or {})
+
+
+def parse_analysis_run_payload(payload_json: Dict[str, Any]) -> AnalysisRunPayload:
+    """Parse and validate analysis_run payload. Raises ValidationError on invalid data."""
+    return AnalysisRunPayload.model_validate(payload_json or {})

@@ -50,6 +50,9 @@ def run_mcq_analyses_for_request(
     request_id: int,
     *,
     dry_run: bool = False,
+    analysis_keys: Optional[List[str]] = None,
+    orchestration_job_id: Optional[int] = None,
+    skip_completed: bool = True,
 ) -> Dict[str, Any]:
     """
     Execute analysis catalog for an MCQ sweep request.
@@ -57,7 +60,14 @@ def run_mcq_analyses_for_request(
     Records MethodService results and marks analysis keys complete.
     Returns a small report dict.
     """
-    report: Dict[str, Any] = {"request_id": request_id, "recorded": [], "dry_run": dry_run}
+    selected_keys = {str(k).strip() for k in (analysis_keys or []) if str(k).strip()}
+    report: Dict[str, Any] = {
+        "request_id": request_id,
+        "recorded": [],
+        "skipped": [],
+        "dry_run": dry_run,
+        "analysis_keys": sorted(selected_keys) if selected_keys else None,
+    }
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         svc = SweepRequestService(repo)
@@ -75,11 +85,19 @@ def run_mcq_analyses_for_request(
 
         metas = _load_mcq_runs_for_keys(session, completed_keys)
         catalog = list(req.get("analysis_catalog") or [])
+        if selected_keys:
+            catalog = [
+                entry
+                for entry in catalog
+                if isinstance(entry, dict)
+                and str(entry.get("analysis_key") or "").strip() in selected_keys
+            ]
         required_keys: Set[str] = {
             str(e.get("analysis_key"))
             for e in catalog
             if isinstance(e, dict) and e.get("required")
         }
+        completed_already = {str(x) for x in (req.get("completed_analyses") or [])}
 
         summaries: List[Dict[str, Any]] = []
         run_ids_by_key: Dict[str, int] = {}
@@ -101,6 +119,9 @@ def run_mcq_analyses_for_request(
             if not isinstance(entry, dict):
                 continue
             akey = str(entry.get("analysis_key") or "")
+            if skip_completed and akey in completed_already:
+                report["skipped"].append({"analysis": akey, "reason": "already_completed"})
+                continue
             scope = str(entry.get("scope") or "run")
             if akey == "mcq_compliance" and scope == "run":
                 for rk in completed_keys:
@@ -120,6 +141,7 @@ def run_mcq_analyses_for_request(
                             analysis_key=akey,
                             result_key=rk_metric,
                             result_value=float(val),
+                            orchestration_job_id=orchestration_job_id,
                             mark_complete=False,
                         )
                 if not dry_run:
@@ -143,6 +165,7 @@ def run_mcq_analyses_for_request(
                     analysis_key=akey,
                     result_key="position_distribution",
                     result_json=payload,
+                    orchestration_job_id=orchestration_job_id,
                     mark_complete=False,
                 )
                 svc.mark_analysis_completed(request_id, akey)
@@ -165,6 +188,7 @@ def run_mcq_analyses_for_request(
                     result_key="chi_square",
                     result_value=float(chi) if chi == chi else None,
                     result_json=chi_payload,
+                    orchestration_job_id=orchestration_job_id,
                     mark_complete=False,
                 )
                 svc.mark_analysis_completed(request_id, akey)
@@ -176,6 +200,98 @@ def run_mcq_analyses_for_request(
         if required_keys <= done:
             report["all_required_complete"] = True
 
+    return report
+
+
+def run_enqueued_analysis_jobs_for_request(
+    db: DatabaseConnectionV2,
+    request_id: int,
+    *,
+    dry_run: bool = False,
+    worker_id: str = "mcq-analyze-wrapper",
+    lease_seconds: int = 300,
+) -> Dict[str, Any]:
+    """
+    Compatibility wrapper: process orchestration ``analysis_run`` jobs for request.
+    """
+    report: Dict[str, Any] = {
+        "request_id": int(request_id),
+        "dry_run": bool(dry_run),
+        "planned_jobs": 0,
+        "processed_jobs": 0,
+        "processed": [],
+    }
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        req = svc.get_request(request_id)
+        if not req:
+            raise ValueError(f"request_id={request_id} not found")
+        if (req.get("sweep_type") or "").lower() != SWEEP_TYPE_MCQ:
+            raise ValueError(f"Request {request_id} is not sweep_type=mcq")
+        svc.ensure_orchestration_jobs(request_id)
+        jobs = repo.list_orchestration_jobs(
+            request_group_id=int(request_id),
+            job_type="analysis_run",
+        )
+        report["planned_jobs"] = len(jobs)
+        report["job_statuses"] = [j.status for j in jobs]
+        if dry_run:
+            report["planned_analysis_keys"] = [
+                str((j.payload_json or {}).get("analysis_key") or "")
+                for j in jobs
+            ]
+            return report
+
+    while True:
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            job = repo.claim_next_orchestration_job(
+                worker_id=worker_id,
+                lease_seconds=max(30, int(lease_seconds)),
+                request_group_id=int(request_id),
+                job_types=["analysis_run"],
+            )
+            if not job:
+                break
+            payload = dict(job.payload_json or {})
+            analysis_key = str(payload.get("analysis_key") or "")
+            try:
+                job_report = run_mcq_analyses_for_request(
+                    db,
+                    int(request_id),
+                    dry_run=False,
+                    analysis_keys=[analysis_key] if analysis_key else None,
+                    orchestration_job_id=int(job.id),
+                    skip_completed=True,
+                )
+                repo.complete_orchestration_job(
+                    int(job.id),
+                    result_ref=f"analysis:{analysis_key}",
+                )
+                report["processed"].append(
+                    {
+                        "job_id": int(job.id),
+                        "analysis_key": analysis_key,
+                        "status": "completed",
+                        "recorded": int(len(job_report.get("recorded") or [])),
+                    }
+                )
+                report["processed_jobs"] = int(report["processed_jobs"]) + 1
+            except Exception as exc:
+                repo.fail_orchestration_job(
+                    int(job.id),
+                    error_json={"error": str(exc)[:1000]},
+                )
+                report["processed"].append(
+                    {
+                        "job_id": int(job.id),
+                        "analysis_key": analysis_key,
+                        "status": "failed",
+                        "error": str(exc)[:1000],
+                    }
+                )
+                raise
     return report
 
 
@@ -198,7 +314,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(1)
     db = DatabaseConnectionV2(url, enable_pgvector=True)
     db.init_db()
-    report = run_mcq_analyses_for_request(db, args.request_id, dry_run=args.dry_run)
+    report = run_enqueued_analysis_jobs_for_request(
+        db,
+        args.request_id,
+        dry_run=args.dry_run,
+    )
     print(json.dumps(report, indent=2, default=str))
 
 

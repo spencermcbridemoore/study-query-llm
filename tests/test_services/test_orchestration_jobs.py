@@ -296,3 +296,73 @@ def test_complete_orchestration_jobs_batch_multiple_request_groups():
         jobs2 = repo.list_orchestration_jobs(request_group_id=req2)
         assert any(j.status == "completed" for j in jobs1)
         assert any(j.status == "completed" for j in jobs2)
+
+
+def test_mcq_request_planner_creates_single_mcq_job_per_run_key():
+    db = _db()
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        req_id = svc.create_request(
+            request_name="mcq_jobs",
+            algorithm="mcq_answer_position_probe",
+            fixed_config={"samples_per_combo": 12, "template_version": "v1"},
+            parameter_axes={
+                "levels": ["high school"],
+                "subjects": ["physics"],
+                "deployments": ["gpt-4o-mini"],
+                "options_per_question": [4, 5],
+                "questions_per_test": [20],
+                "label_styles": ["upper"],
+                "spread_correct_answer_uniformly": [False],
+            },
+            entry_max=None,
+            sweep_type="mcq",
+        )
+        req = svc.get_request(req_id)
+        assert req is not None
+        expected = int(req["expected_count"])
+        jobs = repo.list_orchestration_jobs(request_group_id=req_id)
+        mcq_jobs = [j for j in jobs if j.job_type == "mcq_run"]
+        analysis_jobs = [j for j in jobs if j.job_type == "analysis_run"]
+        assert len(mcq_jobs) == expected
+        assert all(j.status == "ready" for j in mcq_jobs)
+        assert len(analysis_jobs) >= 1
+        assert all(j.status == "pending" for j in analysis_jobs)
+
+
+def test_mcq_orchestration_jobs_can_be_claimed_and_completed():
+    db = _db()
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        req_id = svc.create_request(
+            request_name="mcq_claim_complete",
+            algorithm="mcq_answer_position_probe",
+            fixed_config={"samples_per_combo": 3, "template_version": "v1"},
+            parameter_axes={
+                "levels": ["high school"],
+                "subjects": ["physics"],
+                "deployments": ["gpt-4o-mini"],
+                "options_per_question": [4],
+                "questions_per_test": [10],
+                "label_styles": ["upper"],
+                "spread_correct_answer_uniformly": [False],
+            },
+            entry_max=None,
+            sweep_type="mcq",
+        )
+        job = repo.claim_next_orchestration_job(
+            worker_id="mcq-worker-1",
+            lease_seconds=60,
+            request_group_id=req_id,
+            job_types=["mcq_run"],
+        )
+        assert job is not None
+        assert job.job_type == "mcq_run"
+        repo.complete_orchestration_job(int(job.id), result_ref="run_id:1")
+        refreshed = {
+            int(j.id): j for j in repo.list_orchestration_jobs(request_group_id=req_id)
+        }
+        assert int(job.id) in refreshed
+        assert refreshed[int(job.id)].status == "completed"

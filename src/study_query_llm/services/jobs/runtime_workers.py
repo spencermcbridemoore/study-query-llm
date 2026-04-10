@@ -14,6 +14,7 @@ from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.jobs import JobRunContext, create_job_runner
 from study_query_llm.services.langgraph_provenance import record_langgraph_job_outcome
 from study_query_llm.services.method_service import MethodService
+from study_query_llm.services.provenanced_run_service import ProvenancedRunService
 
 
 def claim_next_langgraph_job(
@@ -117,8 +118,10 @@ def main_langgraph_worker(argv: Optional[list[str]] = None) -> int:
                         outcome.job_id, error_json={"error": outcome.error}
                     )
                     method_svc = MethodService(repo)
+                    provenanced_run_svc = ProvenancedRunService(repo)
                     record_langgraph_job_outcome(
                         method_svc=method_svc,
+                        provenanced_run_svc=provenanced_run_svc,
                         request_group_id=job["request_group_id"],
                         job_id=outcome.job_id,
                         job_key=job_key,
@@ -134,8 +137,10 @@ def main_langgraph_worker(argv: Optional[list[str]] = None) -> int:
                         outcome.job_id, result_ref=outcome.result_ref
                     )
                     method_svc = MethodService(repo)
+                    provenanced_run_svc = ProvenancedRunService(repo)
                     record_langgraph_job_outcome(
                         method_svc=method_svc,
+                        provenanced_run_svc=provenanced_run_svc,
                         request_group_id=job["request_group_id"],
                         job_id=outcome.job_id,
                         job_key=job_key,
@@ -158,8 +163,10 @@ def main_langgraph_worker(argv: Optional[list[str]] = None) -> int:
                     job_id, error_json={"error": str(exc)[:1000]}
                 )
                 method_svc = MethodService(repo)
+                provenanced_run_svc = ProvenancedRunService(repo)
                 record_langgraph_job_outcome(
                     method_svc=method_svc,
+                    provenanced_run_svc=provenanced_run_svc,
                     request_group_id=job["request_group_id"],
                     job_id=job_id,
                     job_key=job_key,

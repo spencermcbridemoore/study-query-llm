@@ -21,6 +21,7 @@ from .models_v2 import (
     GroupLink,
     OrchestrationJob,
     OrchestrationJobDependency,
+    ProvenancedRun,
 )
 from ..utils.logging_config import get_logger
 
@@ -1355,3 +1356,221 @@ class RawCallRepository:
         if status is not None:
             q = q.filter(OrchestrationJob.status == status)
         return q.order_by(OrchestrationJob.created_at.asc()).all()
+
+    # ========== PROVENANCED RUN OPERATIONS ==========
+
+    def create_provenanced_run(
+        self,
+        *,
+        run_kind: str,
+        run_status: str = "created",
+        request_group_id: Optional[int] = None,
+        source_group_id: Optional[int] = None,
+        result_group_id: Optional[int] = None,
+        input_snapshot_group_id: Optional[int] = None,
+        method_definition_id: Optional[int] = None,
+        orchestration_job_id: Optional[int] = None,
+        parent_provenanced_run_id: Optional[int] = None,
+        run_key: Optional[str] = None,
+        determinism_class: str = "non_deterministic",
+        config_hash: Optional[str] = None,
+        config_json: Optional[Dict[str, Any]] = None,
+        result_ref: Optional[str] = None,
+        metadata_json: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Create (or upsert) a first-class execution provenance run record.
+
+        Upsert key is `(request_group_id, run_key, run_kind)` when those values
+        are present. This preserves idempotency across retried workers.
+        """
+        normalized_kind = str(run_kind or "").strip().lower()
+        inferred_execution_role: Optional[str] = None
+        if normalized_kind in ("method_execution", "analysis_execution"):
+            inferred_execution_role = normalized_kind
+            normalized_kind = "execution"
+        if not normalized_kind:
+            normalized_kind = "execution"
+
+        metadata_payload = dict(metadata_json or {})
+        if inferred_execution_role and not metadata_payload.get("execution_role"):
+            metadata_payload["execution_role"] = inferred_execution_role
+
+        existing: Optional[ProvenancedRun] = None
+        if request_group_id is not None and run_key:
+            existing = (
+                self.session.query(ProvenancedRun)
+                .filter(
+                    ProvenancedRun.request_group_id == request_group_id,
+                    ProvenancedRun.run_key == run_key,
+                    ProvenancedRun.run_kind == normalized_kind,
+                )
+                .first()
+            )
+        if existing is not None:
+            now = datetime.now(timezone.utc)
+            existing.run_status = run_status
+            existing.source_group_id = (
+                source_group_id if source_group_id is not None else existing.source_group_id
+            )
+            existing.result_group_id = (
+                result_group_id if result_group_id is not None else existing.result_group_id
+            )
+            existing.input_snapshot_group_id = (
+                input_snapshot_group_id
+                if input_snapshot_group_id is not None
+                else existing.input_snapshot_group_id
+            )
+            existing.method_definition_id = (
+                method_definition_id
+                if method_definition_id is not None
+                else existing.method_definition_id
+            )
+            existing.orchestration_job_id = (
+                orchestration_job_id
+                if orchestration_job_id is not None
+                else existing.orchestration_job_id
+            )
+            existing.parent_provenanced_run_id = (
+                parent_provenanced_run_id
+                if parent_provenanced_run_id is not None
+                else existing.parent_provenanced_run_id
+            )
+            existing.result_ref = result_ref if result_ref is not None else existing.result_ref
+            existing.determinism_class = determinism_class or existing.determinism_class
+            existing.config_hash = config_hash if config_hash is not None else existing.config_hash
+            existing.config_json = config_json if config_json is not None else existing.config_json
+            existing.metadata_json = (
+                metadata_payload if metadata_json is not None else existing.metadata_json
+            )
+            existing.updated_at = now
+            self.session.flush()
+            return int(existing.id)
+
+        run = ProvenancedRun(
+            run_kind=normalized_kind,
+            run_status=run_status,
+            request_group_id=request_group_id,
+            source_group_id=source_group_id,
+            result_group_id=result_group_id,
+            input_snapshot_group_id=input_snapshot_group_id,
+            method_definition_id=method_definition_id,
+            orchestration_job_id=orchestration_job_id,
+            parent_provenanced_run_id=parent_provenanced_run_id,
+            run_key=run_key,
+            determinism_class=determinism_class,
+            config_hash=config_hash,
+            config_json=config_json or {},
+            result_ref=result_ref,
+            metadata_json=metadata_payload,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        self.session.add(run)
+        self.session.flush()
+        self.session.refresh(run)
+        return int(run.id)
+
+    def get_provenanced_run_by_id(self, run_id: int) -> Optional[ProvenancedRun]:
+        """Get a provenanced run by primary key."""
+        return self.session.query(ProvenancedRun).filter_by(id=run_id).first()
+
+    def get_provenanced_run_by_request_and_key(
+        self,
+        *,
+        request_group_id: int,
+        run_key: str,
+        run_kind: str,
+    ) -> Optional[ProvenancedRun]:
+        """Get an execution record by request/run key/run kind."""
+        normalized_kind = str(run_kind or "").strip().lower()
+        role_filter: Optional[str] = None
+        kind_filters = [normalized_kind]
+        if normalized_kind in ("method_execution", "analysis_execution"):
+            role_filter = normalized_kind
+            kind_filters = ["execution", normalized_kind]
+        rows = (
+            self.session.query(ProvenancedRun)
+            .filter(
+                ProvenancedRun.request_group_id == request_group_id,
+                ProvenancedRun.run_key == run_key,
+                ProvenancedRun.run_kind.in_(kind_filters),
+            )
+            .all()
+        )
+        if role_filter is None:
+            return rows[0] if rows else None
+        for row in rows:
+            role = str((row.metadata_json or {}).get("execution_role") or "").strip().lower()
+            if role == role_filter or str(row.run_kind or "").strip().lower() == role_filter:
+                return row
+        return None
+
+    def list_provenanced_runs(
+        self,
+        *,
+        request_group_id: Optional[int] = None,
+        run_kind: Optional[str] = None,
+        source_group_id: Optional[int] = None,
+        status: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[ProvenancedRun]:
+        """List provenanced execution records with optional filters."""
+        q = self.session.query(ProvenancedRun)
+        if request_group_id is not None:
+            q = q.filter(ProvenancedRun.request_group_id == request_group_id)
+        role_filter: Optional[str] = None
+        kind_filter: Optional[List[str]] = None
+        if run_kind is not None:
+            normalized_kind = str(run_kind or "").strip().lower()
+            if normalized_kind in ("method_execution", "analysis_execution"):
+                role_filter = normalized_kind
+                kind_filter = ["execution", normalized_kind]
+            else:
+                kind_filter = [normalized_kind]
+            q = q.filter(ProvenancedRun.run_kind.in_(kind_filter))
+        if source_group_id is not None:
+            q = q.filter(ProvenancedRun.source_group_id == source_group_id)
+        if status is not None:
+            q = q.filter(ProvenancedRun.run_status == status)
+        q = q.order_by(ProvenancedRun.created_at.asc())
+        if limit is not None:
+            q = q.limit(int(limit))
+        rows = q.all()
+        if role_filter is not None:
+            rows = [
+                row
+                for row in rows
+                if str((row.metadata_json or {}).get("execution_role") or "").strip().lower()
+                == role_filter
+                or str(row.run_kind or "").strip().lower() == role_filter
+            ]
+        return rows
+
+    def update_provenanced_run(
+        self,
+        run_id: int,
+        *,
+        run_status: Optional[str] = None,
+        result_ref: Optional[str] = None,
+        result_group_id: Optional[int] = None,
+        orchestration_job_id: Optional[int] = None,
+        metadata_json: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Update mutable fields on a provenanced run."""
+        run = self.session.query(ProvenancedRun).filter_by(id=run_id).first()
+        if run is None:
+            return False
+        if run_status is not None:
+            run.run_status = run_status
+        if result_ref is not None:
+            run.result_ref = result_ref
+        if result_group_id is not None:
+            run.result_group_id = result_group_id
+        if orchestration_job_id is not None:
+            run.orchestration_job_id = orchestration_job_id
+        if metadata_json is not None:
+            run.metadata_json = metadata_json
+        run.updated_at = datetime.now(timezone.utc)
+        self.session.flush()
+        return True

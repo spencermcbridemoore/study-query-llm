@@ -50,10 +50,16 @@ def test_create_mcq_request_expands_expected_keys_and_analysis_contract():
         assert req["expected_count"] == 2
         assert "mcq_compliance" in (req.get("required_analyses") or [])
         assert req.get("analysis_status") == "not_started"
+        assert req.get("determinism_class") == "non_deterministic"
+        assert req.get("orchestration_graph_kind") == "single_job_per_run"
+        assert req.get("historical_backfill_policy") == "compatibility_only"
 
         keys = req.get("expected_run_keys") or []
         assert any("4opt_20q_upper_no_spread_50samples_v1" in k for k in keys)
         assert any("5opt_20q_upper_no_spread_50samples_v1" in k for k in keys)
+        jobs = repo.list_orchestration_jobs(request_group_id=req_id)
+        assert len([j for j in jobs if j.job_type == "mcq_run"]) == 2
+        assert len([j for j in jobs if j.job_type == "analysis_run"]) >= 1
 
 
 def test_create_mcq_request_defaults_missing_label_styles_to_upper():
@@ -75,6 +81,25 @@ def test_create_mcq_request_defaults_missing_label_styles_to_upper():
         assert req["expected_count"] == 2
         keys = req.get("expected_run_keys") or []
         assert all("_upper_" in k or "upper" in k for k in keys)
+
+
+def test_mcq_request_forces_non_deterministic_execution_classification():
+    db = _db()
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        req_id = svc.create_request(
+            request_name="mcq_force_nondeterministic",
+            algorithm="mcq_answer_position_probe",
+            fixed_config={"samples_per_combo": 10, "template_version": "v1"},
+            parameter_axes=_mcq_axes(),
+            entry_max=None,
+            sweep_type="mcq",
+            determinism_class="deterministic",
+        )
+        req = svc.get_request(req_id)
+        assert req is not None
+        assert req.get("determinism_class") == "non_deterministic"
 
 
 def test_mcq_progress_and_finalize_creates_mcq_sweep():

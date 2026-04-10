@@ -680,6 +680,139 @@ class AnalysisResult(BaseV2):
         }
 
 
+class ProvenancedRun(BaseV2):
+    """
+    First-class execution record for all run/analysis outcomes.
+
+    Canonical write path uses ``run_kind='execution'`` and stores the optional
+    semantic role in ``metadata_json.execution_role``. Legacy values remain
+    temporarily accepted for compatibility/backfill windows.
+    """
+
+    __tablename__ = "provenanced_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_kind = Column(String(40), nullable=False, index=True)
+    run_status = Column(String(20), nullable=False, default="created", index=True)
+
+    request_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    result_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    input_snapshot_group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    method_definition_id = Column(
+        Integer,
+        ForeignKey("method_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    orchestration_job_id = Column(
+        Integer,
+        ForeignKey("orchestration_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    parent_provenanced_run_id = Column(
+        Integer,
+        ForeignKey("provenanced_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    run_key = Column(String(300), nullable=True, index=True)
+    determinism_class = Column(
+        String(40),
+        nullable=False,
+        default="non_deterministic",
+        index=True,
+    )
+    config_hash = Column(String(64), nullable=True, index=True)
+    config_json = Column(JSON, nullable=True)
+    result_ref = Column(String(400), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "run_kind IN ('execution', 'method_execution', 'analysis_execution')",
+            name="check_provenanced_run_kind",
+        ),
+        CheckConstraint(
+            "run_status IN ('created', 'running', 'completed', 'failed', 'cancelled')",
+            name="check_provenanced_run_status",
+        ),
+        CheckConstraint(
+            "determinism_class IN ('deterministic', 'pseudo_deterministic', 'non_deterministic')",
+            name="check_provenanced_run_determinism_class",
+        ),
+        Index(
+            "idx_provenanced_run_request_key_kind",
+            "request_group_id",
+            "run_key",
+            "run_kind",
+            unique=True,
+        ),
+        Index(
+            "idx_provenanced_run_source_kind",
+            "source_group_id",
+            "run_kind",
+        ),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "run_kind": self.run_kind,
+            "run_status": self.run_status,
+            "request_group_id": self.request_group_id,
+            "source_group_id": self.source_group_id,
+            "result_group_id": self.result_group_id,
+            "input_snapshot_group_id": self.input_snapshot_group_id,
+            "method_definition_id": self.method_definition_id,
+            "orchestration_job_id": self.orchestration_job_id,
+            "parent_provenanced_run_id": self.parent_provenanced_run_id,
+            "run_key": self.run_key,
+            "determinism_class": self.determinism_class,
+            "config_hash": self.config_hash,
+            "config_json": self.config_json,
+            "result_ref": self.result_ref,
+            "metadata_json": self.metadata_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class EmbeddingVector(BaseV2):
     """
     Table for storing embedding vectors.

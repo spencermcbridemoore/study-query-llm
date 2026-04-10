@@ -5,10 +5,12 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Optional
 
 from .job_runners import (
+    AnalysisRunRunner,
     FinalizeRunRunner,
     JobRunner,
     JobRunContext,
     JobRunOutcome,
+    McqRunRunner,
     ReduceKRunner,
     RunKTryRunner,
 )
@@ -19,13 +21,17 @@ def create_job_runner(
     job_type: str,
     *,
     run_k_try_fn: Optional[Callable[..., tuple]] = None,
+    mcq_run_fn: Optional[Callable[..., tuple]] = None,
+    analysis_run_fn: Optional[Callable[..., tuple]] = None,
     reducer: Optional[Any] = None,
 ) -> JobRunner:
     """Create a job runner for the given job_type.
 
     Args:
-        job_type: "run_k_try", "reduce_k", or "finalize_run"
+        job_type: "run_k_try", "mcq_run", "analysis_run", "reduce_k", "finalize_run", or "langgraph_run"
         run_k_try_fn: Callable for run_k_try (required when job_type is run_k_try)
+        mcq_run_fn: Callable for mcq_run (required when job_type is mcq_run)
+        analysis_run_fn: Callable for analysis_run (required when job_type is analysis_run)
         reducer: JobReducerService instance (required for reduce_k, finalize_run)
 
     Returns:
@@ -39,6 +45,14 @@ def create_job_runner(
         if run_k_try_fn is None:
             raise ValueError("run_k_try_fn required for job_type run_k_try")
         return RunKTryRunner(run_fn=run_k_try_fn)
+    if job_type == "mcq_run":
+        if mcq_run_fn is None:
+            raise ValueError("mcq_run_fn required for job_type mcq_run")
+        return McqRunRunner(run_fn=mcq_run_fn)
+    if job_type == "analysis_run":
+        if analysis_run_fn is None:
+            raise ValueError("analysis_run_fn required for job_type analysis_run")
+        return AnalysisRunRunner(run_fn=analysis_run_fn)
     if job_type == "reduce_k":
         if reducer is None:
             raise ValueError("reducer required for job_type reduce_k")
@@ -51,10 +65,18 @@ def create_job_runner(
         return LangGraphJobRunner()
     raise ValueError(
         f"Unsupported job_type: {job_type!r}. "
-        "Use 'run_k_try', 'reduce_k', 'finalize_run', or 'langgraph_run'."
+        "Use 'run_k_try', 'mcq_run', 'analysis_run', 'reduce_k', "
+        "'finalize_run', or 'langgraph_run'."
     )
 
 
 def get_supported_job_types() -> list[str]:
     """Return list of supported job_type values."""
-    return ["run_k_try", "reduce_k", "finalize_run", "langgraph_run"]
+    return [
+        "run_k_try",
+        "mcq_run",
+        "analysis_run",
+        "reduce_k",
+        "finalize_run",
+        "langgraph_run",
+    ]

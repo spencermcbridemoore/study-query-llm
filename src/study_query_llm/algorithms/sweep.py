@@ -105,7 +105,9 @@ def run_sweep(
             embedding space if skip_pca=True).
 
     Returns:
-        SweepResult with PCA metadata, results by K, and optional precomputed matrices
+        SweepResult with PCA metadata and results by K. The projected embedding matrix
+        ``Z`` is always populated. ``Z_norm`` and ``dist`` are set only when
+        ``compute_stability`` is True (for stability metrics and downstream silhouette).
 
     Raises:
         ValueError: If k_min > k_max or K > n_samples

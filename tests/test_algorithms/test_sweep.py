@@ -40,7 +40,13 @@ def test_run_sweep_basic():
     assert "2" in result.by_k
     assert "representatives" in result.by_k["2"]
     assert "summaries" in result.by_k["2"]
-    assert result.Z is None  # Not computed when stability=False
+    # Z is always the projected embedding matrix (PCA or full); downstream
+    # code and notebooks may use it even when stability metrics are off.
+    assert result.Z is not None
+    assert result.Z.shape == (n, result.pca["pca_dim_used"])
+    assert result.Z_norm is None
+    assert result.dist is None
+    assert "stability" not in result.by_k["2"]
 
 
 def test_run_sweep_with_stability():

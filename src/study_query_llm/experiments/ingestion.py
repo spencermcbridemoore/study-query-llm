@@ -12,7 +12,9 @@ from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.artifact_service import ArtifactService
+from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.provenance_service import ProvenanceService
+from study_query_llm.services.provenanced_run_service import ProvenancedRunService
 from study_query_llm.experiments.result_metrics import (
     METRICS as _METRICS,
     extract_by_k_metrics as _extract_by_k_metrics,
@@ -84,6 +86,9 @@ def ingest_result_to_db(
                 snapshot_ids.append(int(sid))
             except (TypeError, ValueError):
                 continue
+    # Keep snapshot linkage deterministic/idempotent across write paths.
+    snapshot_ids = sorted(set(snapshot_ids))
+    primary_snapshot_id: Optional[int] = snapshot_ids[0] if snapshot_ids else None
 
     try:
         with db.session_scope() as session:
@@ -169,6 +174,69 @@ def ingest_result_to_db(
                     run_metadata["artifact_uri"] = str(artifact.uri)
                     run_group.metadata_json = dict(run_metadata)
             session.flush()
+
+            # Link this execution into the unified provenanced_run contract.
+            method_service = MethodService(repo)
+            provenanced_run_service = ProvenancedRunService(repo)
+            method_name = str(run_metadata.get("algorithm") or "clustering_method")
+            method_version = str(metadata.get("method_version") or "1.0")
+            method = method_service.get_method(method_name, version=method_version)
+            if method is None:
+                method_id = method_service.register_method(
+                    name=method_name,
+                    version=method_version,
+                    description="Auto-registered clustering execution method definition",
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "k_min": {"type": "integer"},
+                            "k_max": {"type": "integer"},
+                            "n_restarts": {"type": "integer"},
+                        },
+                    },
+                )
+            else:
+                method_id = int(method.id)
+
+            request_group_id_raw = metadata.get("request_group_id")
+            if request_group_id_raw is None:
+                # Compatibility fallback: infer request_group_id by expected run_key.
+                request_groups = session.query(Group).filter(
+                    Group.group_type.in_(["clustering_sweep_request", "mcq_sweep_request"])
+                ).all()
+                for req_group in request_groups:
+                    req_meta = dict(req_group.metadata_json or {})
+                    expected = set(str(x) for x in (req_meta.get("expected_run_keys") or []))
+                    if run_key in expected:
+                        request_group_id_raw = int(req_group.id)
+                        break
+            request_group_id = (
+                int(request_group_id_raw) if request_group_id_raw is not None else None
+            )
+            if request_group_id is not None:
+                provenanced_run_service.record_method_execution(
+                    request_group_id=request_group_id,
+                    run_key=run_key,
+                    source_group_id=int(run_id),
+                    result_group_id=int(run_id),
+                    input_snapshot_group_id=primary_snapshot_id,
+                    method_definition_id=int(method_id),
+                    determinism_class=str(
+                        metadata.get("determinism_class") or "pseudo_deterministic"
+                    ),
+                    config_json={
+                        "sweep_config": dict(metadata.get("sweep_config") or {}),
+                        "embedding_engine": engine,
+                        "summarizer": summarizer,
+                        "n_restarts": n_restarts,
+                    },
+                    result_ref=str(run_metadata.get("artifact_uri") or ""),
+                    metadata_json={
+                        "artifact_id": run_metadata.get("artifact_id"),
+                        "source": str(run_metadata.get("source") or ""),
+                    },
+                    run_status="completed",
+                )
 
             # Optional explicit run -> snapshot linkage.
             for snapshot_id in snapshot_ids:

@@ -10,10 +10,14 @@ from sqlalchemy.orm.attributes import flag_modified
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.provenance_service import GROUP_TYPE_MCQ_RUN
+from study_query_llm.services.provenanced_run_service import ProvenancedRunService
 from study_query_llm.services.sweep_request_service import SweepRequestService
 
 MCQ_RUN_METADATA_VERSION = 1
+MCQ_METHOD_DETERMINISM_CLASS = "non_deterministic"
+MCQ_METHOD_VERSION = "1.0"
 
 
 def mcq_run_key_exists_in_db(db: DatabaseConnectionV2, run_key: str) -> bool:
@@ -72,5 +76,45 @@ def persist_mcq_probe_result(
             flag_modified(grp, "metadata_json")
             session.flush()
         svc = SweepRequestService(repo)
+        request = svc.get_request(request_id) or {}
+        method_name = str(request.get("algorithm") or "mcq_answer_position_probe")
+        method_service = MethodService(repo)
+        method = method_service.get_method(method_name, version=MCQ_METHOD_VERSION)
+        if method is None:
+            method_id = method_service.register_method(
+                name=method_name,
+                version=MCQ_METHOD_VERSION,
+                description="MCQ answer-position probe execution",
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "deployment": {"type": "string"},
+                        "level": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "options_per_question": {"type": "integer"},
+                        "questions_per_test": {"type": "integer"},
+                        "label_style": {"type": "string"},
+                        "spread_correct_answer_uniformly": {"type": "boolean"},
+                        "samples_per_combo": {"type": "integer"},
+                        "template_version": {"type": "string"},
+                    },
+                },
+            )
+        else:
+            method_id = int(method.id)
+        ProvenancedRunService(repo).record_method_execution(
+            request_group_id=int(request_id),
+            run_key=str(run_key),
+            source_group_id=int(run_id),
+            result_group_id=int(run_id),
+            method_definition_id=int(method_id),
+            determinism_class=MCQ_METHOD_DETERMINISM_CLASS,
+            config_json=dict(target or {}),
+            metadata_json={
+                "mcq_metadata_version": MCQ_RUN_METADATA_VERSION,
+                "probe_result_summary": summary,
+            },
+            run_status="completed",
+        )
         svc.record_delivery(request_id, run_id, run_key)
     return run_id

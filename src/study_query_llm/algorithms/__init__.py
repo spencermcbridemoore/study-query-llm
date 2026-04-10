@@ -20,6 +20,13 @@ from .clustering import (
     StabilityMetrics,
 )
 from .sweep import SweepConfig, SweepResult, run_sweep
+from .method_plugins import (
+    available_method_plugins,
+    run_fixed_k_plugin,
+    run_unknown_k_plugin,
+    UNKNOWN_K_STRATEGY_FIXED_K_SELECTOR,
+    UNKNOWN_K_STRATEGY_HDBSCAN,
+)
 
 __all__ = [
     # Dimensionality reduction
@@ -41,4 +48,10 @@ __all__ = [
     "SweepConfig",
     "SweepResult",
     "run_sweep",
+    # Method plugins
+    "available_method_plugins",
+    "run_fixed_k_plugin",
+    "run_unknown_k_plugin",
+    "UNKNOWN_K_STRATEGY_FIXED_K_SELECTOR",
+    "UNKNOWN_K_STRATEGY_HDBSCAN",
 ]

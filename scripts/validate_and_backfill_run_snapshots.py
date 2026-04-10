@@ -2,7 +2,8 @@
 """Validate and optionally backfill dataset snapshot linkage on clustering runs.
 
 Default behavior is read-only validation.
-Use --apply to write metadata_json.dataset_snapshot_ids and create depends_on links.
+Use --apply to write metadata_json.dataset_snapshot_ids and create depends_on links
+for unlinked/unannotated runs with unambiguous snapshot matches.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.db.models_v2 import Group
+from study_query_llm.db.models_v2 import Group, GroupLink
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.provenance_service import (
     GROUP_TYPE_CLUSTERING_RUN,
@@ -43,6 +44,43 @@ def _load_snapshots(session) -> Dict[Tuple[str, int], List[int]]:
         key = (str(dataset), int(sample_size))
         index.setdefault(key, []).append(int(snap.id))
     return index
+
+
+def _normalize_snapshot_ids(raw_ids) -> List[int]:
+    if raw_ids is None:
+        return []
+    if not isinstance(raw_ids, (list, tuple, set)):
+        raw_ids = [raw_ids]
+    out: List[int] = []
+    for sid in raw_ids:
+        try:
+            out.append(int(sid))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
+def _load_run_snapshot_links(session) -> Dict[int, List[int]]:
+    rows = (
+        session.query(
+            GroupLink.parent_group_id,
+            GroupLink.child_group_id,
+        )
+        .join(Group, Group.id == GroupLink.child_group_id)
+        .filter(
+            GroupLink.link_type == "depends_on",
+            Group.group_type == GROUP_TYPE_DATASET_SNAPSHOT,
+        )
+        .all()
+    )
+    out: Dict[int, List[int]] = {}
+    for parent_group_id, child_group_id in rows:
+        run_id = int(parent_group_id)
+        snapshot_id = int(child_group_id)
+        out.setdefault(run_id, []).append(snapshot_id)
+    for run_id in list(out.keys()):
+        out[run_id] = sorted(set(out[run_id]))
+    return out
 
 
 def main() -> None:
@@ -77,6 +115,7 @@ def main() -> None:
         repo = RawCallRepository(session)
         provenance = ProvenanceService(repo)
         snapshot_index = _load_snapshots(session)
+        run_snapshot_links = _load_run_snapshot_links(session)
 
         runs = (
             session.query(Group)
@@ -90,14 +129,28 @@ def main() -> None:
         backfilled = 0
         ambiguous = 0
         skipped = 0
+        mismatch_meta_without_link = 0
+        mismatch_link_without_meta = 0
+        mismatch_ids_disagree = 0
 
         for run in runs:
             meta = dict(run.metadata_json or {})
             dataset = str(meta.get("dataset", ""))
             n_samples = int(meta.get("n_samples", 0) or 0)
-            existing_ids = meta.get("dataset_snapshot_ids")
-
-            if existing_ids:
+            metadata_snapshot_ids = _normalize_snapshot_ids(meta.get("dataset_snapshot_ids"))
+            linked_snapshot_ids = _normalize_snapshot_ids(run_snapshot_links.get(int(run.id), []))
+            has_meta = bool(metadata_snapshot_ids)
+            has_links = bool(linked_snapshot_ids)
+            if has_meta and not has_links:
+                mismatch_meta_without_link += 1
+                continue
+            if has_links and not has_meta:
+                mismatch_link_without_meta += 1
+                continue
+            if has_meta and has_links:
+                if set(metadata_snapshot_ids) != set(linked_snapshot_ids):
+                    mismatch_ids_disagree += 1
+                    continue
                 already_linked += 1
                 continue
 
@@ -126,6 +179,9 @@ def main() -> None:
         print(f"  eligible_missing_runs={missing}")
         print(f"  ambiguous_or_unmatched={ambiguous}")
         print(f"  skipped_non_target={skipped}")
+        print(f"  mismatch_meta_without_link={mismatch_meta_without_link}")
+        print(f"  mismatch_link_without_meta={mismatch_link_without_meta}")
+        print(f"  mismatch_ids_disagree={mismatch_ids_disagree}")
         if args.apply:
             print(f"  backfilled={backfilled}")
         else:

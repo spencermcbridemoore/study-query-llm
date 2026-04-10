@@ -145,6 +145,8 @@ class JobReducerService:
                 "summarizer": (job.payload_json or {}).get("summarizer", "None"),
                 "n_restarts": int((job.payload_json or {}).get("tries_per_k", 1)),
                 "actual_entry_count": int((job.payload_json or {}).get("n_texts", 0)),
+                "request_group_id": int(job.request_group_id),
+                "determinism_class": "pseudo_deterministic",
                 "sweep_config": {
                     "k_min": min(int(k) for k in merged_by_k.keys()),
                     "k_max": max(int(k) for k in merged_by_k.keys()),

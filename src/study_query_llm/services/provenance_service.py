@@ -368,6 +368,9 @@ class ProvenanceService:
         label_mode: str,
         sampling_method: str,
         sampling_seed: Optional[int] = None,
+        parent_snapshot_group_id: Optional[int] = None,
+        snapshot_lineage_mode: str = "full",
+        delta_metadata: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         description: Optional[str] = None,
     ) -> int:
@@ -397,6 +400,13 @@ class ProvenanceService:
         }
         if sampling_seed is not None:
             metadata_json["sampling_seed"] = int(sampling_seed)
+        if parent_snapshot_group_id is not None:
+            metadata_json["parent_snapshot_group_id"] = int(parent_snapshot_group_id)
+            metadata_json["snapshot_lineage_mode"] = "delta"
+        else:
+            metadata_json["snapshot_lineage_mode"] = str(snapshot_lineage_mode or "full")
+        if delta_metadata:
+            metadata_json["delta_metadata"] = dict(delta_metadata)
         if metadata:
             metadata_json.update(metadata)
 
@@ -413,7 +423,41 @@ class ProvenanceService:
             source_dataset,
             sample_size,
         )
+        if parent_snapshot_group_id is not None:
+            self.repository.create_group_link(
+                parent_group_id=group_id,
+                child_group_id=int(parent_snapshot_group_id),
+                link_type="depends_on",
+                metadata_json={"relation": "delta_parent_snapshot"},
+            )
         return group_id
+
+    def link_dataset_snapshot_delta(
+        self,
+        *,
+        child_snapshot_group_id: int,
+        parent_snapshot_group_id: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Link a child dataset snapshot to a parent snapshot for delta lineage.
+        """
+        link_id = self.repository.create_group_link(
+            parent_group_id=int(child_snapshot_group_id),
+            child_group_id=int(parent_snapshot_group_id),
+            link_type="depends_on",
+            metadata_json={
+                "relation": "delta_parent_snapshot",
+                **dict(metadata or {}),
+            },
+        )
+        logger.debug(
+            "Linked dataset_snapshot %s -> parent_snapshot %s (depends_on, link %s)",
+            child_snapshot_group_id,
+            parent_snapshot_group_id,
+            link_id,
+        )
+        return link_id
 
     def create_embedding_batch_group(
         self,

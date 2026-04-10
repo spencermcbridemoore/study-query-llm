@@ -27,6 +27,7 @@ from ..services.provenance_service import (
     GROUP_TYPE_MCQ_SWEEP,
     GROUP_TYPE_MCQ_SWEEP_REQUEST,
 )
+from ..services.provenanced_run_service import ProvenancedRunService
 from ..services.sweep_request_service import SweepRequestService
 from ..utils.logging_config import get_logger
 
@@ -35,6 +36,8 @@ logger = get_logger(__name__)
 EXPECTED_COLUMNS = [
     "dataset", "engine", "summarizer", "data_type",
     "clustering_sweep_id",
+    "primary_snapshot_id",
+    "dataset_snapshot_ids",
     "k", "run_idx", "n_samples",
     "objective", "dispersion", "silhouette", "ari",
     "cosine_sim", "cosine_sim_norm",
@@ -59,6 +62,24 @@ _MCQ_PARENT_PREFERENCE = (
 )
 
 _NO_PARENT_SCOPE_SENTINEL = ""
+
+
+def _normalize_snapshot_ids(meta: Dict[str, Any]) -> List[int]:
+    """Return sorted unique snapshot ids from run metadata."""
+    raw_snapshot_ids = meta.get("dataset_snapshot_ids")
+    if raw_snapshot_ids is None and meta.get("dataset_snapshot_id") is not None:
+        raw_snapshot_ids = [meta.get("dataset_snapshot_id")]
+    if raw_snapshot_ids is None:
+        return []
+    if not isinstance(raw_snapshot_ids, (list, tuple, set)):
+        raw_snapshot_ids = [raw_snapshot_ids]
+    snapshot_ids: List[int] = []
+    for sid in raw_snapshot_ids:
+        try:
+            snapshot_ids.append(int(sid))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(snapshot_ids))
 
 
 def _parent_scope_id_by_child_run(
@@ -196,6 +217,16 @@ class SweepQueryService:
             progress["missing_run_keys_preview"] = progress["missing_run_keys"][:10]
         return progress
 
+    def get_unified_execution_runs(self, request_id: int) -> List[dict]:
+        """
+        Return unified execution-provenance rows for a request.
+
+        Includes persisted provenanced_runs plus compatibility-mapped legacy
+        method/analysis outputs when explicit rows do not yet exist.
+        """
+        service = ProvenancedRunService(self.repository)
+        return service.list_unified_execution_view(request_id)
+
     def get_sweep_metrics_df(
         self,
         dataset: Optional[str] = None,
@@ -267,11 +298,16 @@ class SweepQueryService:
         run_meta: dict[int, dict] = {}
         for run in runs:
             meta = run.metadata_json or {}
+            snapshot_ids = _normalize_snapshot_ids(meta)
             run_meta[run.id] = {
                 "dataset": meta.get("dataset", "unknown"),
                 "engine": meta.get("embedding_engine", "?"),
                 "summarizer": meta.get("summarizer", "None"),
                 "data_type": meta.get("data_type", "unknown"),
+                "primary_snapshot_id": (
+                    str(snapshot_ids[0]) if snapshot_ids else _NO_PARENT_SCOPE_SENTINEL
+                ),
+                "dataset_snapshot_ids": ",".join(str(sid) for sid in snapshot_ids),
             }
 
         run_ids = list(run_meta.keys())
@@ -350,6 +386,8 @@ class SweepQueryService:
                     "summarizer": rmeta["summarizer"],
                     "data_type": rmeta["data_type"],
                     "clustering_sweep_id": run_to_scope[run_id],
+                    "primary_snapshot_id": rmeta["primary_snapshot_id"],
+                    "dataset_snapshot_ids": rmeta["dataset_snapshot_ids"],
                     "k": k,
                     "run_idx": i,
                     "n_samples": n_samples,
@@ -374,6 +412,8 @@ class SweepQueryService:
             "summarizer",
             "data_type",
             "clustering_sweep_id",
+            "primary_snapshot_id",
+            "dataset_snapshot_ids",
         ):
             df[cat] = df[cat].astype(str)
         return df.sort_values(
@@ -506,6 +546,8 @@ def _empty_df() -> pd.DataFrame:
         "summarizer",
         "data_type",
         "clustering_sweep_id",
+        "primary_snapshot_id",
+        "dataset_snapshot_ids",
     )
     return pd.DataFrame(
         {

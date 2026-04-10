@@ -40,6 +40,46 @@ def _seed_db(sqlite_path: str) -> int:
         return int(run_id)
 
 
+def _seed_db_with_mismatches(sqlite_path: str) -> None:
+    db = DatabaseConnectionV2(f"sqlite:///{sqlite_path}", enable_pgvector=False)
+    db.init_db()
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        prov = ProvenanceService(repo)
+        snapshot_id = prov.create_dataset_snapshot_group(
+            snapshot_name="dbpedia_286_seed42_labeled",
+            source_dataset="dbpedia",
+            sample_size=286,
+            label_mode="labeled",
+            sampling_method="seeded_random_filtered_10_1000_chars",
+            sampling_seed=42,
+        )
+        repo.create_group(
+            group_type="clustering_run",
+            name="run_meta_only_snapshot",
+            metadata_json={
+                "dataset": "dbpedia",
+                "n_samples": 286,
+                "run_key": "dbpedia_meta_only",
+                "dataset_snapshot_ids": [int(snapshot_id)],
+            },
+        )
+        run_link_only_id = repo.create_group(
+            group_type="clustering_run",
+            name="run_link_only_snapshot",
+            metadata_json={
+                "dataset": "dbpedia",
+                "n_samples": 286,
+                "run_key": "dbpedia_link_only",
+            },
+        )
+        repo.create_group_link(
+            parent_group_id=int(run_link_only_id),
+            child_group_id=int(snapshot_id),
+            link_type="depends_on",
+        )
+
+
 def test_validate_script_dry_run_and_apply():
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
@@ -60,6 +100,8 @@ def test_validate_script_dry_run_and_apply():
             timeout=20,
         )
         assert dry_run.returncode == 0
+        assert "mismatch_meta_without_link=0" in dry_run.stdout
+        assert "mismatch_link_without_meta=0" in dry_run.stdout
         assert "backfilled=0 (dry-run; use --apply)" in dry_run.stdout
 
         apply_run = subprocess.run(
@@ -75,6 +117,8 @@ def test_validate_script_dry_run_and_apply():
             timeout=20,
         )
         assert apply_run.returncode == 0
+        assert "mismatch_meta_without_link=0" in apply_run.stdout
+        assert "mismatch_link_without_meta=0" in apply_run.stdout
         assert "backfilled=1" in apply_run.stdout
 
         db = DatabaseConnectionV2(f"sqlite:///{db_path}", enable_pgvector=False)
@@ -85,6 +129,53 @@ def test_validate_script_dry_run_and_apply():
             meta = run.metadata_json or {}
             assert "dataset_snapshot_ids" in meta
             assert len(meta["dataset_snapshot_ids"]) == 1
+    finally:
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+
+
+def test_validate_script_reports_metadata_link_mismatches_without_mutation():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+    try:
+        _seed_db_with_mismatches(db_path)
+        env = os.environ.copy()
+        env["DATABASE_URL"] = f"sqlite:///{db_path}"
+
+        dry_run = subprocess.run(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "validate_and_backfill_run_snapshots.py"),
+            ],
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert dry_run.returncode == 0
+        assert "mismatch_meta_without_link=1" in dry_run.stdout
+        assert "mismatch_link_without_meta=1" in dry_run.stdout
+        assert "backfilled=0 (dry-run; use --apply)" in dry_run.stdout
+
+        apply_run = subprocess.run(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / "scripts" / "validate_and_backfill_run_snapshots.py"),
+                "--apply",
+            ],
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert apply_run.returncode == 0
+        assert "mismatch_meta_without_link=1" in apply_run.stdout
+        assert "mismatch_link_without_meta=1" in apply_run.stdout
+        assert "backfilled=0" in apply_run.stdout
     finally:
         try:
             os.unlink(db_path)

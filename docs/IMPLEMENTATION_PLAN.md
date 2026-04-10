@@ -35,11 +35,12 @@ Every phase includes a "Test" section describing how to validate the component w
 Core Python modules live under `src/study_query_llm/` (providers, services, db, config). Panel UI lives in `panel_app/app.py`.
 
 ### Planning Workflow For Large Refactors
-For multi-document, step-isolated planning workflows, use:
-- `docs/plans/MASTER_META_PLAN.md` (assumptions, contracts, step registry)
-- `docs/plans/README.md` (execution workflow)
-- `docs/plans/templates/STEP_EXECUTION_HEADER.md` (copy-paste fresh-chat header)
-- `docs/plans/templates/SECTION_PLAN_TEMPLATE.md` (standard section plan output)
+- The `docs/plans/` framework is archived and retained for historical context only.
+- Prefer lightweight, model-agnostic planning anchored to:
+  - `docs/living/CURRENT_STATE.md`
+  - `docs/living/ARCHITECTURE_CURRENT.md`
+  - `docs/review/DOC_PARITY_LEDGER.md`
+- If you need historical examples of the archived approach, see `docs/plans/README.md`.
 
 ---
 

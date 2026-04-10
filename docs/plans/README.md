@@ -1,6 +1,18 @@
-# Plans Workflow Guide
+# Plans Workflow Guide (Archived)
 
-## Purpose
+Status: archived-historical  
+Archived on: 2026-04-07
+
+This folder is preserved as historical context for one planning experiment.
+Do not treat `docs/plans/*` as current implementation guidance.
+See `docs/plans/ARCHIVE_NOTICE.md` for archive status details.
+
+For current guidance, use:
+- `docs/living/CURRENT_STATE.md`
+- `docs/living/ARCHITECTURE_CURRENT.md`
+- `docs/review/DOC_PARITY_LEDGER.md`
+
+## Historical Purpose
 
 This folder contains a contract-driven planning workflow for producing many plan documents from one master meta-plan.
 

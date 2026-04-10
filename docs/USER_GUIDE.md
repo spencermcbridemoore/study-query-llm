@@ -279,13 +279,14 @@ results = await service.run_sampling_inference("Say hello", n=5)
 Query the database directly:
 
 ```python
-from study_query_llm.db.connection import DatabaseConnection
-from study_query_llm.db.inference_repository import InferenceRepository
+from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.study_service import StudyService
+from study_query_llm.config import config
 
-db = DatabaseConnection(config.database.connection_string)
+db = DatabaseConnectionV2(config.database.connection_string)
 with db.session_scope() as session:
-    repo = InferenceRepository(session)
+    repo = RawCallRepository(session)
     study = StudyService(repo)
     
     # Get provider comparison

@@ -1,5 +1,11 @@
 # Master Meta-Plan For Plan-Doc Generation
 
+Status: archived-historical  
+Archived on: 2026-04-07
+
+This document is preserved for historical context only.
+Do not treat it as the active planning workflow for ongoing implementation.
+
 ## Purpose
 
 Establish one canonical planning framework that can generate many independent plan documents. The master meta-plan defines global assumptions, contract IDs, step IDs, and handoff rules so each section plan can be authored in isolation with minimal context.

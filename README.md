@@ -141,7 +141,7 @@ app.servable()
    ```
 
 2. **Use the Inference tab:**
-   - Select a provider (Azure, OpenAI, or Hyperbolic)
+   - Select a configured provider (for example Azure or OpenAI-compatible endpoints)
    - For Azure: Click "Load Deployments" and select a deployment
    - Enter your prompt
    - Adjust temperature and max tokens (optional)
@@ -172,10 +172,12 @@ study-query-llm/
 │   ├── __init__.py
 │   └── app.py              # Main application entry point
 ├── docs/                   # Documentation
-│   ├── ARCHITECTURE.md     # System architecture
-│   ├── IMPLEMENTATION_PLAN.md  # Development roadmap
-│   └── USER_GUIDE.md       # User guide
-├── tests/                  # Test suite (112 tests)
+│   ├── README.md           # Documentation index/routing
+│   ├── living/             # Current source-of-truth docs
+│   ├── runbooks/           # Operational procedures
+│   ├── history/            # Historical chronology/context
+│   └── deprecated/         # Deprecated compatibility docs
+├── tests/                  # Test suite
 │   ├── test_providers/     # Provider tests
 │   ├── test_services/      # Service tests
 │   └── test_db/            # Database tests

@@ -46,6 +46,7 @@ Last reviewed: 2026-04-06
 - [`docs/PLOT_ORGANIZATION.md`](PLOT_ORGANIZATION.md)
 - [`docs/history/USER_GUIDE_V1_LEGACY.md`](history/USER_GUIDE_V1_LEGACY.md)
 - [`docs/experiments/CUSTOM_SWEEP_README.md`](experiments/CUSTOM_SWEEP_README.md)
+- [`docs/plans/README.md`](plans/README.md) (archived planning framework)
 
 ### Deprecated
 

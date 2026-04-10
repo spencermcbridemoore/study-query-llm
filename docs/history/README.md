@@ -15,3 +15,4 @@ They are not the default source for current behavior.
 - [`docs/PLOT_ORGANIZATION.md`](../PLOT_ORGANIZATION.md)
 - [`docs/experiments/CUSTOM_SWEEP_README.md`](../experiments/CUSTOM_SWEEP_README.md)
 - [`docs/history/USER_GUIDE_V1_LEGACY.md`](USER_GUIDE_V1_LEGACY.md)
+- [`docs/plans/README.md`](../plans/README.md) (archived plan-doc workflow bundle)

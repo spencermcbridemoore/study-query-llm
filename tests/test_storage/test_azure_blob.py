@@ -140,6 +140,26 @@ def test_implements_storage_backend_protocol():
         assert isinstance(backend, StorageBackend)
 
 
+def test_blob_path_from_uri_strips_configured_prefix():
+    """_blob_path_from_uri removes blob_prefix to avoid double-prefix reads."""
+    with patch(
+        "study_query_llm.storage.azure_blob.BlobServiceClient"
+    ) as mock_client_class:
+        mock_client_class.from_connection_string.return_value = MagicMock()
+        backend = AzureBlobStorageBackend(
+            connection_string="DefaultEndpointsProtocol=https;AccountName=test;...",
+            blob_prefix="dev",
+        )
+        uri = (
+            "https://account.blob.core.windows.net/artifacts/"
+            "dev/1539/embedding_matrix/embedding_matrix.npy"
+        )
+        assert (
+            backend._blob_path_from_uri(uri)
+            == "1539/embedding_matrix/embedding_matrix.npy"
+        )
+
+
 def test_requires_azure_storage_blob():
     """AzureBlobStorageBackend raises ImportError when azure-storage-blob not installed."""
     with patch("study_query_llm.storage.azure_blob.BlobServiceClient", None):

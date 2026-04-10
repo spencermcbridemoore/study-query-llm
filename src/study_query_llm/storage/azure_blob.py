@@ -32,6 +32,9 @@ class AzureBlobStorageBackend:
         account_url: Optional[str] = None,
         credential: Optional[object] = None,
         container_name: str = "artifacts",
+        auth_mode: Optional[str] = None,
+        blob_prefix: Optional[str] = None,
+        **_: object,
     ) -> None:
         """
         Initialize the Azure Blob storage backend.
@@ -52,6 +55,8 @@ class AzureBlobStorageBackend:
         self.container_name = container_name or os.environ.get(
             "AZURE_STORAGE_CONTAINER", "artifacts"
         )
+        self._blob_prefix = (blob_prefix or "").strip("/")
+        self.auth_mode = (auth_mode or "connection_string").strip().lower()
 
         if conn_str:
             self._client = BlobServiceClient.from_connection_string(conn_str)
@@ -60,10 +65,17 @@ class AzureBlobStorageBackend:
         else:
             raise ValueError(
                 "Provide connection_string or (account_url + credential). "
-                "Or set AZURE_STORAGE_CONNECTION_STRING."
+                f"Current auth_mode={self.auth_mode!r}; "
+                "or set AZURE_STORAGE_CONNECTION_STRING."
             )
 
         self._container_client = self._client.get_container_client(self.container_name)
+
+    def _with_prefix(self, logical_path: str) -> str:
+        if not self._blob_prefix:
+            return logical_path
+        normalized = logical_path.strip("/")
+        return f"{self._blob_prefix}/{normalized}"
 
     def write(
         self,
@@ -82,7 +94,7 @@ class AzureBlobStorageBackend:
         Returns:
             The blob URI (https://...).
         """
-        blob_client = self._container_client.get_blob_client(logical_path)
+        blob_client = self._container_client.get_blob_client(self._with_prefix(logical_path))
         content_settings = ContentSettings(content_type=content_type) if content_type else None
         blob_client.upload_blob(
             data,
@@ -104,7 +116,7 @@ class AzureBlobStorageBackend:
         Raises:
             Exception: If blob does not exist.
         """
-        blob_client = self._container_client.get_blob_client(logical_path)
+        blob_client = self._container_client.get_blob_client(self._with_prefix(logical_path))
         stream = blob_client.download_blob()
         return stream.readall()
 
@@ -118,7 +130,7 @@ class AzureBlobStorageBackend:
         Returns:
             True if the blob exists.
         """
-        blob_client = self._container_client.get_blob_client(logical_path)
+        blob_client = self._container_client.get_blob_client(self._with_prefix(logical_path))
         try:
             blob_client.get_blob_properties()
             return True
@@ -132,7 +144,7 @@ class AzureBlobStorageBackend:
         Args:
             logical_path: Blob name (object key)
         """
-        blob_client = self._container_client.get_blob_client(logical_path)
+        blob_client = self._container_client.get_blob_client(self._with_prefix(logical_path))
         try:
             blob_client.delete_blob()
         except Exception:
@@ -148,8 +160,15 @@ class AzureBlobStorageBackend:
         Returns:
             Full blob URL (https://account.blob.core.windows.net/container/path).
         """
-        blob_client = self._container_client.get_blob_client(logical_path)
+        blob_client = self._container_client.get_blob_client(self._with_prefix(logical_path))
         return blob_client.url
+
+    def get_total_bytes(self) -> int:
+        """Return total bytes currently stored in the configured container."""
+        total = 0
+        for blob in self._container_client.list_blobs():
+            total += int(getattr(blob, "size", 0) or 0)
+        return total
 
     def read_from_uri(self, uri: str) -> bytes:
         """
@@ -185,4 +204,11 @@ class AzureBlobStorageBackend:
         path_parts = parsed.path.strip("/").split("/", 1)
         if len(path_parts) < 2:
             raise ValueError(f"Cannot parse blob path from URI: {uri}")
-        return unquote(path_parts[1])
+        blob_path = unquote(path_parts[1])
+        # URIs returned by get_uri() already include blob_prefix; strip it so
+        # read()/exists() do not apply the prefix twice.
+        if self._blob_prefix:
+            prefix = f"{self._blob_prefix}/"
+            if blob_path.startswith(prefix):
+                return blob_path[len(prefix) :]
+        return blob_path

@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: ops-maintainers  
-Last reviewed: 2026-04-06
+Last reviewed: 2026-04-07
 
 Use runbooks for procedures that are executed step-by-step.
 
@@ -17,6 +17,13 @@ Use runbooks for procedures that are executed step-by-step.
 - [`docs/SWEEP_MIGRATION_RUNBOOK.md`](../SWEEP_MIGRATION_RUNBOOK.md)
 - [`docs/LANGGRAPH_JOB_EXECUTION.md`](../LANGGRAPH_JOB_EXECUTION.md)
 - [`docs/TESTING_CHECKLIST.md`](../TESTING_CHECKLIST.md)
+- Dataset snapshot flow (lightweight):
+  - contract: [`docs/DATASET_SNAPSHOT_PROVENANCE.md`](../DATASET_SNAPSHOT_PROVENANCE.md)
+  - create snapshots: `scripts/create_dataset_snapshots_286.py`
+  - validate/backfill run linkage: `scripts/validate_and_backfill_run_snapshots.py`
+  - BANK77 bootstrap (snapshot + full embeddings + means):
+    - full bootstrap: `python scripts/create_bank77_snapshot_and_embeddings.py --provider azure --embedding-engine text-embedding-3-large --require-azure-blob`
+    - verify only: `python scripts/create_bank77_snapshot_and_embeddings.py --provider azure --embedding-engine text-embedding-3-large --verify-only --require-azure-blob`
 
 ## Policy Runbook
 

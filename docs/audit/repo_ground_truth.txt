@@ -1,0 +1,69 @@
+Repo: C:/Users/spenc/Cursor Repos/study-query-llm
+Base branch: origin/main
+Current branch: main
+Current HEAD: d3e095a
+
+## git status --short
+<clean; no output>
+
+## git branch -vv
+* main d3e095a [origin/main: ahead 7] docs: archive planning workflow and add experiment history summaries
+
+## git log --oneline --reverse origin/main..HEAD
+a4c7235 feat(bank77): add bootstrap flow and resilient artifact reads
+33d7331 feat(benchmark): add live embedding limit probe script
+d3d67c0 feat(openrouter): discover embedding models and runtime limits
+3d9a388 feat(provenance): unify execution linkage and snapshot lineage checks
+808d0d7 feat(storage): enforce artifact quota guardrail before writes
+8dcfbda feat(mcq): add OpenRouter sweep helpers and option-count exports
+d3e095a docs: archive planning workflow and add experiment history summaries
+
+## git show --name-status --stat salvage-backup-c43e483
+COMMIT c43e483 2026-04-09 chore(salvage): checkpoint in-progress workspace state
+M README.md
+A artifacts/2/embedding_matrix/embedding_matrix.npy
+A artifacts/3/embedding_matrix/embedding_matrix.npy
+M config/mcq_sweep_highschool_college_20q_3456_openrouter_6models.json
+M docs/IMPLEMENTATION_PLAN.md
+M docs/README.md
+M docs/USER_GUIDE.md
+A docs/history/EXPERIMENT_ACTIVITY_SUMMARY.md
+A docs/history/EXPERIMENT_ATTEMPT_TABLE.md
+M docs/history/README.md
+A docs/plans/ARCHIVE_NOTICE.md
+M docs/plans/MASTER_META_PLAN.md
+M docs/plans/README.md
+M docs/plans/STEP-01_master_bootstrap.md
+A notebooks/mcq_recent_1000_big_run_visualizer.ipynb
+A scripts/export_mcq_sweep_option_counts_db.py
+M scripts/ingest_mcq_probe_json_to_sweep_db.py
+M scripts/run_mcq_sweep.py
+A scripts/run_openrouter_mcq_sweep_until_done.py
+M scripts/validate_and_backfill_run_snapshots.py
+M src/study_query_llm/algorithms/__init__.py
+A src/study_query_llm/algorithms/method_plugins.py
+M src/study_query_llm/config.py
+A src/study_query_llm/db/migrations/add_provenanced_runs_table.py
+M src/study_query_llm/experiments/ingestion.py
+M src/study_query_llm/experiments/mcq_answer_position_probe.py
+M src/study_query_llm/experiments/mcq_run_persistence.py
+M src/study_query_llm/providers/base.py
+M src/study_query_llm/providers/factory.py
+M src/study_query_llm/services/artifact_service.py
+M src/study_query_llm/services/embeddings/service.py
+M src/study_query_llm/services/jobs/job_reducer_service.py
+M src/study_query_llm/services/model_registry.py
+M src/study_query_llm/services/provenance_service.py
+M src/study_query_llm/services/sweep_query_service.py
+M src/study_query_llm/storage/local.py
+M tests/test_providers/test_factory.py
+M tests/test_scripts/test_validate_and_backfill_run_snapshots.py
+A tests/test_services/test_artifact_service_quota.py
+M tests/test_services/test_embedding_service.py
+A tests/test_services/test_model_registry.py
+A tests/test_services/test_provenance_delta_lineage.py
+
+## git show --name-status --stat artifacts-checkpoint-6ed6785
+COMMIT 6ed6785 2026-04-09 chore(artifacts): checkpoint generated embedding matrix outputs
+A artifacts/2/embedding_matrix/embedding_matrix.npy
+A artifacts/3/embedding_matrix/embedding_matrix.npy

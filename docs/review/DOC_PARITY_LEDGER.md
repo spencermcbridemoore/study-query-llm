@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-10
+Last reviewed: 2026-04-11
 
 ## Purpose
 
@@ -51,6 +51,7 @@ Status values:
 | C027 | `docs/living/CURRENT_STATE.md` | Panel includes a Storage / DB stats tab: Postgres catalog sizes and largest relations when `DATABASE_URL` is PostgreSQL; v2 counts including `CallArtifact`; artifact env summary (no secrets); optional capped Azure blob prefix listing; redacted `LOCAL_DATABASE_URL` and clone runbook pointers. | `panel_app/app.py`, `panel_app/views/storage_stats.py`, `src/study_query_llm/storage/azure_blob.py` | verified | Low positive: operator visibility without expanding write paths. | Keep tab behavior aligned with artifact env contract in `artifact_service.py` / blob policy docs. |
 | C028 | `docs/DATASET_ACQUISITION_LAYER0.md` + `docs/living/CURRENT_STATE.md` | Layer 0 download provenance records pinned URLs, per-file SHA-256, and `acquisition.json`; optional `--persist-db` creates a `dataset` group and stores `dataset_acquisition_file` / `dataset_acquisition_manifest` blobs via `ArtifactService.store_group_blob_artifact` when Azure blob backend is configured. | `src/study_query_llm/datasets/acquisition.py`, `src/study_query_llm/datasets/source_specs/`, `scripts/record_dataset_download.py`, `src/study_query_llm/services/artifact_service.py`, `tests/test_datasets/test_acquisition.py`, `tests/test_services/test_artifact_service.py` | verified | Medium positive: reproducible upstream capture before normalized `dataset_snapshot` work. | Add new slugs via `ACQUIRE_REGISTRY`; keep pinned git refs intentional when upstream data changes. |
 | C029 | `docs/DATASET_ACQUISITION_LAYER0.md` + `docs/living/CURRENT_STATE.md` | Layer 0 registry includes `sources_uncertainty_qc` (Zenodo record 16912394, `sources_v2.xlsx`) and `semeval2013_sra_5way` (pinned ashudeep/Student-Response-Analysis five-way gold files + README); `zenodo_file_download_url` builds stable Zenodo file GET URLs. | `src/study_query_llm/datasets/acquisition.py`, `src/study_query_llm/datasets/source_specs/sources_uncertainty_zenodo.py`, `src/study_query_llm/datasets/source_specs/semeval2013_sra_5way.py`, `src/study_query_llm/datasets/source_specs/registry.py`, `tests/test_datasets/test_acquisition.py` | verified | Medium positive: expands script-friendly acquisition without layer-1 snapshot work. | Bump Zenodo/Git pins when upstream versions change; document mirror-vs-LDC caveat for SemEval. |
+| C030 | `deploy/jetstream/RUNBOOK.md` | Jetstream HTTPS failures: replace literal `YOUR_DOMAIN` with forward-resolvable DNS; for IP-only access document `tls internal` plus global `default_sni` for clients that omit SNI on IPv4; `PANEL_ALLOW_WS_ORIGINS` must use host/port only (no URL scheme) for Bokeh. | `deploy/jetstream/RUNBOOK.md`, `panel_app/app.py` | verified | Medium positive: closes common Jetstream2 TLS + Panel WS misconfiguration loop. | Keep aligned with on-VM `/etc/caddy/Caddyfile` practices. |
 
 ## Severity-Ranked Mismatch Summary
 

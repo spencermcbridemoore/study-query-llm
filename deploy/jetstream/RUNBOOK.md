@@ -66,13 +66,39 @@ curl -u admin:YourPassword https://YOUR_DOMAIN/health
 4. If DNS is new, it may take up to a few hours to propagate. Caddy will retry
    automatically.
 
+### HTTPS fails in the browser (`SSL_ERROR_INTERNAL_ERROR_ALERT`) or curl shows TLS alert
+
+1. **Site block must not stay as the literal `YOUR_DOMAIN`.** Replace it with a
+   hostname that has a **forward** DNS `A`/`AAAA` record to the floating IP, or
+   Caddy cannot obtain a Let’s Encrypt certificate. Check:
+   `dig +short your.name.projects.jetstream-cloud.org` from the public internet
+   (not only reverse DNS / PTR).
+2. **Floating IP only (no working public hostname yet):** use **`tls internal`**
+   on the IP site block and set a global **`default_sni`** to that IP so clients
+   that omit SNI for literal IPv4 (common on Windows) still complete TLS:
+   ```caddyfile
+   {
+       default_sni YOUR.FLOATING.IP
+   }
+   YOUR.FLOATING.IP {
+       tls internal
+       basicauth * { ... }
+       reverse_proxy localhost:5006
+   }
+   ```
+   Browsers will show a one-time warning for the Caddy local CA; accept it to proceed.
+3. After edits: `sudo caddy validate --config /etc/caddy/Caddyfile` then
+   `sudo systemctl reload caddy` (or `restart` if reload is insufficient).
+
 ### WebSocket connection refused / Panel UI loads but widgets don't work
 
 The Panel app requires WebSocket connections. If the browser console shows
 WebSocket errors:
 
-1. Check that `PANEL_ALLOW_WS_ORIGINS` in `.env.jetstream` includes the exact
-   public hostname (e.g. `sqllm-panel.xxx000000.projects.jetstream-cloud.org`).
+1. Check that `PANEL_ALLOW_WS_ORIGINS` in `.env.jetstream` lists **Bokeh-style**
+   entries: **`host` or `host:port` only** (no `http://` / `https://` prefixes).
+   Include the address users type in the browser, e.g. `example.projects.jetstream-cloud.org:443`
+   and `:80`, or `YOUR.IP:443` / `YOUR.IP:80` / `YOUR.IP` when using HTTPS by IP.
 2. Restart the app container after changing the env value:
    ```bash
    docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream up -d app

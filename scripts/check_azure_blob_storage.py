@@ -112,10 +112,13 @@ try:
         verify_uploads=verify_uploads,
         runtime_env=runtime_env,
     )
+    blob_prefix = getattr(storage, "blob_prefix", None) or getattr(
+        storage, "_blob_prefix", None
+    )
     print(
         f"    Backend: {storage.backend_type} "
         f"(container={storage.container_name}, auth_mode={storage.auth_mode}, "
-        f"prefix={storage.blob_prefix or '(none)'})"
+        f"prefix={blob_prefix or '(none)'})"
     )
 
     # Write

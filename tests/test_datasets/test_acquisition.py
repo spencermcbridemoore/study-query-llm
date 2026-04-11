@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from study_query_llm.datasets.acquisition import (
     ACQUISITION_SCHEMA_VERSION,
     FileFetchSpec,
@@ -11,6 +13,7 @@ from study_query_llm.datasets.acquisition import (
     download_acquisition_files,
     sha256_hex,
     write_acquisition_bundle,
+    zenodo_file_download_url,
 )
 from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 
@@ -93,3 +96,41 @@ def test_acquire_registry_contains_ausem():
     meta = cfg.source_metadata()
     assert meta["kind"] == "github_raw"
     assert meta["git_ref"]
+
+
+def test_zenodo_file_download_url():
+    u = zenodo_file_download_url(16912394, "sources_v2.xlsx")
+    assert u == "https://zenodo.org/records/16912394/files/sources_v2.xlsx?download=1"
+
+
+def test_zenodo_file_download_url_rejects_path_traversal():
+    with pytest.raises(ValueError):
+        zenodo_file_download_url(1, "../etc/passwd")
+    with pytest.raises(ValueError):
+        zenodo_file_download_url(1, "a/b")
+
+
+def test_acquire_registry_sources_uncertainty_qc():
+    cfg = ACQUIRE_REGISTRY["sources_uncertainty_qc"]
+    files = cfg.file_specs()
+    assert len(files) == 1
+    assert files[0].relative_path == "sources_v2.xlsx"
+    assert "zenodo.org/records/16912394/files/sources_v2.xlsx" in files[0].url
+    meta = cfg.source_metadata()
+    assert meta["kind"] == "zenodo"
+    assert meta["record_id"] == 16912394
+
+
+def test_acquire_registry_semeval2013_sra_5way():
+    cfg = ACQUIRE_REGISTRY["semeval2013_sra_5way"]
+    files = cfg.file_specs()
+    assert len(files) == 6
+    paths = sorted(f.relative_path for f in files)
+    assert paths[0] == "README.md"
+    assert "semevalFormatProcessing-5way/partialEntailmentGold.txt" in paths
+    assert all(
+        "1d6d30b265e6038fd6f6395d4cfd6686aef4b97f" in f.url for f in files
+    )
+    meta = cfg.source_metadata()
+    assert meta["kind"] == "github_raw"
+    assert "ldc" in meta["note"].lower()

@@ -12,6 +12,8 @@ Last reviewed: 2026-04-10
 
 ```bash
 python scripts/record_dataset_download.py --dataset ausem --output-dir ./data/acquisitions/ausem
+python scripts/record_dataset_download.py --dataset sources_uncertainty_qc --output-dir ./data/acquisitions/sources_uncertainty_qc
+python scripts/record_dataset_download.py --dataset semeval2013_sra_5way --output-dir ./data/acquisitions/semeval2013_sra_5way
 ```
 
 Produces `acquisition.json` and `files/...` under the output directory.
@@ -20,6 +22,8 @@ Produces `acquisition.json` and `files/...` under the output directory.
 
 ```bash
 python scripts/record_dataset_download.py --dataset ausem --dry-run
+python scripts/record_dataset_download.py --dataset sources_uncertainty_qc --dry-run
+python scripts/record_dataset_download.py --dataset semeval2013_sra_5way --dry-run
 ```
 
 ## Persist to Postgres + Azure Blob

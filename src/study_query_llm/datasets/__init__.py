@@ -6,6 +6,7 @@ from study_query_llm.datasets.acquisition import (
     fetch_url,
     sha256_hex,
     write_acquisition_bundle,
+    zenodo_file_download_url,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "fetch_url",
     "sha256_hex",
     "write_acquisition_bundle",
+    "zenodo_file_download_url",
 ]

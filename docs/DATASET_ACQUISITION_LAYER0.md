@@ -60,6 +60,10 @@ See [docs/runbooks/record_dataset_download.md](runbooks/record_dataset_download.
 
 ## Supported dataset slugs
 
-- `ausem` — [tufts-ml/AuSeM](https://github.com/tufts-ml/AuSeM) `Student_Explanations/problem1.csv` … `problem4.csv` at a pinned git ref (`source_specs/ausem.py`).
+| Slug | Source | Notes |
+|------|--------|--------|
+| `ausem` | [tufts-ml/AuSeM](https://github.com/tufts-ml/AuSeM) | Four `Student_Explanations/problem*.csv` at a pinned git ref ([`source_specs/ausem.py`](../src/study_query_llm/datasets/source_specs/ausem.py)). |
+| `sources_uncertainty_qc` | [Zenodo 16912394](https://zenodo.org/records/16912394) (DOI [10.5281/zenodo.16912394](https://doi.org/10.5281/zenodo.16912394)) | Single `sources_v2.xlsx` — “Sources of Uncertainty in Quantum and Classical Measurement” public dataset ([`source_specs/sources_uncertainty_zenodo.py`](../src/study_query_llm/datasets/source_specs/sources_uncertainty_zenodo.py)). |
+| `semeval2013_sra_5way` | [ashudeep/Student-Response-Analysis](https://github.com/ashudeep/Student-Response-Analysis) | **Community mirror** of SemEval-2013 Task 7 five-way **gold** text files only (pinned commit); not the official LDC release ([`source_specs/semeval2013_sra_5way.py`](../src/study_query_llm/datasets/source_specs/semeval2013_sra_5way.py)). |
 
 Additional slugs can be registered in `source_specs/registry.py` using the same pattern.

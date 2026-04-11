@@ -11,6 +11,16 @@ from study_query_llm.datasets.source_specs.ausem import (
     ausem_file_specs,
     ausem_source_metadata,
 )
+from study_query_llm.datasets.source_specs.semeval2013_sra_5way import (
+    SEMEVAL2013_SRA_5WAY_SLUG,
+    semeval2013_sra_5way_file_specs,
+    semeval2013_sra_5way_source_metadata,
+)
+from study_query_llm.datasets.source_specs.sources_uncertainty_zenodo import (
+    SOURCES_UNCERTAINTY_QC_SLUG,
+    sources_uncertainty_file_specs,
+    sources_uncertainty_source_metadata,
+)
 
 
 @dataclass(frozen=True)
@@ -25,5 +35,15 @@ ACQUIRE_REGISTRY: Dict[str, DatasetAcquireConfig] = {
         slug=AUSEM_DATASET_SLUG,
         file_specs=ausem_file_specs,
         source_metadata=ausem_source_metadata,
+    ),
+    SOURCES_UNCERTAINTY_QC_SLUG: DatasetAcquireConfig(
+        slug=SOURCES_UNCERTAINTY_QC_SLUG,
+        file_specs=sources_uncertainty_file_specs,
+        source_metadata=sources_uncertainty_source_metadata,
+    ),
+    SEMEVAL2013_SRA_5WAY_SLUG: DatasetAcquireConfig(
+        slug=SEMEVAL2013_SRA_5WAY_SLUG,
+        file_specs=semeval2013_sra_5way_file_specs,
+        source_metadata=semeval2013_sra_5way_source_metadata,
     ),
 }

@@ -25,6 +25,19 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def zenodo_file_download_url(record_id: int, filename: str) -> str:
+    """
+    Public Zenodo file URL suitable for GET (browser-style download parameter).
+
+    Example: https://zenodo.org/records/16912394/files/sources_v2.xlsx?download=1
+    """
+    name = str(filename).lstrip("/")
+    if ".." in name or "/" in name:
+        raise ValueError(f"Unsafe Zenodo filename: {filename!r}")
+    rid = int(record_id)
+    return f"https://zenodo.org/records/{rid}/files/{name}?download=1"
+
+
 def fetch_url(url: str, *, timeout_sec: float = DEFAULT_TIMEOUT_SEC) -> bytes:
     """GET a URL and return response body bytes."""
     req = Request(

@@ -50,25 +50,55 @@ def get_database_health_markdown() -> str:
     try:
         db = get_db_connection()
         with db.session_scope() as session:
-            from study_query_llm.db.models_v2 import Group, RawCall
+            from study_query_llm.db.models_v2 import (
+                CallArtifact,
+                Group,
+                ProvenancedRun,
+                RawCall,
+            )
+            from study_query_llm.services.provenance_service import GROUP_TYPE_MCQ_RUN
 
             n_groups = session.query(Group).count()
             n_raw = session.query(RawCall).count()
+            n_provenanced = session.query(ProvenancedRun).count()
+            n_mcq_groups = (
+                session.query(Group)
+                .filter(Group.group_type == GROUP_TYPE_MCQ_RUN)
+                .count()
+            )
+            n_artifacts = session.query(CallArtifact).count()
+
         target = database_connection_summary(config.database.connection_string)
+        any_activity = (
+            n_groups > 0
+            or n_raw > 0
+            or n_provenanced > 0
+            or n_mcq_groups > 0
+            or n_artifacts > 0
+        )
         empty_note = ""
-        if n_groups == 0 and n_raw == 0:
+        if not any_activity:
             empty_note = (
                 "\n\n**Note:** The Inference tab lists deployments from your **provider API**, "
-                "not from `groups` / `raw_calls`. Groups, Embeddings, Analytics, and Sweep Explorer "
-                "only show rows **written to this** `DATABASE_URL`. If you expected data, point "
-                "`DATABASE_URL` at the same Postgres branch where you ingest sweeps or run workers."
+                "not from these tables. The **Storage / DB stats** tab adds catalog sizes and "
+                "artifact/Azure probes. Other tabs only show rows **written to this** `DATABASE_URL`. "
+                "If you expected data, point `DATABASE_URL` at the same Postgres where you run workers "
+                "or ingest sweeps."
             )
+        semantics = (
+            "\n\n_**`raw_calls`** = chat-style inference rows (e.g. Panel Inference with DB persistence). "
+            "**MCQ** probe calls are not stored per-call in `raw_calls`; runs appear as **`mcq_run` groups** "
+            "and **`provenanced_runs`**. **Artifact rows** = `call_artifacts` table._"
+        )
         return (
             "### Database\n\n"
             "**Status:** connected  \n"
             f"**Target:** `{target}`  \n"
-            f"**Groups:** {n_groups:,} &nbsp;·&nbsp; **Raw calls:** {n_raw:,}  \n\n"
-            "_If both counts are zero, this database has no v2 `groups` / `raw_calls` rows yet._"
+            f"**Groups:** {n_groups:,} &nbsp;·&nbsp; **Raw calls:** {n_raw:,} &nbsp;·&nbsp; "
+            f"**Provenanced runs:** {n_provenanced:,} &nbsp;·&nbsp; **MCQ run groups:** {n_mcq_groups:,} "
+            f"&nbsp;·&nbsp; **Artifact rows:** {n_artifacts:,}  \n\n"
+            "_If every count above is zero, this database has no v2 activity in those tables yet._"
+            f"{semantics}"
             f"{empty_note}"
         )
     except Exception as exc:

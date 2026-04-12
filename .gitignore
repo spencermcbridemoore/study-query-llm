@@ -120,6 +120,9 @@ Thumbs.db
 
 # Scratch outputs (procedural graphs, local experiments)
 scratch/out/
+# Local-only Jetstream SSH drivers and secrets (see scratch/local/README.md)
+scratch/local/*
+!scratch/local/README.md
 artifacts/
 
 # Temporary plan files (session-specific)

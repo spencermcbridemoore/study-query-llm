@@ -40,6 +40,7 @@ deploy/jetstream/
   RUNBOOK.md                        # Ops runbook (troubleshooting, backup, rollback)
   PROVISION.md                      # VM provisioning checklist (manual Phase 1)
   build-and-push.sh                 # Image build + push helper script
+  redeploy_panel_from_origin.sh     # VM: git pull + optional NEW_IMAGE_REF + compose pull/up + /health
   setup_boot_services.sh            # Enable Docker + compose + Caddy on boot (run on VM)
   rotate_caddy_basic_auth.sh        # Set a new Caddy basic-auth password (run on VM)
   install_panel_caddyfile.sh        # Replace stock package Caddyfile with Panel + HTTPS template

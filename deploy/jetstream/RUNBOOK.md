@@ -149,7 +149,28 @@ gunzip -c ~/backups/sqllm-YYYYMMDD.sql.gz | \
 
 ## Deployment / Update
 
-### Deploy a new image version
+### One-shot: git pull + new image + restart (recommended)
+
+From the VM, after a new image is published (CI or `./deploy/jetstream/build-and-push.sh --push` on a build machine), run:
+
+```bash
+cd ~/app/deploy/jetstream
+chmod +x redeploy_panel_from_origin.sh
+NEW_IMAGE_REF='ghcr.io/yourorg/study-query-llm@sha256:...' ./redeploy_panel_from_origin.sh
+```
+
+This script:
+
+1. **`git fetch` + `git pull origin main`** under `~/app` (so compose files and helpers match the repo).
+2. Optionally **rewrites `IMAGE_REF=`** in `.env.jetstream` when `NEW_IMAGE_REF` is set (UTF-8, timestamped `.bak.*` backup).
+3. Runs **`docker compose pull app`** then **`up -d`** with **`--env-file .env.jetstream`** and project **`sqllm-jetstream`**.
+4. **`curl`** checks **`http://127.0.0.1:5006/health`**.
+
+Skip git when you only need the image roll: `SKIP_GIT=1 NEW_IMAGE_REF='...' ./redeploy_panel_from_origin.sh`.
+
+See `redeploy_panel_from_origin.sh` header for all environment knobs (`GIT_REF`, `REPO`, `SKIP_COMPOSE_PULL`, etc.).
+
+### Deploy a new image version (manual)
 
 1. On your build machine (local or CI):
    ```bash
@@ -161,8 +182,8 @@ gunzip -c ~/backups/sqllm-YYYYMMDD.sql.gz | \
    ```bash
    cd ~/app/deploy/jetstream
    # Edit .env.jetstream — update IMAGE_REF to the new value
-   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream pull app
-   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream up -d app
+   docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream pull app
+   docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream up -d app
    ```
 4. Verify health:
    ```bash
@@ -171,11 +192,12 @@ gunzip -c ~/backups/sqllm-YYYYMMDD.sql.gz | \
 
 ### Rollback to previous image
 
-1. Edit `.env.jetstream` — set `IMAGE_REF` back to the previous tag/digest.
+1. Edit `.env.jetstream` — set `IMAGE_REF` back to the previous tag/digest (or restore a `.bak.*` from `redeploy_panel_from_origin.sh`).
 2. Pull and restart:
    ```bash
-   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream pull app
-   docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream up -d app
+   cd ~/app/deploy/jetstream
+   docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream pull app
+   docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream up -d app
    ```
 
 ---
@@ -236,7 +258,7 @@ sudo systemctl restart caddy
 
 ```bash
 cd ~/app/deploy/jetstream
-docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream down
+docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream down
 docker compose -f docker-compose.jetstream.yml --env-file .env.jetstream -p sqllm-jetstream up -d
 ```
 

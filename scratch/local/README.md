@@ -1,6 +1,6 @@
 # Local-only Jetstream helpers
 
-Files in this directory except this `README.md` are **gitignored** (see [.gitignore](../../.gitignore): `scratch/local/*` with `!scratch/local/README.md`).
+Most files under `scratch/local/` are **gitignored**; this `README.md` and `jetstream-remote-build-and-restart.ps1` are **tracked** (see [.gitignore](../../.gitignore): `scratch/local/*` with negated exceptions). Add more `!` rules or ignore `*.local.*` if you keep personal variants here.
 
 ## `jetstream-remote-build-and-restart.ps1`
 

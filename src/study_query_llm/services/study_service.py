@@ -6,8 +6,9 @@ transforming raw database queries into analysis-ready DataFrames.
 """
 
 import logging
+import json
 import pandas as pd
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime, timedelta, timezone
 from ..db.raw_call_repository import RawCallRepository
 
@@ -81,10 +82,38 @@ class StudyService:
 
         return df
 
+    def _extract_prompt_preview(self, request: Any, modality: Optional[str]) -> str:
+        """Best-effort prompt text for analytics tables (non-chat modalities included)."""
+        if not isinstance(request, dict):
+            s = str(request)
+            return s[:PROMPT_DISPLAY_TRUNCATION] + ("..." if len(s) > PROMPT_DISPLAY_TRUNCATION else "")
+
+        prompt = (
+            request.get("prompt")
+            or request.get("input")
+            or request.get("text")
+            or ""
+        )
+        if not prompt:
+            msgs = request.get("messages")
+            if isinstance(msgs, list) and msgs:
+                first = msgs[0]
+                if isinstance(first, dict):
+                    prompt = str(first.get("content") or "")
+        if not prompt:
+            try:
+                compact = json.dumps(request, ensure_ascii=False)[:PROMPT_DISPLAY_TRUNCATION]
+            except (TypeError, ValueError):
+                compact = str(modality or "")
+            prompt = compact or f"[{modality or 'call'}]"
+        return str(prompt)
+
     def get_recent_inferences(
         self,
         limit: int = 50,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        modality: Optional[str] = "text",
+        status: Optional[str] = "success",
     ) -> pd.DataFrame:
         """
         Get recent inference runs as a DataFrame.
@@ -92,28 +121,36 @@ class StudyService:
         Args:
             limit: Maximum number of results (default: 50)
             provider: Optional provider filter (default: None)
+            modality: Filter by modality; default ``\"text\"``. Pass ``None`` to include all modalities.
+            status: Filter by status; default ``\"success\"``. Pass ``None`` to include all statuses.
         
         Returns:
             DataFrame with recent inferences, including:
-            - id, prompt (truncated), response (truncated), provider,
+            - id, prompt (truncated), response (truncated), provider, modality, status,
               tokens, latency_ms, created_at
         """
         calls = self.repository.query_raw_calls(
             provider=provider,
-            modality='text',
-            status='success',  # Only show successful calls
-            limit=limit
+            modality=modality,
+            status=status,
+            limit=limit,
         )
 
         if not calls:
-            logger.info(f"No recent inferences found (provider={provider}, limit={limit})")
+            logger.info(
+                "No recent inferences found (provider=%s, modality=%s, status=%s, limit=%s)",
+                provider,
+                modality,
+                status,
+                limit,
+            )
             return pd.DataFrame()
 
         data = []
         for call in calls:
             # Extract prompt from request_json
             request = call.request_json or {}
-            prompt = request.get('prompt', '') if isinstance(request, dict) else str(request)
+            prompt = self._extract_prompt_preview(request, call.modality)
             
             # Extract response from response_json
             response = ''
@@ -129,11 +166,20 @@ class StudyService:
                     0
                 )
             
+            p = str(prompt)
+            if len(p) > PROMPT_DISPLAY_TRUNCATION:
+                p = p[:PROMPT_DISPLAY_TRUNCATION] + "..."
+            r = str(response)
+            if len(r) > PROMPT_DISPLAY_TRUNCATION:
+                r = r[:PROMPT_DISPLAY_TRUNCATION] + "..."
+
             data.append({
                 'id': call.id,
-                'prompt': prompt[:PROMPT_DISPLAY_TRUNCATION] + '...' if len(str(prompt)) > PROMPT_DISPLAY_TRUNCATION else str(prompt),
-                'response': response[:PROMPT_DISPLAY_TRUNCATION] + '...' if len(str(response)) > PROMPT_DISPLAY_TRUNCATION else str(response),
+                'prompt': p,
+                'response': r,
                 'provider': call.provider,
+                'modality': call.modality,
+                'status': call.status,
                 'tokens': tokens,
                 'latency_ms': call.latency_ms,
                 'created_at': call.created_at

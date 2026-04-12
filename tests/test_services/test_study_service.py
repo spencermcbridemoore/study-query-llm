@@ -112,6 +112,8 @@ def test_get_recent_inferences(study_service):
     assert 'prompt' in df.columns
     assert 'response' in df.columns
     assert 'provider' in df.columns
+    assert 'modality' in df.columns
+    assert 'status' in df.columns
     assert 'tokens' in df.columns
     assert 'latency_ms' in df.columns
     assert 'created_at' in df.columns
@@ -123,6 +125,31 @@ def test_get_recent_inferences_with_provider_filter(study_service):
     
     assert isinstance(df, pd.DataFrame)
     assert all(df['provider'] == 'azure')
+
+
+def test_get_recent_inferences_unfiltered_includes_non_text(db_connection):
+    """Non-chat raw_calls appear when modality/status filters are cleared."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        repo.insert_raw_call(
+            provider="artifact_service",
+            request_json={"op": "store"},
+            modality="artifact",
+            status="success",
+            response_json={},
+            tokens_json=None,
+            latency_ms=None,
+        )
+        session.commit()
+
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        study = StudyService(repo)
+        df = study.get_recent_inferences(limit=20, modality=None, status=None)
+
+    assert not df.empty
+    assert "modality" in df.columns
+    assert (df["modality"] == "artifact").any()
 
 
 def test_get_recent_inferences_truncation(study_service, db_connection):

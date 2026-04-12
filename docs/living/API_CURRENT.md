@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-09
+Last reviewed: 2026-04-11
 
 ## Configuration
 
@@ -34,7 +34,7 @@ Notes:
   - `InferenceService.run_sampling_inference(prompt, n=..., batch_id=...)`
 - Analytics:
   - `StudyService(repository=RawCallRepository(...))`
-  - `get_summary_stats()`, `get_provider_comparison()`, `get_recent_inferences()`
+  - `get_summary_stats()`, `get_provider_comparison()`, `get_recent_inferences()` (optional `modality` / `status` filters; default remains text+success; pass `None` for both to list all `raw_calls` rows in limit order)
 
 ## Database Access (Canonical)
 

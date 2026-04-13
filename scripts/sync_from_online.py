@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-Incremental sync from online Neon PostgreSQL to local backup PostgreSQL.
+Incremental sync from source PostgreSQL to local clone PostgreSQL.
 
 Pulls all records from the online DB that are newer than what's already in
 the local DB. Only downloads, never uploads. Safe to run repeatedly
 (uses ON CONFLICT DO NOTHING so duplicates are skipped automatically).
+
+Guardrails:
+    - Refuses source==target unless --allow-same-source-target is passed.
+    - Refuses non-loopback write target unless --allow-remote-target is passed.
 
 Prerequisites:
     docker compose --profile postgres up -d db
@@ -23,7 +27,8 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, func, text
@@ -31,7 +36,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import sessionmaker, make_transient
 from sqlalchemy.pool import NullPool
 
-load_dotenv()
+from db_target_guardrails import (
+    is_loopback_target,
+    redact_database_url,
+    same_db_target,
+)
+
+load_dotenv(REPO_ROOT / ".env", encoding="utf-8")
 
 
 def get_max_local_id(local_engine) -> int:
@@ -46,24 +57,23 @@ def get_max_local_id(local_engine) -> int:
         session.close()
 
 
-def warmup_neon(online_engine) -> None:
+def warmup_source(online_engine) -> None:
     """
-    Send a trivial query to wake up Neon's serverless compute.
+    Send a trivial query to wake up the source database.
 
-    Neon free-tier compute sleeps after ~5 min of inactivity and can take
-    30-120 s to cold-start. This warmup prevents the first batch query from
-    appearing to hang silently.
+    Some serverless sources can sleep after inactivity. This warmup prevents the
+    first batch query from appearing to hang silently.
     """
-    print("Warming up Neon connection (may take up to 120s on cold start)...", flush=True)
+    print("Warming up source connection (may take up to 120s on cold start)...", flush=True)
     t0 = time.time()
     with online_engine.connect() as conn:
         conn.execute(text("SELECT 1"))
-    print(f"Neon connected in {time.time()-t0:.1f}s", flush=True)
+    print(f"Source connected in {time.time()-t0:.1f}s", flush=True)
 
 
 def fetch_batch(online_engine, min_id: int, batch_size: int) -> dict:
     """
-    Open a fresh short-lived Neon connection, fetch one batch, close it.
+    Open a fresh short-lived source DB connection, fetch one batch, close it.
 
     Returns dict with: calls, members, group_ids, vectors, artifacts.
     Empty dict means no more records.
@@ -122,7 +132,7 @@ def fetch_batch(online_engine, min_id: int, batch_size: int) -> dict:
 
 
 def fetch_groups(online_engine, group_ids: list[int]) -> list:
-    """Fetch Group rows from Neon in a fresh connection."""
+    """Fetch Group rows from source DB in a fresh connection."""
     if not group_ids:
         return []
     from study_query_llm.db.models_v2 import Group
@@ -230,14 +240,34 @@ def write_batch(local_engine, batch: dict, online_groups: list) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sync records from online Neon DB to local backup DB")
-    parser.add_argument("--online-url", default=None, help="Online DB URL (default: DATABASE_URL)")
+    parser = argparse.ArgumentParser(
+        description="Incrementally sync records from source DB to local clone DB"
+    )
+    parser.add_argument(
+        "--online-url",
+        default=None,
+        help="Source DB URL (default: SOURCE_DATABASE_URL, else DATABASE_URL)",
+    )
     parser.add_argument("--local-url", default=None, help="Local DB URL (default: LOCAL_DATABASE_URL)")
     parser.add_argument("--batch-size", type=int, default=200, help="Records per batch (default: 200)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    parser.add_argument(
+        "--allow-same-source-target",
+        action="store_true",
+        help="Allow source and target URLs to resolve to the same DB (normally blocked).",
+    )
+    parser.add_argument(
+        "--allow-remote-target",
+        action="store_true",
+        help="Allow non-loopback write targets (normally blocked).",
+    )
     args = parser.parse_args()
 
-    online_url = args.online_url or os.environ.get("DATABASE_URL")
+    online_url = (
+        args.online_url
+        or os.environ.get("SOURCE_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+    )
     local_url = args.local_url or os.environ.get("LOCAL_DATABASE_URL")
 
     if not online_url:
@@ -247,13 +277,32 @@ def main():
         print("ERROR: LOCAL_DATABASE_URL not set. Add it to .env or pass --local-url.")
         sys.exit(1)
 
-    print(f"Online DB: ...@{online_url.split('@')[-1] if '@' in online_url else online_url}")
-    print(f"Local  DB: ...@{local_url.split('@')[-1] if '@' in local_url else local_url}", flush=True)
+    try:
+        same_target = same_db_target(online_url, local_url)
+    except ValueError as exc:
+        print(f"ERROR: Invalid database URL: {exc}")
+        sys.exit(1)
+    if same_target and not args.allow_same_source_target:
+        print(
+            "ERROR: Source and target resolve to the same DB target. "
+            "Refusing sync; pass --allow-same-source-target to override."
+        )
+        sys.exit(1)
+
+    if not is_loopback_target(local_url) and not args.allow_remote_target:
+        print(
+            "ERROR: Target URL resolves to a non-loopback host. "
+            "Refusing writes without --allow-remote-target."
+        )
+        sys.exit(1)
+
+    print(f"Source DB: {redact_database_url(online_url)}")
+    print(f"Target DB: {redact_database_url(local_url)}", flush=True)
     if args.dry_run:
         print("[DRY RUN] No changes will be written.\n", flush=True)
 
     # NullPool: fresh connection per operation, avoids long-lived transaction issues
-    # with Neon's PgBouncer transaction-mode pooler
+    # with transaction-pooling proxies.
     online_engine = create_engine(
         online_url,
         poolclass=NullPool,
@@ -261,8 +310,8 @@ def main():
     )
     local_engine = create_engine(local_url, poolclass=NullPool)
 
-    # Wake up Neon's serverless compute before the batch loop
-    warmup_neon(online_engine)
+    # Warm source before batch loop to avoid first-query cold-start stall.
+    warmup_source(online_engine)
 
     current_min = get_max_local_id(local_engine)
     print(f"Local max id : {current_min}", flush=True)

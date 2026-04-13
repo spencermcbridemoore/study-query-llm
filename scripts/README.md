@@ -15,6 +15,28 @@ previously in `scripts/common/` now lives in canonical locations under `src/stud
 | `sweep_utils.py` (DB ingestion) | `study_query_llm.experiments.ingestion` |
 | `sweep_utils.py` (metric helpers) | `study_query_llm.experiments.result_metrics` |
 
+## Canonical DB Ops Matrix
+
+Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../docs/runbooks/README.md).
+
+| Script | Primary intent | Source assumptions | Target assumptions | Risk level |
+|---|---|---|---|---|
+| `dump_postgres_for_jetstream_migration.py` | Create custom-format `pg_dump` snapshot (`-Fc`) | Uses explicit source via `--source-url`, `--from-local`, `--from-jetstream`, or env fallback | Writes `.dump` file under `pg_migration_dumps/` | Low (read-only DB, sensitive artifact output) |
+| `restore_pg_dump_to_local_docker.py` | Restore `.dump` into local clone DB | `.dump` file created by `pg_dump -Fc` | `LOCAL_DATABASE_URL` by default (or explicit URL) | High (drops/recreates target DB unless `--skip-recreate`) |
+| `sync_from_online.py` | Incrementally copy v2 rows from source DB to local clone | `DATABASE_URL`/`--online-url` is source; id-based incremental pull | `LOCAL_DATABASE_URL`/`--local-url` is target | Medium-High (writes target rows, no schema-level clone) |
+| `probe_postgres_inventory.py` | Quick inventory probe (size/tables/counts) | URL from selected env var | No writes | Low |
+| `verify_db_backup_inventory.py` | Compare local vs Jetstream table counts + backup manifests/blob listing | `JETSTREAM_DATABASE_URL`, `LOCAL_DATABASE_URL` | No writes | Low |
+| `start_jetstream_postgres_tunnel.py` | SSH local-forward to Jetstream Postgres | Requires Jetstream SSH host/auth env | No DB writes; network tunnel only | Low |
+| `purge_dataset_acquisition.py` | Remove Layer-0 acquisition artifacts for a dataset group | Selected DB URL + artifact storage backend | Deletes blob artifacts + matching DB rows | High (destructive by design) |
+| `record_dataset_download.py --persist-db` | Persist acquisition manifest/files as DB + blob artifacts | Dataset slug + active `DATABASE_URL` + Azure config | Creates/updates `dataset` group, artifacts, placeholders | Medium-High (writes canonical dataset artifacts) |
+| `backup_mcq_db_to_json.py` | Export MCQ-related rows to JSON backup | `LOCAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low (can contain sensitive prompts/artifacts) |
+
+### Full-copy vs Incremental Copy
+
+- **Full-copy replace/clone:** `dump_postgres_for_jetstream_migration.py` + restore scripts/runbooks (`pg_dump`/`pg_restore`). Use when you need a database-faithful copy.
+- **Incremental sync:** `sync_from_online.py` for additive v2-row transfer into a local clone, not for full replacement or schema parity.
+- **Naming note:** `dump_postgres_for_jetstream_migration.py` remains the compatibility filename; it now supports any Postgres source and both local/Jetstream modes.
+
 ## Script Status
 
 ### ✅ Active Scripts
@@ -46,8 +68,29 @@ Scripts that are currently maintained, tested, and actively used:
   - Default `--env-var JETSTREAM_DATABASE_URL` (tunnel); use for quick remote vs local comparisons
   - Status: Active utility
 
+- **`dump_postgres_for_jetstream_migration.py`** - Create custom-format (`-Fc`) full-copy DB dumps
+  - Supports explicit source URL and source shortcuts (`--from-local`, `--from-jetstream`)
+  - Status: Active utility
+
+- **`restore_pg_dump_to_local_docker.py`** - Restore custom-format dump into target DB (default local clone)
+  - Destructive path guardrails: remote target requires `--allow-remote-target --confirm-target-db <dbname>`
+  - Status: Active utility
+
+- **`sync_from_online.py`** - Incremental source->local v2 row sync (not full copy)
+  - Guardrails block same source/target and remote write target unless explicit override flags are provided
+  - Status: Active utility
+
+- **`start_jetstream_postgres_tunnel.py`** - Open SSH tunnel from local machine to Jetstream Postgres
+  - Emits URL-contract-safe instructions using `JETSTREAM_DATABASE_URL` and explicit `DATABASE_URL` repointing intent
+  - Status: Active utility
+
 - **`purge_dataset_acquisition.py`** - Dry-run or delete Layer-0 acquisition blobs + DB rows for a dataset group (blob order: files then manifest; then `call_artifacts` / `raw_calls` / `groups`)
-  - Pair with `record_dataset_download.py --persist-db` for a clean re-import; use `--database-url` for Jetstream when needed
+  - Destructive execution requires `--execute --database-url ... --confirm-group-name ...` (plus `--allow-remote-target` for non-loopback)
+  - Pair with `record_dataset_download.py --persist-db` for a clean re-import
+  - Status: Active utility
+
+- **`record_dataset_download.py`** - Layer-0 acquisition bundle download + optional DB/blob persistence
+  - `--persist-db` guardrails prevent accidental writes to `LOCAL_DATABASE_URL` and non-Jetstream targets unless override flags are passed
   - Status: Active utility
 
 - **`backup_mcq_db_to_json.py`** - Export MCQ-related v2 rows to `scratch/mcq_db_backups/`

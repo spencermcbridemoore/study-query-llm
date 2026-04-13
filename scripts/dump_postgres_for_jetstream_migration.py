@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dump a PostgreSQL database (e.g. Neon) to a custom-format file for Jetstream restore.
+Dump a PostgreSQL database to a custom-format file for full-copy restore workflows.
 
 Requires PostgreSQL client tools on PATH: pg_dump (same major version as server is ideal).
 
@@ -18,7 +18,7 @@ Usage:
   Dump Jetstream (SSH tunnel must be up):
     python scripts/dump_postgres_for_jetstream_migration.py --from-jetstream
 
-Output defaults to pg_migration_dumps/neon_for_jetstream_<timestamp>.dump (gitignored).
+Output defaults to pg_migration_dumps/neon_for_jetstream_<timestamp>.dump (gitignored compatibility name).
 """
 
 from __future__ import annotations
@@ -29,29 +29,10 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
 
 from dotenv import load_dotenv
 
-
-def _redact_database_url(url: str) -> str:
-    """Return URL safe to print (password replaced)."""
-    try:
-        p = urlparse(url)
-        if p.password is None:
-            return url
-        netloc = p.hostname or ""
-        if p.port:
-            netloc = f"{netloc}:{p.port}"
-        if p.username:
-            netloc = f"{p.username}:***@{netloc}"
-        else:
-            netloc = f"***@{netloc}"
-        return urlunparse(
-            (p.scheme, netloc, p.path, p.params, p.query, p.fragment)
-        )
-    except Exception:
-        return "***"
+from db_target_guardrails import redact_database_url
 
 
 def _repo_root() -> Path:
@@ -59,9 +40,9 @@ def _repo_root() -> Path:
 
 
 def main() -> int:
-    load_dotenv(_repo_root() / ".env")
+    load_dotenv(_repo_root() / ".env", encoding="utf-8")
     parser = argparse.ArgumentParser(
-        description="pg_dump (custom format) for Neon → Jetstream migration",
+        description="pg_dump (custom format) for full-copy migration/backup workflows",
     )
     parser.add_argument(
         "--source-url",
@@ -114,6 +95,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if not args.from_local and not args.from_jetstream and not args.source_url:
+        print(
+            "Mode: generic source dump via SOURCE_DATABASE_URL/DATABASE_URL "
+            "(legacy filename retained for compatibility).",
+            flush=True,
+        )
 
     out_dir = _repo_root() / "pg_migration_dumps"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -138,10 +125,10 @@ def main() -> int:
         source,
     ]
 
-    print(f"Source: {_redact_database_url(source)}", flush=True)
+    print(f"Source: {redact_database_url(source)}", flush=True)
     print(f"Output: {out_path}", flush=True)
     if args.dry_run:
-        safe_cmd = cmd[:-1] + [_redact_database_url(source)]
+        safe_cmd = cmd[:-1] + [redact_database_url(source)]
         print("DRY RUN:", subprocess.list2cmdline(safe_cmd), flush=True)
         return 0
 

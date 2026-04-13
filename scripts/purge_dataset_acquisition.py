@@ -32,6 +32,8 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, delete, text
 from sqlalchemy.orm import sessionmaker
 
+from db_target_guardrails import parse_postgres_target, redact_database_url
+
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
@@ -106,6 +108,16 @@ def main() -> int:
         default=None,
         help="Postgres URL (default: DATABASE_URL from .env; use Jetstream tunnel URL to purge remote)",
     )
+    parser.add_argument(
+        "--allow-remote-target",
+        action="store_true",
+        help="Allow purge against non-loopback DB hosts.",
+    )
+    parser.add_argument(
+        "--confirm-group-name",
+        default=None,
+        help="Exact dataset group name confirmation required with --execute.",
+    )
     args = parser.parse_args()
 
     load_dotenv(REPO / ".env", encoding="utf-8")
@@ -113,6 +125,26 @@ def main() -> int:
     if not db_url:
         print(
             "ERROR: DATABASE_URL not set and --database-url not passed.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        target = parse_postgres_target(db_url)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(f"Target DB: {redact_database_url(db_url)}")
+
+    if args.execute and not args.database_url:
+        print(
+            "ERROR: --execute requires explicit --database-url to avoid accidental "
+            "ambient-target deletion.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.execute and target.host not in {"127.0.0.1", "::1"} and not args.allow_remote_target:
+        print(
+            "ERROR: --execute against non-loopback host requires --allow-remote-target.",
             file=sys.stderr,
         )
         return 1
@@ -168,6 +200,15 @@ def main() -> int:
         if not args.execute:
             print("\nDry-run only. Re-run with --execute to apply.")
             return 0
+
+        expected_name = (args.confirm_group_name or "").strip()
+        if expected_name != gname:
+            print(
+                "ERROR: --execute requires exact group-name confirmation. "
+                f"Re-run with --confirm-group-name {gname!r}.",
+                file=sys.stderr,
+            )
+            return 1
 
         for aid, cid, atype, uri in ordered:
             msg = _delete_blob_for_uri(storage, uri)

@@ -21,12 +21,15 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from db_target_guardrails import redact_database_url, same_db_target
 from study_query_llm.datasets.acquisition import (
     acquisition_manifest_sha256,
     build_acquisition_manifest,
@@ -41,7 +44,43 @@ from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService
 
 
+def _resolve_persist_db_target(args: argparse.Namespace) -> str:
+    """Validate and return DB URL for --persist-db path."""
+    backend = (os.environ.get("ARTIFACT_STORAGE_BACKEND") or "local").strip().lower()
+    if backend != "azure_blob":
+        raise SystemExit(
+            "ERROR: --persist-db requires ARTIFACT_STORAGE_BACKEND=azure_blob "
+            f"(got {backend!r}). See .env.example and scripts/check_azure_blob_storage.py"
+        )
+    db_url = (args.database_url or os.environ.get("DATABASE_URL") or "").strip()
+    if not db_url:
+        raise SystemExit("ERROR: DATABASE_URL is not set")
+    local_url = (os.environ.get("LOCAL_DATABASE_URL") or "").strip()
+    jetstream_url = (os.environ.get("JETSTREAM_DATABASE_URL") or "").strip()
+
+    try:
+        if local_url and same_db_target(db_url, local_url) and not args.allow_local_target:
+            raise SystemExit(
+                "ERROR: --persist-db target matches LOCAL_DATABASE_URL. "
+                "Refusing write by default; pass --allow-local-target to override."
+            )
+        if (
+            jetstream_url
+            and not same_db_target(db_url, jetstream_url)
+            and not args.allow_non_jetstream_target
+        ):
+            raise SystemExit(
+                "ERROR: --persist-db target differs from JETSTREAM_DATABASE_URL. "
+                "Pass --allow-non-jetstream-target to override intentionally."
+            )
+    except ValueError as exc:
+        raise SystemExit(f"ERROR: Invalid Postgres URL for --persist-db: {exc}") from exc
+    print(f"[persist-db] target={redact_database_url(db_url)}")
+    return db_url
+
+
 def main() -> None:
+    load_dotenv(REPO_ROOT / ".env", encoding="utf-8")
     parser = argparse.ArgumentParser(description="Record dataset download provenance (layer 0)")
     parser.add_argument(
         "--dataset",
@@ -70,7 +109,24 @@ def main() -> None:
         default=None,
         help="Group name for ProvenanceService.create_dataset_group (default: acquire_<slug>)",
     )
+    parser.add_argument(
+        "--database-url",
+        default=None,
+        help="Override write target URL for --persist-db (default: DATABASE_URL).",
+    )
+    parser.add_argument(
+        "--allow-local-target",
+        action="store_true",
+        help="Allow --persist-db writes when target matches LOCAL_DATABASE_URL.",
+    )
+    parser.add_argument(
+        "--allow-non-jetstream-target",
+        action="store_true",
+        help="Allow --persist-db writes when target differs from JETSTREAM_DATABASE_URL.",
+    )
     args = parser.parse_args()
+
+    persist_db_url = _resolve_persist_db_target(args) if args.persist_db else None
 
     cfg = ACQUIRE_REGISTRY[args.dataset]
     specs = cfg.file_specs()
@@ -98,22 +154,12 @@ def main() -> None:
         print(f"manifest_sha256={mhash}")
 
     if args.persist_db:
-        backend = (os.environ.get("ARTIFACT_STORAGE_BACKEND") or "local").strip().lower()
-        if backend != "azure_blob":
-            raise SystemExit(
-                "ERROR: --persist-db requires ARTIFACT_STORAGE_BACKEND=azure_blob "
-                f"(got {backend!r}). See .env.example and scripts/check_azure_blob_storage.py"
-            )
-        db_url = os.environ.get("DATABASE_URL")
-        if not db_url:
-            raise SystemExit("ERROR: DATABASE_URL is not set")
-
         group_name = args.dataset_group_name or f"acquire_{cfg.slug}"
         manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True).encode(
             "utf-8"
         )
 
-        db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+        db = DatabaseConnectionV2(persist_db_url, enable_pgvector=False)
         db.init_db()
         with db.session_scope() as session:
             repo = RawCallRepository(session)

@@ -24,9 +24,11 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import unquote, urlparse, urlunparse
+from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
+
+from db_target_guardrails import is_loopback_target, parse_postgres_target, redact_database_url
 
 
 def _repo_root() -> Path:
@@ -48,25 +50,8 @@ def _connection_uri_for_cli(url: str) -> str:
     return url.strip()
 
 
-def _redact_database_url(url: str) -> str:
-    try:
-        p = urlparse(url)
-        if not p.password:
-            return url
-        netloc = p.hostname or ""
-        if p.port:
-            netloc = f"{netloc}:{p.port}"
-        if p.username:
-            netloc = f"{p.username}:***@{netloc}"
-        else:
-            netloc = f"***@{netloc}"
-        return urlunparse((p.scheme, netloc, p.path, p.params, p.query, p.fragment))
-    except Exception:
-        return "***"
-
-
 def main() -> int:
-    load_dotenv(_repo_root() / ".env")
+    load_dotenv(_repo_root() / ".env", encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Restore custom-format pg_dump into local Docker Postgres (LOCAL_DATABASE_URL).",
     )
@@ -90,6 +75,16 @@ def main() -> int:
         action="store_true",
         help="Skip dropdb/createdb; only run pg_restore --clean --if-exists (DB must exist)",
     )
+    parser.add_argument(
+        "--allow-remote-target",
+        action="store_true",
+        help="Allow restore to non-loopback host (requires --confirm-target-db).",
+    )
+    parser.add_argument(
+        "--confirm-target-db",
+        default=None,
+        help="Exact target DB name confirmation when using --allow-remote-target.",
+    )
     args = parser.parse_args()
 
     target = args.database_url or os.environ.get("LOCAL_DATABASE_URL") or ""
@@ -102,22 +97,41 @@ def main() -> int:
         print(f"ERROR: Dump file not found: {dump_path}", file=sys.stderr)
         return 1
 
-    p = urlparse(target)
-    dbname = (p.path or "").lstrip("/") or ""
-    if not dbname:
-        print("ERROR: Could not parse database name from URL path.", file=sys.stderr)
+    try:
+        target_info = parse_postgres_target(target)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    user = unquote(p.username) if p.username else ""
-    host = p.hostname or "localhost"
-    port = str(p.port or 5432)
+
+    dbname = target_info.dbname
+    user = target_info.username
+    host = target_info.host or "localhost"
+    port = str(target_info.port)
     if not user:
         print("ERROR: Database URL must include a username.", file=sys.stderr)
         return 1
 
+    if not is_loopback_target(target):
+        if not args.allow_remote_target:
+            print(
+                "ERROR: Target URL resolves to a non-loopback host. "
+                "Refusing destructive restore without --allow-remote-target.",
+                file=sys.stderr,
+            )
+            return 1
+        expected = (args.confirm_target_db or "").strip()
+        if expected != dbname:
+            print(
+                "ERROR: Remote restore requires explicit DB confirmation. "
+                f"Re-run with --confirm-target-db {dbname!r}.",
+                file=sys.stderr,
+            )
+            return 1
+
     env = _pg_env(target)
     uri = _connection_uri_for_cli(target)
 
-    print(f"Target DB: {p.scheme}://{user}:***@{host}:{port}/{dbname}", flush=True)
+    print(f"Target DB: {redact_database_url(target)}", flush=True)
     print(f"Dump file: {dump_path}", flush=True)
 
     drop_cmd = ["dropdb", "--if-exists", "-h", host, "-p", port, "-U", user, dbname]
@@ -151,7 +165,7 @@ def main() -> int:
             print("DRY RUN dropdb:", subprocess.list2cmdline(drop_cmd), flush=True)
             print("DRY RUN createdb:", subprocess.list2cmdline(create_cmd), flush=True)
         safe_restore = [
-            _redact_database_url(x) if x.startswith("postgresql:") else x
+            redact_database_url(x) if x.startswith("postgresql:") else x
             for x in restore_cmd
         ]
         print("DRY RUN pg_restore:", subprocess.list2cmdline(safe_restore), flush=True)

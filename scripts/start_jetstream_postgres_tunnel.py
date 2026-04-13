@@ -21,7 +21,8 @@ Auth (pick one):
 Optional: JETSTREAM_SSH_PORT=22
 Optional: JETSTREAM_SSH_DEBUG=1  (verbose paramiko/sshtunnel logs)
 
-Then set DATABASE_URL to 127.0.0.1:JETSTREAM_SSH_LOCAL_PORT (see .env.example).
+Set JETSTREAM_DATABASE_URL to 127.0.0.1:JETSTREAM_SSH_LOCAL_PORT (see .env.example).
+Only repoint DATABASE_URL when you intentionally want writes against Jetstream.
 
 Storing SSH passwords or key passphrases in .env is convenient but risky; prefer ssh-agent and no secrets on disk.
 
@@ -92,7 +93,8 @@ def _run_password_tunnel(
         flush=True,
     )
     print(
-        f"Point DATABASE_URL at postgresql://USER:PASS@127.0.0.1:{local_port}/DB?sslmode=prefer",
+        f"Set JETSTREAM_DATABASE_URL=postgresql://USER:PASS@127.0.0.1:{local_port}/DB?sslmode=prefer "
+        "(repoint DATABASE_URL only for intentional Jetstream writes)",
         flush=True,
     )
     try:
@@ -165,7 +167,8 @@ def _run_pkey_tunnel(
         flush=True,
     )
     print(
-        f"Point DATABASE_URL at postgresql://USER:PASS@127.0.0.1:{local_port}/DB?sslmode=prefer",
+        f"Set JETSTREAM_DATABASE_URL=postgresql://USER:PASS@127.0.0.1:{local_port}/DB?sslmode=prefer "
+        "(repoint DATABASE_URL only for intentional Jetstream writes)",
         flush=True,
     )
     try:
@@ -231,7 +234,8 @@ def _run_subprocess_ssh(
     cmd.append(f"{user}@{host}")
     print("Tunnel (leave this running):", " ".join(cmd), flush=True)
     print(
-        f"Point DATABASE_URL at postgresql://USER:PASS@127.0.0.1:{local_port}/DB?sslmode=prefer",
+        f"Set JETSTREAM_DATABASE_URL=postgresql://USER:PASS@127.0.0.1:{local_port}/DB?sslmode=prefer "
+        "(repoint DATABASE_URL only for intentional Jetstream writes)",
         flush=True,
     )
     try:

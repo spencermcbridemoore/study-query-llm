@@ -1,6 +1,6 @@
 # Local development: SSH tunnel to Jetstream Postgres
 
-Use this when you run tools, tests, or the app **on your own machine** but want **`DATABASE_URL`** to point at the PostgreSQL instance that runs **inside** the Jetstream compose stack.
+Use this when you run tools, tests, or the app **on your own machine** but want to reach the PostgreSQL instance that runs **inside** the Jetstream compose stack.
 
 On the VM, Postgres listens on `127.0.0.1:5432` only. It is not exposed to the public internet, so your PC needs an **SSH local port forward** through the same user account you use to administer the VM (typically `exouser`).
 
@@ -11,7 +11,7 @@ On the VM, Postgres listens on `127.0.0.1:5432` only. It is not exposed to the p
    - `JETSTREAM_SSH_USER` — usually `exouser`.
    - `JETSTREAM_SSH_LOCAL_PORT` — local port (default `5433` avoids clashing with other Postgres on your PC).
    - `JETSTREAM_POSTGRES_*` and `JETSTREAM_DATABASE_URL` — credentials and URL for the Jetstream DB user (see `.env.example`).
-   - Point `DATABASE_URL` at `JETSTREAM_DATABASE_URL` while using the tunnel (or set `DATABASE_URL` explicitly to the same `127.0.0.1:<local_port>` URL).
+   - Follow the URL contract in [`docs/runbooks/README.md`](../../docs/runbooks/README.md): `DATABASE_URL` is the active write target; set it intentionally to `JETSTREAM_DATABASE_URL` only when you want Jetstream writes.
 
 2. Start the tunnel and **leave it running** in a dedicated terminal:
 
@@ -65,5 +65,6 @@ To compare row counts, manifests, and Azure `db-backups` blobs: `python scripts/
 ## Related
 
 - VM-side deployment and compose: [README.md](README.md) in this directory.
+- Source-of-truth + URL contract: [docs/runbooks/README.md](../../docs/runbooks/README.md).
 - Neon → Jetstream migration: [MIGRATION_FROM_NEON.md](MIGRATION_FROM_NEON.md).
 - Back up local Postgres, then clone Jetstream into local Docker: [LOCAL_DB_CLONE_FROM_JETSTREAM.md](../../docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md).

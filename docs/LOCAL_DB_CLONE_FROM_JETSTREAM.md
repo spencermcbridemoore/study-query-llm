@@ -2,9 +2,11 @@
 
 Status: runbook  
 Owner: data-ops-maintainers  
-Last reviewed: 2026-04-06
+Last reviewed: 2026-04-13
 
 This runbook backs up your **current local** Docker Postgres, then replaces it with a **full copy of Jetstream’s** database (same idea as [`deploy/jetstream/MIGRATION_FROM_NEON.md`](../deploy/jetstream/MIGRATION_FROM_NEON.md), but **source = Jetstream**, **target = local**).
+
+Canonical DB URL variable contract: [`docs/runbooks/README.md`](runbooks/README.md).
 
 ## Prerequisites
 
@@ -28,7 +30,7 @@ This runbook backs up your **current local** Docker Postgres, then replaces it w
 
 2. **Extra copy** — manually copy that `.dump` to an external drive or folder outside the repo (e.g. `D:\Backups\study-query-llm\`).
 
-3. Optional: note row counts — `python scripts/verify_db_backup_inventory.py` (with `DATABASE_URL` / tunnel settings consistent with what you want to measure).
+3. Optional: note row counts — `python scripts/verify_db_backup_inventory.py` (uses `JETSTREAM_DATABASE_URL` and `LOCAL_DATABASE_URL`).
 
 ## Phase B — Dump Jetstream
 
@@ -65,7 +67,7 @@ python scripts/sanity_check_database_url.py
 python scripts/verify_db_backup_inventory.py
 ```
 
-With the tunnel up, **Local** and **Jetstream** table counts should **match**.
+`verify_db_backup_inventory.py` primarily compares `LOCAL_DATABASE_URL` vs `JETSTREAM_DATABASE_URL`. With the tunnel up, those row counts should match after clone.
 
 ## Rollback
 

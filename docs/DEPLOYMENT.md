@@ -7,6 +7,10 @@ Last reviewed: 2026-04-06
 This guide explains how to containerize and run Study Query LLM by using the
 multi-stage `Dockerfile` and `docker-compose.yml` that ship with the repo.
 
+For Jetstream VM backup/restore/tunnel/source-of-truth workflows, use
+[`docs/runbooks/README.md`](runbooks/README.md) and
+[`deploy/jetstream/RUNBOOK.md`](../deploy/jetstream/RUNBOOK.md).
+
 ## 1. Requirements
 
 - Docker Desktop 4.0+ (or engine with BuildKit)

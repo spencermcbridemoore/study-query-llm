@@ -2,13 +2,14 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-06
+Last reviewed: 2026-04-13
 
 ## Quick Route
 
 - Current product/runtime truth: [`docs/living/CURRENT_STATE.md`](living/CURRENT_STATE.md)
 - Current architecture (v2-first): [`docs/living/ARCHITECTURE_CURRENT.md`](living/ARCHITECTURE_CURRENT.md)
 - Current API entrypoints: [`docs/living/API_CURRENT.md`](living/API_CURRENT.md)
+- Canonical DB ops entrypoint: [`docs/runbooks/README.md`](runbooks/README.md)
 - Current user workflow (v2-first): [`docs/USER_GUIDE.md`](USER_GUIDE.md)
 - Design flaws register: [`docs/DESIGN_FLAWS.md`](DESIGN_FLAWS.md)
 - Parity evidence ledger: [`docs/review/DOC_PARITY_LEDGER.md`](review/DOC_PARITY_LEDGER.md)
@@ -28,7 +29,7 @@ Last reviewed: 2026-04-06
 
 ### Runbooks
 
-- [`docs/runbooks/README.md`](runbooks/README.md)
+- [`docs/runbooks/README.md`](runbooks/README.md) (**start here** for DB/tunnel/backup/restore ops)
 - [`docs/DEPLOYMENT.md`](DEPLOYMENT.md)
 - [`docs/SWEEP_MIGRATION_RUNBOOK.md`](SWEEP_MIGRATION_RUNBOOK.md)
 - [`docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`](LOCAL_DB_CLONE_FROM_JETSTREAM.md)
@@ -62,5 +63,6 @@ Last reviewed: 2026-04-06
 
 - Treat only `living` docs as current implementation truth.
 - Use `runbooks` for procedures and operator workflows.
+- For DB operations, treat `docs/runbooks/README.md` as the top-level workflow index and URL contract source.
 - Keep `history` for chronology and migration context.
 - Keep `deprecated` for compatibility context; do not use for new implementation decisions.

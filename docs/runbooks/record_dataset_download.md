@@ -4,38 +4,40 @@ Status: living
 Owner: data-maintainers  
 Last reviewed: 2026-04-10
 
-## References
+## Canonical References
 
-- Contract and schema: [docs/DATASET_ACQUISITION_LAYER0.md](../DATASET_ACQUISITION_LAYER0.md)
+- Contract and schema: [`docs/DATASET_ACQUISITION_LAYER0.md`](../DATASET_ACQUISITION_LAYER0.md)
+- Snapshot/provenance relationship: [`docs/DATASET_SNAPSHOT_PROVENANCE.md`](../DATASET_SNAPSHOT_PROVENANCE.md)
+- DB URL policy and source-of-truth rules: [`docs/runbooks/README.md`](README.md)
 
-## Local filesystem bundle
+## Command Patterns
+
+### 1) Local files only (no DB writes)
 
 ```bash
 python scripts/record_dataset_download.py --dataset ausem --output-dir ./data/acquisitions/ausem
-python scripts/record_dataset_download.py --dataset sources_uncertainty_qc --output-dir ./data/acquisitions/sources_uncertainty_qc
-python scripts/record_dataset_download.py --dataset semeval2013_sra_5way --output-dir ./data/acquisitions/semeval2013_sra_5way
 ```
 
-Produces `acquisition.json` and `files/...` under the output directory.
+Produces `acquisition.json` plus `files/...` under the output directory.
 
-## Dry run (print manifest)
+### 2) Dry-run (manifest only)
 
 ```bash
 python scripts/record_dataset_download.py --dataset ausem --dry-run
-python scripts/record_dataset_download.py --dataset sources_uncertainty_qc --dry-run
-python scripts/record_dataset_download.py --dataset semeval2013_sra_5way --dry-run
 ```
 
-## Persist to Postgres + Azure Blob
+### 3) Persist Layer-0 artifacts to DB + blob storage
 
 Prerequisites:
 
-- `DATABASE_URL` set
-- `ARTIFACT_STORAGE_BACKEND=azure_blob` and Azure variables per `.env.example`
-- Verify connectivity: `python scripts/check_azure_blob_storage.py`
+- `ARTIFACT_STORAGE_BACKEND=azure_blob`
+- Azure variables from `.env.example`
+- `DATABASE_URL` points to the intended write target (Jetstream by default policy)
+- Optional safety check: `python scripts/check_azure_blob_storage.py`
+- Guardrails: `--persist-db` refuses `LOCAL_DATABASE_URL` and non-`JETSTREAM_DATABASE_URL` targets unless explicit override flags are passed.
 
 ```bash
-python scripts/record_dataset_download.py --dataset ausem --output-dir ./data/acquisitions/ausem --persist-db --dataset-group-name acquire_ausem
+python scripts/record_dataset_download.py --dataset ausem --output-dir ./data/acquisitions/ausem --persist-db --dataset-group-name acquire_ausem --database-url "$JETSTREAM_DATABASE_URL"
 ```
 
-You may omit `--output-dir` if you only want database artifacts (blobs + group metadata).
+For DB-only artifact persistence, omit `--output-dir`.

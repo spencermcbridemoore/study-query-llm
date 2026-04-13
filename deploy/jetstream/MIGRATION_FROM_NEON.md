@@ -2,6 +2,8 @@
 
 This runbook moves **all** database content from Neon (or any Postgres URL) to the `db` service in `docker-compose.jetstream.yml`.
 
+This is a **full-copy replacement** workflow. For the canonical workflow index and DB URL variable contract, see [`docs/runbooks/README.md`](../../docs/runbooks/README.md).
+
 ## When to point the app at Jetstream
 
 Keep **`DATABASE_URL` in `.env.jetstream` on the VM** aimed at **Neon** only if the Jetstream app should keep using Neon during the dump. For a normal cutover:

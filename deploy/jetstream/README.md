@@ -3,6 +3,14 @@
 This directory contains **infrastructure-only** assets for running the Panel app
 as a 24/7 password-protected service on a Jetstream2 VM.
 
+## Operational Docs
+
+- Canonical on-VM operations: [`RUNBOOK.md`](RUNBOOK.md)
+- Canonical DB/tunnel workflow index + URL contract: [`docs/runbooks/README.md`](../../docs/runbooks/README.md)
+- Laptop tunnel details: [`LOCAL_DEV_TUNNEL.md`](LOCAL_DEV_TUNNEL.md)
+
+Keep this README focused on deployment boundaries/bootstrap. Use the runbooks above for backup, restore, replacement, reseed, and rollback procedures.
+
 ## Boundary Rules
 
 1. **No edits to notebook or runtime env files.**
@@ -24,7 +32,7 @@ as a 24/7 password-protected service on a Jetstream2 VM.
 
 ## Local development (from your PC)
 
-To run tools against Jetstream Postgres while on your laptop, open an SSH tunnel and point the repo root `.env` at `127.0.0.1` — see **[LOCAL_DEV_TUNNEL.md](LOCAL_DEV_TUNNEL.md)**. That flow is separate from `.env.jetstream` on the VM.
+To run tools against Jetstream Postgres while on your laptop, open an SSH tunnel and follow the DB URL contract in **[docs/runbooks/README.md](../../docs/runbooks/README.md)** and **[LOCAL_DEV_TUNNEL.md](LOCAL_DEV_TUNNEL.md)**. That flow is separate from `.env.jetstream` on the VM.
 
 ## Directory Layout
 

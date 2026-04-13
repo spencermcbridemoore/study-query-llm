@@ -1,5 +1,8 @@
 # Operations Runbook — Jetstream2 Panel Deployment
 
+Canonical cross-environment DB ops index and URL contract:
+[`docs/runbooks/README.md`](../../docs/runbooks/README.md).
+
 ## Service Architecture
 
 ```
@@ -123,6 +126,8 @@ docker compose -f docker-compose.jetstream.yml -p sqllm-jetstream \
     exec db pg_dump -U sqllm study_query_jetstream \
     | gzip > ~/backups/sqllm-$(date -u +%Y%m%d-%H%M%S).sql.gz
 ```
+
+Use this for routine on-VM safety snapshots. For cross-environment full-copy migration workflows (`pg_dump -Fc` / `pg_restore`), use [`MIGRATION_FROM_NEON.md`](MIGRATION_FROM_NEON.md) and the scripts indexed in [`docs/runbooks/README.md`](../../docs/runbooks/README.md).
 
 ### Scheduled backup (cron)
 

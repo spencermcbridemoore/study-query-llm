@@ -9,7 +9,7 @@ Runs on **your Windows PC**. Over **SSH** it will on the Jetstream VM:
 1. **`docker compose … stop app`** — Panel container only; **Postgres stays up**.
 2. **`git pull`** under `$HOME/<RemoteRepoDir>` (default `app`).
 3. **`docker build`** from that repo root into a **VM-local image tag** (default `study-query-llm:jetstream-vm-<timestamp>`).
-4. **Rewrite only `IMAGE_REF=`** in `deploy/jetstream/.env.jetstream` via Python (UTF-8, timestamped `.bak.*`); it does **not** print the full env file.
+4. **Rewrite only `IMAGE_REF=`** in `deploy/jetstream/.env.jetstream` via Python (reads bytes as UTF-8 with `errors='replace'` for legacy `.env` encodings, writes UTF-8; timestamped `.bak.*`); it does **not** print the full env file.
 5. **`docker compose … up -d --pull never --force-recreate app`** then **`curl /health`**.
 
 ### Example

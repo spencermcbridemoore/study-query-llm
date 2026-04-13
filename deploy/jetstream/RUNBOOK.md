@@ -162,7 +162,7 @@ NEW_IMAGE_REF='ghcr.io/yourorg/study-query-llm@sha256:...' ./redeploy_panel_from
 This script:
 
 1. **`git fetch` + `git pull origin main`** under `~/app` (so compose files and helpers match the repo).
-2. Optionally **rewrites `IMAGE_REF=`** in `.env.jetstream` when `NEW_IMAGE_REF` is set (UTF-8, timestamped `.bak.*` backup).
+2. Optionally **rewrites `IMAGE_REF=`** in `.env.jetstream` when `NEW_IMAGE_REF` is set (reads existing file as UTF-8 with replacement for invalid bytes; rewrites UTF-8; timestamped `.bak.*` backup).
 3. Runs **`docker compose pull app`** then **`up -d`** with **`--env-file .env.jetstream`** and project **`sqllm-jetstream`**.
 4. **`curl`** checks **`http://127.0.0.1:5006/health`**.
 

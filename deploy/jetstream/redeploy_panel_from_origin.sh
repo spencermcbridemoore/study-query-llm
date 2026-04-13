@@ -78,7 +78,8 @@ path = Path(sys.argv[1])
 ref = os.environ.get("NEW_IMAGE_REF", "").strip()
 if not ref:
     sys.exit("error: NEW_IMAGE_REF is empty")
-text = path.read_text(encoding="utf-8")
+# .env.jetstream may contain non-UTF-8 bytes (e.g. legacy editor); replace on decode.
+text = path.read_bytes().decode("utf-8", errors="replace")
 lines = text.splitlines()
 out: list[str] = []
 seen = False
@@ -88,7 +89,7 @@ for line in lines:
         out.append(f"IMAGE_REF={ref}")
         seen = True
     else:
-        out.append(line.rstrip("\n"))
+        out.append(line.rstrip("\n\r"))
 if not seen:
     out.append(f"IMAGE_REF={ref}")
 path.write_text("\n".join(out) + "\n", encoding="utf-8")

@@ -86,7 +86,8 @@ path = Path(".env.jetstream")
 ref = os.environ.get("NEW_IMAGE_REF", "").strip()
 if not ref:
     sys.exit("error: NEW_IMAGE_REF is empty")
-text = path.read_text(encoding="utf-8")
+# .env may contain legacy Windows-1252 bytes; never fail the deploy on decode.
+text = path.read_bytes().decode("utf-8", errors="replace")
 lines = text.splitlines()
 out = []
 seen = False
@@ -96,7 +97,7 @@ for line in lines:
         out.append(f"IMAGE_REF={ref}")
         seen = True
     else:
-        out.append(line.rstrip("\n"))
+        out.append(line.rstrip("\n\r"))
 if not seen:
     out.append(f"IMAGE_REF={ref}")
 path.write_text("\n".join(out) + "\n", encoding="utf-8")

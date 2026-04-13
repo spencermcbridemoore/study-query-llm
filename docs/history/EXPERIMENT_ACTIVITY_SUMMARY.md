@@ -40,7 +40,7 @@ The relevant method pattern (as reflected in your repo direction) is summary-as-
 ## 1) No-PCA 50-restart clustering sweeps
 
 - Pattern: `k=2..20`, `n_restarts=50`, no PCA, cosine/normalized settings
-- Strong evidence in: `scripts/run_no_pca_50runs_sweep.py`
+- Strong evidence in: `scripts/history/experiments/run_no_pca_50runs_sweep.py` (legacy wrapper retained at `scripts/run_no_pca_50runs_sweep.py`)
 - Confirmed retained artifacts: `6` top-level PKLs in `experimental_results/no_pca_50runs_*.pkl`
 - Confirmed dataset in retained PKLs: `dbpedia`
 - Confirmed summarizers in retained PKLs: `None`, `gpt-5-chat`
@@ -167,7 +167,7 @@ The relevant method pattern (as reflected in your repo direction) is summary-as-
 
 ## Primary Evidence Anchors
 
-- `scripts/run_no_pca_50runs_sweep.py`
+- `scripts/history/experiments/run_no_pca_50runs_sweep.py`
 - `scripts/ingest_sweep_to_db.py`
 - `notebooks/archive/local_gpu_300_sweep.ipynb`
 - `notebooks/archive/local_gpu_multi_sweep.ipynb`

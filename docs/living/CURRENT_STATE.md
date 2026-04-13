@@ -59,6 +59,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - For operational execution: prefer package CLI subcommands over legacy script wrappers.
 - For DB/tunnel/backup/restore operations: start at `docs/runbooks/README.md` (canonical source-of-truth policy + URL contract).
 - High-risk DB scripts now enforce write-target guardrails (remote-target overrides, same-target refusal, and explicit destructive confirmations).
+- Scripts now use lane governance (`scripts/living`, `scripts/history`, `scripts/deprecated`, `scripts/internal`); first-pass no-PCA/experimental scripts were moved to `scripts/history` with root compatibility wrappers.
 
 ## Known Legacy / Transitional Areas
 

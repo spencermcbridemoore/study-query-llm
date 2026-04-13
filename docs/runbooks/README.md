@@ -49,6 +49,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 - [`docs/SWEEP_MIGRATION_RUNBOOK.md`](../SWEEP_MIGRATION_RUNBOOK.md)
 - [`docs/LANGGRAPH_JOB_EXECUTION.md`](../LANGGRAPH_JOB_EXECUTION.md)
 - [`docs/TESTING_CHECKLIST.md`](../TESTING_CHECKLIST.md)
+- Script lane note: active operational entrypoints remain under `scripts/`; historical experiment drivers are being moved under `scripts/history/` with compatibility wrappers.
 - Dataset snapshot flow:
   - contract: [`docs/DATASET_SNAPSHOT_PROVENANCE.md`](../DATASET_SNAPSHOT_PROVENANCE.md)
   - create snapshots: `scripts/create_dataset_snapshots_286.py`

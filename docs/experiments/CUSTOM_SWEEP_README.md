@@ -92,7 +92,7 @@ Each file contains:
 
 ## Scripts
 
-- **Main sweep**: `scripts/run_custom_full_categories_sweep.py`
+- **Main sweep**: `scripts/history/experiments/run_custom_full_categories_sweep.py` (legacy wrapper still available at `scripts/run_custom_full_categories_sweep.py`)
 - **Analysis**: Use `notebooks/sweep_explorer.ipynb` with filters:
   - `label_max=[10, 14]` (to isolate this sweep)
   - Compare across entry_max

@@ -9,6 +9,8 @@ Examples:
     --persist-db --dataset-group-name acquire_ausem
 
 --persist-db requires DATABASE_URL and ARTIFACT_STORAGE_BACKEND=azure_blob.
+
+To remove a previous acquisition and re-import, see ``scripts/purge_dataset_acquisition.py``.
 """
 
 from __future__ import annotations

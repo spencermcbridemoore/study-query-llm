@@ -46,6 +46,10 @@ Scripts that are currently maintained, tested, and actively used:
   - Default `--env-var JETSTREAM_DATABASE_URL` (tunnel); use for quick remote vs local comparisons
   - Status: Active utility
 
+- **`purge_dataset_acquisition.py`** - Dry-run or delete Layer-0 acquisition blobs + DB rows for a dataset group (blob order: files then manifest; then `call_artifacts` / `raw_calls` / `groups`)
+  - Pair with `record_dataset_download.py --persist-db` for a clean re-import; use `--database-url` for Jetstream when needed
+  - Status: Active utility
+
 - **`backup_mcq_db_to_json.py`** - Export MCQ-related v2 rows to `scratch/mcq_db_backups/`
   - Uses `LOCAL_DATABASE_URL` or `DATABASE_URL`; writes `*_full.json` + `*_summary.json` with embedded backup metadata
   - Output path is gitignored; may contain prompts — do not commit

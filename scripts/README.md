@@ -42,6 +42,11 @@ Scripts that are currently maintained, tested, and actively used:
   - Verifies if database is empty
   - Status: Active utility
 
+- **`backup_mcq_db_to_json.py`** - Export MCQ-related v2 rows to `scratch/mcq_db_backups/`
+  - Uses `LOCAL_DATABASE_URL` or `DATABASE_URL`; writes `*_full.json` + `*_summary.json` with embedded backup metadata
+  - Output path is gitignored; may contain prompts — do not commit
+  - Status: Active utility
+
 - **`check_embedding_calls.py`** - Embedding calls inspection
   - Lists embedding calls in database
   - Status: Active utility

@@ -120,6 +120,8 @@ Thumbs.db
 
 # Scratch outputs (procedural graphs, local experiments)
 scratch/out/
+# MCQ / v2 JSON exports from scripts/backup_mcq_db_to_json.py (may contain prompts)
+scratch/mcq_db_backups/
 # Local-only Jetstream SSH drivers (see scratch/local/README.md); add patterns here for untracked local files
 scratch/local/*
 !scratch/local/README.md

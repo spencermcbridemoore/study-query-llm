@@ -42,6 +42,10 @@ Scripts that are currently maintained, tested, and actively used:
   - Verifies if database is empty
   - Status: Active utility
 
+- **`probe_postgres_inventory.py`** - Print DB size, `public` table list, `groups` counts, `raw_calls` count (redacted URL)
+  - Default `--env-var JETSTREAM_DATABASE_URL` (tunnel); use for quick remote vs local comparisons
+  - Status: Active utility
+
 - **`backup_mcq_db_to_json.py`** - Export MCQ-related v2 rows to `scratch/mcq_db_backups/`
   - Uses `LOCAL_DATABASE_URL` or `DATABASE_URL`; writes `*_full.json` + `*_summary.json` with embedded backup metadata
   - Output path is gitignored; may contain prompts — do not commit

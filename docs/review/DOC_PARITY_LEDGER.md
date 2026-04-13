@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-11
+Last reviewed: 2026-04-13
 
 ## Purpose
 
@@ -56,6 +56,7 @@ Status values:
 | C032 | `docs/living/CURRENT_STATE.md` + `docs/living/API_CURRENT.md` | Panel Analytics tab surfaces v2 counts (including group_members and embedding_vectors), raw_calls modality/status histograms, groups by group_type, recent provenanced_runs and groups, and recent raw_calls with optional StudyService filters (default text+success unchanged). | `panel_app/views/analytics.py`, `src/study_query_llm/services/study_service.py`, `tests/test_services/test_study_service.py` | verified | Low positive: operators see MCQ/provenance activity when raw_calls-only charts look empty. | Keep queries bounded (limits); revisit if large DBs need pagination. |
 | C033 | `deploy/jetstream/RUNBOOK.md` + `deploy/jetstream/README.md` | Jetstream redeploy script `redeploy_panel_from_origin.sh` runs git pull on the VM repo, optionally sets `IMAGE_REF` from `NEW_IMAGE_REF` (Python reads `.env.jetstream` bytes as UTF-8 with `errors='replace'`), `docker compose pull app` + `up -d` with `--env-file .env.jetstream`, then curls Panel `/health`. | `deploy/jetstream/redeploy_panel_from_origin.sh` | verified | Low positive: single operator path for compose-on-disk + container image refresh. | Keep aligned with compose project name and env-file flags in `docker-compose.jetstream.yml`. |
 | C034 | `scratch/local/README.md` + `.gitignore` | `scratch/local/*` is gitignored except `scratch/local/README.md` and `scratch/local/jetstream-remote-build-and-restart.ps1`; README documents the Windows driver (SSH: stop app, git pull, VM `docker build`, Python-only `IMAGE_REF` rewrite with `read_bytes`/`decode(..., errors='replace')` for non-UTF-8 `.env.jetstream`, `up --pull never --force-recreate app`, health curl). | `scratch/local/README.md`, `scratch/local/jetstream-remote-build-and-restart.ps1`, `.gitignore` | verified | Low positive: Path-A VM build workflow from a Windows workstation without putting secrets in the script. | Keep character-set validation in the ps1 in sync with README examples. |
+| C035 | `docs/runbooks/README.md` + `scripts/README.md` + DB ops scripts | Canonical DB ops now flow through one runbook index with explicit `DATABASE_URL`/`JETSTREAM_DATABASE_URL`/`LOCAL_DATABASE_URL` contract, and high-risk scripts enforce target guardrails (`restore_pg_dump_to_local_docker.py`, `sync_from_online.py`, `purge_dataset_acquisition.py`, `record_dataset_download.py --persist-db`) including remote-target overrides and destructive confirmations. | `docs/runbooks/README.md`, `scripts/README.md`, `scripts/db_target_guardrails.py`, `scripts/restore_pg_dump_to_local_docker.py`, `scripts/sync_from_online.py`, `scripts/purge_dataset_acquisition.py`, `scripts/record_dataset_download.py`, `tests/test_scripts/test_*guardrails.py` | verified | High positive: materially reduces wrong-target DB write/delete risk and removes conflicting source-of-truth narratives. | Keep guardrail flags in runbook examples whenever destructive/scripted writes are documented. |
 
 ## Severity-Ranked Mismatch Summary
 

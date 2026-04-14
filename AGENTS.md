@@ -16,7 +16,6 @@ Panel-based web application for running LLM inference experiments across multipl
 - **Jetstream: PC → Postgres SSH tunnel** (local `DATABASE_URL` via forward): `deploy/jetstream/LOCAL_DEV_TUNNEL.md`
 - **Clone Jetstream DB into local Docker** (backup local, `pg_dump` Jetstream, restore): `docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`
 - **Coding Rules**: `.cursorrules` - Detailed technical conventions (Cursor-specific)
-- **`qr ` concise replies**: `.cursor/rules/qr-concise.mdc` — when the user’s message starts with `qr `, answer briefly and begin with exactly `CONCISE RESPONSE: ` (`alwaysApply: true` in Cursor)
 - **Contributing**: `CONTRIBUTING.md` - Development process and guidelines
 - **Standing Orders**: `docs/STANDING_ORDERS.md` - Consistency guidelines
 

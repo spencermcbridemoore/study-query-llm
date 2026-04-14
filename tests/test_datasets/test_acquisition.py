@@ -124,9 +124,10 @@ def test_acquire_registry_sources_uncertainty_qc():
 def test_acquire_registry_semeval2013_sra_5way():
     cfg = ACQUIRE_REGISTRY["semeval2013_sra_5way"]
     files = cfg.file_specs()
-    assert len(files) == 6
+    assert len(files) == 7
     paths = sorted(f.relative_path for f in files)
     assert paths[0] == "README.md"
+    assert "semevalFormatProcessing-5way/answers.csv" in paths
     assert "semevalFormatProcessing-5way/partialEntailmentGold.txt" in paths
     assert all(
         "1d6d30b265e6038fd6f6395d4cfd6686aef4b97f" in f.url for f in files

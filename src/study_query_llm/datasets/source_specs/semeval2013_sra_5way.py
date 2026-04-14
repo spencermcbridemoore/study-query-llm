@@ -4,7 +4,8 @@ SemEval-2013 Task 7 — Student Response Analysis, five-way gold labels (mirror)
 Uses public GitHub mirror ashudeep/Student-Response-Analysis (not the official
 LDC distribution). Pinned commit for reproducible raw.githubusercontent.com URLs.
 
-Gold / label files under ``semevalFormatProcessing-5way/`` plus repository README.
+Gold / label files and ``answers.csv`` under ``semevalFormatProcessing-5way/`` plus
+repository README (all from the same pinned mirror commit).
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ _GOLD_FILES = (
     "testGold-UQ.txt",
     "partialEntailmentGold.txt",
 )
+# Same directory as gold files in the mirror; keeps Layer 0 self-contained vs ad-hoc clones.
+_5WAY_EXTRA_FILES = ("answers.csv",)
 
 
 def _raw_url(repo_relative_path: str) -> str:
@@ -39,7 +42,7 @@ def _raw_url(repo_relative_path: str) -> str:
 
 def semeval2013_sra_5way_file_specs() -> List[FileFetchSpec]:
     specs: List[FileFetchSpec] = []
-    for name in _GOLD_FILES:
+    for name in _GOLD_FILES + _5WAY_EXTRA_FILES:
         rel = f"{_PREFIX}/{name}"
         specs.append(FileFetchSpec(relative_path=rel, url=_raw_url(rel)))
     specs.append(FileFetchSpec(relative_path="README.md", url=_raw_url("README.md")))
@@ -52,6 +55,6 @@ def semeval2013_sra_5way_source_metadata() -> Dict[str, Any]:
         "organization": GITHUB_ORG,
         "repository": GITHUB_REPO,
         "git_ref": PINNED_GIT_REF,
-        "description": "SemEval-2013 Task 7 SRA five-way gold files (community mirror)",
+        "description": "SemEval-2013 Task 7 SRA five-way gold files + answers.csv (community mirror)",
         "note": "Official corpus may require LDC; this pin is the ashudeep/Student-Response-Analysis mirror.",
     }

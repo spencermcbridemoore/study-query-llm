@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: ops-maintainers  
-Last reviewed: 2026-04-13
+Last reviewed: 2026-04-14
 
 Use this page as the **single procedural entrypoint** for operator workflows.
 
@@ -38,6 +38,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 - Tunnel setup: [`deploy/jetstream/LOCAL_DEV_TUNNEL.md`](../../deploy/jetstream/LOCAL_DEV_TUNNEL.md)
 - DB inventory probe: `python scripts/probe_postgres_inventory.py`
 - Local-vs-Jetstream inventory + backup manifests: `python scripts/verify_db_backup_inventory.py`
+- Upload a Jetstream-sourced `pg_dump -Fc` to Azure `db-backups` (same account as artifacts): after `python scripts/dump_postgres_for_jetstream_migration.py --from-jetstream`, run `python scripts/upload_jetstream_pg_dump_to_blob.py` (or `--dump-path …`); then re-run `verify_db_backup_inventory.py`
 
 ## Application / Infrastructure Runbooks
 

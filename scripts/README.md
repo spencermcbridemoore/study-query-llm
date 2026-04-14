@@ -50,6 +50,7 @@ Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../d
 | `sync_from_online.py` | Incrementally copy v2 rows from source DB to local clone | `SOURCE_DATABASE_URL`/`DATABASE_URL` or `--online-url` is source | `LOCAL_DATABASE_URL`/`--local-url` is target | Medium-High (writes target rows, no schema-level clone) |
 | `probe_postgres_inventory.py` | Quick inventory probe (size/tables/counts) | URL from selected env var | No writes | Low |
 | `verify_db_backup_inventory.py` | Compare local vs Jetstream table counts + backup manifests/blob listing | `JETSTREAM_DATABASE_URL`, `LOCAL_DATABASE_URL` | No writes | Low |
+| `upload_jetstream_pg_dump_to_blob.py` | Upload `jetstream_for_local_*.dump` to Azure `db-backups` + write manifest | `AZURE_STORAGE_CONNECTION_STRING`; optional `JETSTREAM_DATABASE_URL` for manifest `table_counts` | Writes blobs + `backup_pg_dumps/*.manifest.json` | Medium (blob writes; sensitive dump contents) |
 | `start_jetstream_postgres_tunnel.py` | SSH local-forward to Jetstream Postgres | Requires Jetstream SSH host/auth env | No DB writes; network tunnel only | Low |
 | `purge_dataset_acquisition.py` | Remove Layer-0 acquisition artifacts for a dataset group | Selected DB URL + artifact storage backend | Deletes blob artifacts + matching DB rows | High (destructive by design) |
 | `record_dataset_download.py --persist-db` | Persist acquisition manifest/files as DB + blob artifacts | Dataset slug + active `DATABASE_URL` + Azure config | Creates/updates `dataset` group, artifacts, placeholders | Medium-High (writes canonical dataset artifacts) |
@@ -57,7 +58,7 @@ Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../d
 
 ## Full-Copy vs Incremental Copy
 
-- **Full-copy replace/clone:** `dump_postgres_for_jetstream_migration.py` + restore runbooks/scripts (`pg_dump`/`pg_restore`)
+- **Full-copy replace/clone:** `dump_postgres_for_jetstream_migration.py` + restore runbooks/scripts (`pg_dump`/`pg_restore`); optional off-VM archival: `upload_jetstream_pg_dump_to_blob.py` → Azure `db-backups` + manifest for `verify_db_backup_inventory.py`
 - **Incremental sync:** `sync_from_online.py` for additive v2-row transfer into a local clone, not full replacement
 - **Compatibility note:** `dump_postgres_for_jetstream_migration.py` keeps its filename for backward compatibility
 

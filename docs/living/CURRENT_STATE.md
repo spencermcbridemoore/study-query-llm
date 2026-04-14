@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-13
+Last reviewed: 2026-04-14
 
 ## Scope
 
@@ -58,6 +58,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - For chat providers: use `create_chat_provider` path, not legacy assumptions about `create()`.
 - For operational execution: prefer package CLI subcommands over legacy script wrappers.
 - For DB/tunnel/backup/restore operations: start at `docs/runbooks/README.md` (canonical source-of-truth policy + URL contract).
+- Optional Jetstream `pg_dump` archival to Azure container `db-backups`: `scripts/upload_jetstream_pg_dump_to_blob.py` writes the dump blob plus `backup_pg_dumps/*.manifest.json` for `scripts/verify_db_backup_inventory.py` (uses `AZURE_STORAGE_CONNECTION_STRING`, same account as artifacts).
 - High-risk DB scripts now enforce write-target guardrails (remote-target overrides, same-target refusal, and explicit destructive confirmations).
 - Scripts now use lane governance (`scripts/living`, `scripts/history`, `scripts/deprecated`, `scripts/internal`); first-pass no-PCA/experimental scripts were moved to `scripts/history` with root compatibility wrappers.
 

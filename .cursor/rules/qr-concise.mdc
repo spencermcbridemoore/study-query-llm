@@ -1,0 +1,29 @@
+---
+description: >-
+  When the user prefixes a message with "qr ", respond concisely and start the
+  reply with "CONCISE RESPONSE: ".
+alwaysApply: true
+---
+
+# `qr ` prefix — concise replies
+
+When the **user’s message** begins with the prefix **`qr `** (the two letters `qr` immediately followed by a **single ASCII space**), treat the remainder of the message as the real question or instruction.
+
+## Required behavior
+
+1. **Concise answer:** Short, direct, high-signal. Prefer tight bullets or a few sentences over long prose. Skip optional background, hedging, and “engagement” filler unless omitting it would make the answer wrong or unsafe.
+2. **Mandatory lead-in line:** The **very first characters** of your assistant reply MUST be exactly:
+
+   `CONCISE RESPONSE: `
+
+   (including the trailing space after the colon). Put the substantive answer **on the same line after that prefix** or continue on following lines; do not insert any other text, headings, or whitespace before that exact prefix.
+
+## Non-triggering cases
+
+- If the user does **not** start the message with `qr `, ignore this rule for that turn.
+- Do **not** add `CONCISE RESPONSE: ` unless the `qr ` prefix trigger applies.
+
+## Examples
+
+- User: `qr What is 2+2?` → Reply must start with `CONCISE RESPONSE: ` then the brief answer.
+- User: `What is 2+2?` → Normal reply; no `CONCISE RESPONSE: ` prefix.

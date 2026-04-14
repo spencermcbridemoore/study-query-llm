@@ -41,3 +41,13 @@ python scripts/record_dataset_download.py --dataset ausem --output-dir ./data/ac
 ```
 
 For DB-only artifact persistence, omit `--output-dir`.
+
+### 4) Refresh measured statistics in `DATASET_ACQUISITION_LAYER0.md`
+
+After pin bumps or when updating operator-facing scale numbers:
+
+```bash
+python scripts/report_layer0_dataset_stats.py --write-doc
+```
+
+Requires network access to Zenodo and pinned GitHub raw URLs.

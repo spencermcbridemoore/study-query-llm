@@ -51,6 +51,7 @@ Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../d
 | `probe_postgres_inventory.py` | Quick inventory probe (size/tables/counts) | URL from selected env var | No writes | Low |
 | `verify_db_backup_inventory.py` | Compare local vs Jetstream table counts + backup manifests/blob listing | `JETSTREAM_DATABASE_URL`, `LOCAL_DATABASE_URL` | No writes | Low |
 | `verify_call_artifact_blob_lanes.py` | Read-only: classify `call_artifacts.uri` by Azure blob container (and optional key prefix) | `DATABASE_URL` or `--env-var` / `--database-url` | No writes | Low |
+| `report_layer0_dataset_stats.py` | Fetch pinned Layer 0 files; print/refresh measured byte + row/line stats in `docs/DATASET_ACQUISITION_LAYER0.md` | Network (Zenodo/GitHub); optional `--write-doc` | No writes (unless `--write-doc`) | Low |
 | `upload_jetstream_pg_dump_to_blob.py` | Upload `jetstream_for_local_*.dump` to Azure `db-backups` + write manifest | `AZURE_STORAGE_CONNECTION_STRING`; optional `JETSTREAM_DATABASE_URL` for manifest `table_counts` | Writes blobs + `backup_pg_dumps/*.manifest.json` | Medium (blob writes; sensitive dump contents) |
 | `start_jetstream_postgres_tunnel.py` | SSH local-forward to Jetstream Postgres | Requires Jetstream SSH host/auth env | No DB writes; network tunnel only | Low |
 | `purge_dataset_acquisition.py` | Remove Layer-0 acquisition artifacts for a dataset group | Selected DB URL + artifact storage backend | Deletes blob artifacts + matching DB rows | High (destructive by design) |

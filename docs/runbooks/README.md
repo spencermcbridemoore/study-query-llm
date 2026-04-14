@@ -62,6 +62,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 - Layer-0 acquisition:
   - contract: [`docs/DATASET_ACQUISITION_LAYER0.md`](../DATASET_ACQUISITION_LAYER0.md)
   - command runbook: [`docs/runbooks/record_dataset_download.md`](record_dataset_download.md)
+  - refresh measured sizes/row counts in the contract doc: `python scripts/report_layer0_dataset_stats.py --write-doc`
 
 ## Policy
 

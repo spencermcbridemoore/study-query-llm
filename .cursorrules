@@ -1,5 +1,8 @@
 # Study Query LLM - AI Assistant Rules
 
+## User message conventions
+- **`qr ` prefix:** If the user’s message **starts with** `qr ` (letters `qr` plus one space), reply **concisely** and begin the assistant message with exactly `CONCISE RESPONSE: ` (see `.cursor/rules/qr-concise.mdc`, `alwaysApply: true`).
+
 ## Source of Truth
 - **Implementation Status**: Always check `docs/living/CURRENT_STATE.md` for current behavior/capability status
 - **Architecture Decisions**: Refer to `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns and layer responsibilities

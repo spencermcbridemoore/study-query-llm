@@ -45,6 +45,9 @@ Legacy `scripts/run_*.py` files are compatibility wrappers where retained.
 - Read models derive request-level analysis state from orchestration/execution records, with legacy metadata arrays retained as compatibility mirrors during cutover.
 - New MCQ method executions are captured as explicit `provenanced_runs` rows (`run_kind=execution`, `execution_role=method_execution`, `determinism_class=non_deterministic`).
 - `run_key` remains identity/idempotency metadata, while execution lineage is represented through `provenanced_runs` + `Group`/`GroupLink`.
+- Each `provenanced_runs` row carries a **canonical run fingerprint** (`fingerprint_json`/`fingerprint_hash`) that captures algorithmic identity independent of scheduling granularity. See `canonical_run_fingerprint()` and `fingerprints_match()` in `provenanced_run_service.py`.
+- The boundary between schedulable units and in-job provenance events is documented in [SCHEDULING_PROVENANCE_BOUNDARY.md](SCHEDULING_PROVENANCE_BOUNDARY.md).
+- Orchestration claim/complete paths include `perf_counter` timing instrumentation (logged at DEBUG level) for diagnosing overhead.
 - Dataset snapshots support immutable full lineage and delta lineage (`depends_on` link from child snapshot to parent snapshot).
 
 ## Legacy Notes

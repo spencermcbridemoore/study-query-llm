@@ -38,6 +38,92 @@ def canonical_config_hash(config_json: Optional[Dict[str, Any]]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# Keys in config_json that describe scheduling/runtime, not algorithmic identity.
+_SCHEDULING_ONLY_CONFIG_KEYS = frozenset({
+    "max_attempts",
+    "job_key",
+    "job_id",
+    "orchestration_job_id",
+    "claimed_by",
+    "lease_seconds",
+    "lease_expires_at",
+    "heartbeat_at",
+    "worker_id",
+    "worker_slot",
+    "claim_lease_seconds",
+    "idle_exit_seconds",
+    "bundle_size",
+    "execution_mode",
+    "shard_config",
+    "standalone_special_case",
+    "concurrency_observed",
+})
+
+
+def _strip_scheduling_keys(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Return config dict with scheduling-only keys removed."""
+    return {k: v for k, v in config.items() if k not in _SCHEDULING_ONLY_CONFIG_KEYS}
+
+
+def canonical_run_fingerprint(
+    *,
+    method_name: Optional[str] = None,
+    method_version: Optional[str] = None,
+    config_json: Optional[Dict[str, Any]] = None,
+    input_snapshot_group_id: Optional[int] = None,
+    manifest_hash: Optional[str] = None,
+    data_regime: Optional[Dict[str, Any]] = None,
+    determinism_class: str = "non_deterministic",
+) -> Tuple[Dict[str, Any], str]:
+    """Build a canonical run fingerprint for semantic comparability.
+
+    The fingerprint captures *algorithmic identity* (what method, what config,
+    what input, what data regime) and deliberately excludes scheduling mechanics
+    (job ids, worker ids, claim timestamps, retries, lease info, fan-out shape).
+
+    Returns:
+        ``(fingerprint_json, fingerprint_hash)`` where *fingerprint_json* is the
+        structured tuple and *fingerprint_hash* is its SHA-256 digest.
+    """
+    semantic_config = _strip_scheduling_keys(config_json or {})
+
+    fp: Dict[str, Any] = {
+        "method_name": method_name or None,
+        "method_version": method_version or None,
+        "config_hash": canonical_config_hash(semantic_config),
+        "input_snapshot_group_id": input_snapshot_group_id,
+        "manifest_hash": manifest_hash or None,
+        "data_regime": data_regime or None,
+        "determinism_class": determinism_class,
+    }
+    canonical = json.dumps(fp, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    fp_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return fp, fp_hash
+
+
+def fingerprints_match(
+    fp_a: Optional[Dict[str, Any]],
+    fp_b: Optional[Dict[str, Any]],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Compare two fingerprint dicts and return ``(match, diff)``.
+
+    ``diff`` maps each field name to ``{"a": val_a, "b": val_b}`` for fields
+    that differ.  When both fingerprints are ``None``, returns ``(True, {})``.
+    """
+    if fp_a is None and fp_b is None:
+        return True, {}
+    if fp_a is None or fp_b is None:
+        return False, {"_present": {"a": fp_a is not None, "b": fp_b is not None}}
+    all_keys = sorted(set(fp_a) | set(fp_b))
+    diff: Dict[str, Any] = {}
+    for key in all_keys:
+        va = fp_a.get(key)
+        vb = fp_b.get(key)
+        if va != vb:
+            diff[key] = {"a": va, "b": vb}
+    return len(diff) == 0, diff
+
+
 def _primary_snapshot_id_from_run_metadata(meta: Dict[str, Any]) -> Optional[int]:
     """Return deterministic primary snapshot id from legacy run metadata."""
     raw_snapshot_ids = meta.get("dataset_snapshot_ids")
@@ -95,6 +181,18 @@ class ProvenancedRunService:
         """Upsert a method execution run keyed by request+run_key+run_kind."""
         meta = dict(metadata_json or {})
         meta.setdefault("execution_role", EXECUTION_ROLE_METHOD)
+
+        method_name, method_version = self._resolve_method_identity(method_definition_id)
+        fp_json, fp_hash = canonical_run_fingerprint(
+            method_name=method_name,
+            method_version=method_version,
+            config_json=config_json,
+            input_snapshot_group_id=input_snapshot_group_id,
+            manifest_hash=meta.get("manifest_hash"),
+            data_regime=meta.get("data_regime"),
+            determinism_class=determinism_class,
+        )
+
         return self.repository.create_provenanced_run(
             run_kind=RUN_KIND_EXECUTION,
             run_status=run_status,
@@ -110,6 +208,8 @@ class ProvenancedRunService:
             config_json=config_json or {},
             result_ref=result_ref,
             metadata_json=meta,
+            fingerprint_json=fp_json,
+            fingerprint_hash=fp_hash,
         )
 
     def record_analysis_execution(
@@ -132,6 +232,17 @@ class ProvenancedRunService:
         meta = dict(metadata_json or {})
         meta.setdefault("analysis_key", str(analysis_key))
         meta.setdefault("execution_role", EXECUTION_ROLE_ANALYSIS)
+
+        method_name, method_version = self._resolve_method_identity(method_definition_id)
+        fp_json, fp_hash = canonical_run_fingerprint(
+            method_name=method_name,
+            method_version=method_version,
+            config_json=config_json,
+            manifest_hash=meta.get("manifest_hash"),
+            data_regime=meta.get("data_regime"),
+            determinism_class=determinism_class,
+        )
+
         return self.repository.create_provenanced_run(
             run_kind=RUN_KIND_EXECUTION,
             run_status=run_status,
@@ -145,7 +256,39 @@ class ProvenancedRunService:
             config_json=config_json or {},
             result_ref=result_ref,
             metadata_json=meta,
+            fingerprint_json=fp_json,
+            fingerprint_hash=fp_hash,
         )
+
+    def _resolve_method_identity(
+        self, method_definition_id: Optional[int]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Look up method name/version from a definition id."""
+        if method_definition_id is None:
+            return None, None
+        method = (
+            self.repository.session.query(MethodDefinition)
+            .filter(MethodDefinition.id == method_definition_id)
+            .first()
+        )
+        if method is None:
+            return None, None
+        return str(method.name), str(method.version) if method.version else None
+
+    def compare_run_fingerprints(
+        self, run_a_id: int, run_b_id: int
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Compare fingerprints of two provenanced_runs by id.
+
+        Returns ``(match, diff)`` — see :func:`fingerprints_match`.
+        """
+        from study_query_llm.db.models_v2 import ProvenancedRun
+
+        run_a = self.repository.session.query(ProvenancedRun).filter_by(id=run_a_id).first()
+        run_b = self.repository.session.query(ProvenancedRun).filter_by(id=run_b_id).first()
+        fp_a = run_a.fingerprint_json if run_a else None
+        fp_b = run_b.fingerprint_json if run_b else None
+        return fingerprints_match(fp_a, fp_b)
 
     def list_unified_execution_view(self, request_group_id: int) -> List[Dict[str, Any]]:
         """

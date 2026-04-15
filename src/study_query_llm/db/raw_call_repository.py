@@ -5,6 +5,7 @@ This repository handles all database interactions for storing and querying
 raw calls in the v2 schema. Uses the Repository pattern to abstract database details.
 """
 
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
@@ -1126,6 +1127,7 @@ class RawCallRepository:
         filter_payload: Optional[Dict[str, Any]] = None,
     ) -> Optional[OrchestrationJob]:
         """Claim the highest-priority ready job that matches filters."""
+        t0 = time.perf_counter()
         now = datetime.now(timezone.utc)
         q = self.session.query(OrchestrationJob).filter(
             OrchestrationJob.status.in_(["ready", "claimed"]),
@@ -1160,7 +1162,17 @@ class RawCallRepository:
             job.attempt_count = int(job.attempt_count or 0) + 1
             job.updated_at = now
             self.session.flush()
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.debug(
+                "claim_next_orchestration_job: job_id=%s request=%s duration_ms=%.1f",
+                job.id, request_group_id, elapsed_ms,
+            )
             return job
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.debug(
+            "claim_next_orchestration_job: no_job request=%s duration_ms=%.1f",
+            request_group_id, elapsed_ms,
+        )
         return None
 
     def claim_orchestration_job_batch(
@@ -1173,6 +1185,7 @@ class RawCallRepository:
         filter_payload: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Claim up to limit ready jobs matching filters; return detached snapshots."""
+        t0 = time.perf_counter()
         now = datetime.now(timezone.utc)
         expires = now + timedelta(seconds=max(1, int(lease_seconds)))
         q = self.session.query(OrchestrationJob).filter(
@@ -1221,6 +1234,11 @@ class RawCallRepository:
                 "base_run_key": job.base_run_key,
             }
             result.append(snapshot)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.debug(
+            "claim_orchestration_job_batch: batch_size=%d request=%s duration_ms=%.1f",
+            len(result), request_group_id, elapsed_ms,
+        )
         return result
 
     def heartbeat_orchestration_job(self, job_id: int, lease_seconds: int) -> bool:
@@ -1235,17 +1253,24 @@ class RawCallRepository:
         return True
 
     def complete_orchestration_job(self, job_id: int, result_ref: Optional[str] = None) -> bool:
+        t0 = time.perf_counter()
         now = datetime.now(timezone.utc)
         job = self.session.query(OrchestrationJob).filter_by(id=job_id).first()
         if not job:
             return False
+        request_group_id = job.request_group_id
         job.status = "completed"
         job.result_ref = result_ref
         job.lease_expires_at = None
         job.heartbeat_at = now
         job.updated_at = now
         self.session.flush()
-        self.promote_ready_orchestration_jobs(request_group_id=job.request_group_id)
+        self.promote_ready_orchestration_jobs(request_group_id=request_group_id)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.debug(
+            "complete_orchestration_job: job_id=%s request=%s duration_ms=%.1f",
+            job_id, request_group_id, elapsed_ms,
+        )
         return True
 
     def complete_orchestration_jobs_batch(
@@ -1254,6 +1279,7 @@ class RawCallRepository:
         """Complete multiple jobs; promote once per distinct request_group_id at end."""
         if not items:
             return
+        t0 = time.perf_counter()
         now = datetime.now(timezone.utc)
         request_group_ids: set = set()
         for job_id, result_ref in items:
@@ -1268,6 +1294,11 @@ class RawCallRepository:
             self.session.flush()
         for rgid in request_group_ids:
             self.promote_ready_orchestration_jobs(request_group_id=rgid)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.debug(
+            "complete_orchestration_jobs_batch: batch_size=%d duration_ms=%.1f",
+            len(items), elapsed_ms,
+        )
 
     def fail_orchestration_job(self, job_id: int, error_json: Optional[Dict[str, Any]] = None) -> bool:
         now = datetime.now(timezone.utc)
@@ -1377,6 +1408,8 @@ class RawCallRepository:
         config_json: Optional[Dict[str, Any]] = None,
         result_ref: Optional[str] = None,
         metadata_json: Optional[Dict[str, Any]] = None,
+        fingerprint_json: Optional[Dict[str, Any]] = None,
+        fingerprint_hash: Optional[str] = None,
     ) -> int:
         """
         Create (or upsert) a first-class execution provenance run record.
@@ -1443,6 +1476,10 @@ class RawCallRepository:
             existing.metadata_json = (
                 metadata_payload if metadata_json is not None else existing.metadata_json
             )
+            if fingerprint_json is not None:
+                existing.fingerprint_json = fingerprint_json
+            if fingerprint_hash is not None:
+                existing.fingerprint_hash = fingerprint_hash
             existing.updated_at = now
             self.session.flush()
             return int(existing.id)
@@ -1463,6 +1500,8 @@ class RawCallRepository:
             config_json=config_json or {},
             result_ref=result_ref,
             metadata_json=metadata_payload,
+            fingerprint_json=fingerprint_json,
+            fingerprint_hash=fingerprint_hash,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )

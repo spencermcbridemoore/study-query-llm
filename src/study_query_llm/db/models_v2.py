@@ -750,6 +750,9 @@ class ProvenancedRun(BaseV2):
     result_ref = Column(String(400), nullable=True)
     metadata_json = Column(JSON, nullable=True)
 
+    fingerprint_json = Column(JSON, nullable=True)
+    fingerprint_hash = Column(String(64), nullable=True, index=True)
+
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -808,6 +811,8 @@ class ProvenancedRun(BaseV2):
             "config_json": self.config_json,
             "result_ref": self.result_ref,
             "metadata_json": self.metadata_json,
+            "fingerprint_json": self.fingerprint_json,
+            "fingerprint_hash": self.fingerprint_hash,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

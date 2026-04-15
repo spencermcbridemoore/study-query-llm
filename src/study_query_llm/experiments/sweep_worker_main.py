@@ -638,6 +638,7 @@ def _claim_next_sharded_job(
     job_types: List[str],
     filter_payload: Optional[Dict[str, Any]],
 ):
+    t0 = time.perf_counter()
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         job = repo.claim_next_orchestration_job(
@@ -648,9 +649,13 @@ def _claim_next_sharded_job(
             filter_payload=filter_payload,
         )
         if not job:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.debug(
+                "_claim_next_sharded_job: no_job request=%s duration_ms=%.1f",
+                request_id, elapsed_ms,
+            )
             return None
-        # Detach-safe job snapshot (session closes after this function).
-        return {
+        snapshot = {
             "id": int(job.id),
             "request_group_id": int(job.request_group_id),
             "job_type": str(job.job_type),
@@ -659,6 +664,12 @@ def _claim_next_sharded_job(
             "job_key": str(job.job_key),
             "base_run_key": job.base_run_key,
         }
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    logger.debug(
+        "_claim_next_sharded_job: job_id=%s request=%s duration_ms=%.1f",
+        snapshot["id"], request_id, elapsed_ms,
+    )
+    return snapshot
 
 
 def _run_sharded_worker_loop(

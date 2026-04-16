@@ -80,6 +80,7 @@ class MethodService:
         input_schema: Optional[Dict[str, Any]] = None,
         output_schema: Optional[Dict[str, Any]] = None,
         parameters_schema: Optional[Dict[str, Any]] = None,
+        recipe_json: Optional[Dict[str, Any]] = None,
         parent_version_id: Optional[int] = None,
     ) -> int:
         """
@@ -97,6 +98,10 @@ class MethodService:
             output_schema: JSON describing output shape
             parameters_schema: JSON describing configurable knobs. When set,
                 results may include result_json["parameters"] matching this shape.
+            recipe_json: Optional structured recipe for composite/pipeline
+                methods describing ordered component stages. See
+                ``study_query_llm.algorithms.recipes`` and
+                ``docs/living/METHOD_RECIPES.md`` for the v0 shape.
             parent_version_id: FK to previous version (nullable for v1)
 
         Returns:
@@ -128,6 +133,7 @@ class MethodService:
             input_schema=input_schema,
             output_schema=output_schema,
             parameters_schema=parameters_schema,
+            recipe_json=recipe_json,
             parent_version_id=parent_version_id,
         )
         session.add(method)
@@ -138,6 +144,47 @@ class MethodService:
             f"Registered method: id={method.id}, name={name}, version={version}"
         )
         return method.id
+
+    def update_recipe(
+        self,
+        method_definition_id: int,
+        recipe_json: Dict[str, Any],
+    ) -> bool:
+        """
+        Attach or replace the ``recipe_json`` for an existing method row
+        in-place (no version bump).
+
+        Use this when a composite method was registered before its recipe was
+        available (e.g. lazy auto-registration) and the recipe is being
+        back-filled. Adding a recipe to an existing row is not a semantic
+        change warranting a new version; callers who do want a semantic change
+        should call :meth:`register_method` with a new version string instead.
+
+        Args:
+            method_definition_id: ID of the MethodDefinition to update.
+            recipe_json: Recipe dict conforming to the v0 shape.
+
+        Returns:
+            True if the row was updated, False if not found.
+        """
+        from ..db.models_v2 import MethodDefinition
+
+        method = (
+            self.repository.session.query(MethodDefinition)
+            .filter(MethodDefinition.id == method_definition_id)
+            .first()
+        )
+        if method is None:
+            return False
+        method.recipe_json = recipe_json
+        self.repository.session.flush()
+        logger.info(
+            "Updated recipe_json for method id=%s name=%s version=%s",
+            method.id,
+            method.name,
+            method.version,
+        )
+        return True
 
     def get_method(
         self,

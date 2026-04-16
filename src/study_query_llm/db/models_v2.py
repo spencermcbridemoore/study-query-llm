@@ -558,6 +558,11 @@ class MethodDefinition(BaseV2):
         input_schema: JSON describing expected input
         output_schema: JSON describing output shape
         parameters_schema: JSON describing configurable knobs
+        recipe_json: Optional recipe describing a composite pipeline as an
+            ordered list of component MethodDefinition references. When set,
+            callers SHOULD include canonical_recipe_hash(recipe) in run
+            config_json so the run fingerprint absorbs the recipe identity.
+            See docs/living/METHOD_RECIPES.md for the v0 shape.
         parent_version_id: FK to previous version (nullable for v1)
         created_at: Timestamp when definition was created
     """
@@ -573,6 +578,7 @@ class MethodDefinition(BaseV2):
     input_schema = Column(JSON, nullable=True)
     output_schema = Column(JSON, nullable=True)
     parameters_schema = Column(JSON, nullable=True)
+    recipe_json = Column(JSON, nullable=True)
     parent_version_id = Column(
         Integer,
         ForeignKey("method_definitions.id", ondelete="SET NULL"),
@@ -606,6 +612,7 @@ class MethodDefinition(BaseV2):
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
             "parameters_schema": self.parameters_schema,
+            "recipe_json": self.recipe_json,
             "parent_version_id": self.parent_version_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

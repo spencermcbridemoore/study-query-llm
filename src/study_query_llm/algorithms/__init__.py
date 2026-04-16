@@ -27,6 +27,16 @@ from .method_plugins import (
     UNKNOWN_K_STRATEGY_FIXED_K_SELECTOR,
     UNKNOWN_K_STRATEGY_HDBSCAN,
 )
+from .recipes import (
+    RECIPE_VERSION,
+    CLUSTERING_COMPONENT_METHODS,
+    COMPOSITE_RECIPES,
+    COSINE_KLLMEANS_NO_PCA_RECIPE,
+    canonical_recipe_hash,
+    build_composite_recipe,
+    register_clustering_components,
+    ensure_composite_recipe,
+)
 
 __all__ = [
     # Dimensionality reduction
@@ -54,4 +64,13 @@ __all__ = [
     "run_unknown_k_plugin",
     "UNKNOWN_K_STRATEGY_FIXED_K_SELECTOR",
     "UNKNOWN_K_STRATEGY_HDBSCAN",
+    # Recipes
+    "RECIPE_VERSION",
+    "CLUSTERING_COMPONENT_METHODS",
+    "COMPOSITE_RECIPES",
+    "COSINE_KLLMEANS_NO_PCA_RECIPE",
+    "canonical_recipe_hash",
+    "build_composite_recipe",
+    "register_clustering_components",
+    "ensure_composite_recipe",
 ]

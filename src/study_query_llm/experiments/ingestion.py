@@ -8,6 +8,13 @@ import numpy as np
 from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
 
+from study_query_llm.algorithms.recipes import (
+    COMPOSITE_RECIPES,
+    build_composite_recipe,
+    canonical_recipe_hash,
+    ensure_composite_recipe,
+    register_clustering_components,
+)
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -180,12 +187,22 @@ def ingest_result_to_db(
             provenanced_run_service = ProvenancedRunService(repo)
             method_name = str(run_metadata.get("algorithm") or "clustering_method")
             method_version = str(metadata.get("method_version") or "1.0")
-            method = method_service.get_method(method_name, version=method_version)
-            if method is None:
-                method_id = method_service.register_method(
-                    name=method_name,
-                    version=method_version,
-                    description="Auto-registered clustering execution method definition",
+
+            recipe_for_fingerprint: Optional[Dict[str, Any]] = None
+            if method_name in COMPOSITE_RECIPES:
+                # Composite with a canonical recipe: ensure component rows exist,
+                # ensure the composite carries its recipe, and compute the
+                # recipe_hash we will inject into config_json so the canonical
+                # run fingerprint absorbs the recipe identity.
+                register_clustering_components(method_service)
+                method_id = ensure_composite_recipe(
+                    method_service,
+                    method_name,
+                    composite_version=method_version,
+                    description=(
+                        "Auto-registered clustering execution method definition "
+                        f"({method_name}); recipe_json lists ordered stages."
+                    ),
                     parameters_schema={
                         "type": "object",
                         "properties": {
@@ -195,8 +212,30 @@ def ingest_result_to_db(
                         },
                     },
                 )
+                recipe_for_fingerprint = build_composite_recipe(method_name)
             else:
-                method_id = int(method.id)
+                method = method_service.get_method(
+                    method_name, version=method_version
+                )
+                if method is None:
+                    method_id = method_service.register_method(
+                        name=method_name,
+                        version=method_version,
+                        description=(
+                            "Auto-registered clustering execution "
+                            "method definition"
+                        ),
+                        parameters_schema={
+                            "type": "object",
+                            "properties": {
+                                "k_min": {"type": "integer"},
+                                "k_max": {"type": "integer"},
+                                "n_restarts": {"type": "integer"},
+                            },
+                        },
+                    )
+                else:
+                    method_id = int(method.id)
 
             request_group_id_raw = metadata.get("request_group_id")
             if request_group_id_raw is None:
@@ -214,6 +253,18 @@ def ingest_result_to_db(
                 int(request_group_id_raw) if request_group_id_raw is not None else None
             )
             if request_group_id is not None:
+                config_json_for_run: Dict[str, Any] = {
+                    "sweep_config": dict(metadata.get("sweep_config") or {}),
+                    "embedding_engine": engine,
+                    "summarizer": summarizer,
+                    "n_restarts": n_restarts,
+                }
+                if recipe_for_fingerprint is not None:
+                    # recipe_hash participates in canonical_run_fingerprint via
+                    # canonical_config_hash (_strip_scheduling_keys keeps it).
+                    config_json_for_run["recipe_hash"] = canonical_recipe_hash(
+                        recipe_for_fingerprint
+                    )
                 provenanced_run_service.record_method_execution(
                     request_group_id=request_group_id,
                     run_key=run_key,
@@ -224,12 +275,7 @@ def ingest_result_to_db(
                     determinism_class=str(
                         metadata.get("determinism_class") or "pseudo_deterministic"
                     ),
-                    config_json={
-                        "sweep_config": dict(metadata.get("sweep_config") or {}),
-                        "embedding_engine": engine,
-                        "summarizer": summarizer,
-                        "n_restarts": n_restarts,
-                    },
+                    config_json=config_json_for_run,
                     result_ref=str(run_metadata.get("artifact_uri") or ""),
                     metadata_json={
                         "artifact_id": run_metadata.get("artifact_id"),

@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-13
+Last reviewed: 2026-04-14
 
 ## Purpose
 
@@ -63,6 +63,7 @@ Status values:
 | C039 | `docs/DATASET_ACQUISITION_LAYER0.md` + `docs/runbooks/README.md` + `docs/runbooks/record_dataset_download.md` + `scripts/README.md` + `docs/living/CURRENT_STATE.md` | Layer 0 doc includes an auto-generated measured statistics block (bytes, CSV rows, line counts, coarse xlsx row estimate) maintained by `scripts/report_layer0_dataset_stats.py --write-doc`. | `scripts/report_layer0_dataset_stats.py`, `tests/test_scripts/test_report_layer0_dataset_stats.py`, `docs/DATASET_ACQUISITION_LAYER0.md` | verified | Low positive: operator-visible scale without hand-maintaining tables. | Re-run after pin bumps; xlsx row count is XML heuristic. |
 
 | C040 | `docs/living/CURRENT_STATE.md` + `docs/living/ARCHITECTURE_CURRENT.md` + `docs/living/SCHEDULING_PROVENANCE_BOUNDARY.md` + `docs/STANDING_ORDERS.md` | `ProvenancedRun` carries `fingerprint_json`/`fingerprint_hash` for scheduling-independent algorithmic identity; scheduling vs provenance boundary rule is documented; orchestration claim/complete paths have perf_counter timing. | `src/study_query_llm/db/models_v2.py`, `src/study_query_llm/services/provenanced_run_service.py`, `src/study_query_llm/db/raw_call_repository.py`, `src/study_query_llm/experiments/sweep_worker_main.py`, `src/study_query_llm/db/migrations/add_fingerprint_columns.py`, `scripts/backfill_run_fingerprints.py`, `tests/test_services/test_run_fingerprint.py` | verified | High positive: enables semantic comparison of runs independent of orchestration shape, formalizes granularity boundary, and instruments overhead. | Keep fingerprint field list aligned with method taxonomy expansion. |
+| C041 | `docs/living/METHOD_RECIPES.md` + `docs/living/CURRENT_STATE.md` + `docs/living/ARCHITECTURE_CURRENT.md` + `docs/STANDING_ORDERS.md` | `MethodDefinition` carries an optional `recipe_json` column; the canonical clustering recipe (`cosine_kllmeans_no_pca`) and its four component methods are defined in `algorithms/recipes.py` and registered via `scripts/register_clustering_methods.py`; clustering ingestion injects `canonical_recipe_hash(recipe)` into run `config_json["recipe_hash"]` so the canonical run fingerprint absorbs recipe identity without a fingerprint tuple shape change. | `src/study_query_llm/db/models_v2.py`, `src/study_query_llm/db/migrations/add_recipe_json_column.py`, `src/study_query_llm/algorithms/recipes.py`, `src/study_query_llm/algorithms/__init__.py`, `src/study_query_llm/services/method_service.py`, `src/study_query_llm/experiments/ingestion.py`, `scripts/register_clustering_methods.py`, `tests/test_services/test_recipe.py` | verified | High positive: makes composite/pipeline identity explicit at the provenance layer and lets fingerprints distinguish structurally different pipelines without breaking existing fingerprints. | Extend `COMPOSITE_RECIPES` as new composites are introduced; bump composite `version` when the recipe shape or component identities change. |
 
 ## Severity-Ranked Mismatch Summary
 

@@ -60,7 +60,7 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 
 ### Documentation Sync Process
 
-**When completing a phase/step:**
+**When completing a phase/milestone:**
 1. Update `docs/living/CURRENT_STATE.md` if behavior/capabilities changed
 2. Update `docs/review/DOC_PARITY_LEDGER.md` if claim parity changed
 3. Add/update relevant docstrings in code
@@ -118,12 +118,28 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 
 ### Method Definitions and Provenance
 - **Whenever possible, register methods in the methods table** (`method_definitions`) and record results in `analysis_results`, rather than encoding "which method" only as new group types, link types, or free-form metadata in `groups.metadata_json`.
-- **Runs stay in groups**: A *run* (Group with steps, artifacts, raw_calls) is still the unit of execution; the method is *which* algorithm/version that run used. Use `method_definitions` for the method identity and version (e.g. `code_ref`, `code_commit`); use groups/links for run and step provenance.
+- **Runs stay in groups**: A *run* (Group with provenance stages, artifacts, raw_calls) is still the unit of execution; the method is *which* algorithm/version that run used. Use `method_definitions` for the method identity and version (e.g. `code_ref`, `code_commit`); use groups/links for run and provenance-stage lineage.
 - **New analysis or algorithms**: Prefer registering a row in `method_definitions` (via `MethodService.register_method`) and writing structured results to `analysis_results` (via `MethodService.record_result`) keyed by `source_group_id` (and optionally `analysis_group_id`). Avoid introducing new `group_type` or link types solely to represent "kind of method."
 - **Parameters convention (soft)**: When a method has `parameters_schema`, include `result_json["parameters"]` with the run parameters (e.g., job payload) when recording results. This links parameters to results for queryability; validation is optional.
 - **Canonical run fingerprint**: Every `provenanced_runs` row should carry a `fingerprint_json`/`fingerprint_hash` that captures algorithmic identity (method, config, input, data regime) and excludes scheduling mechanics. Use `canonical_run_fingerprint()` from `provenanced_run_service.py`; compare runs with `fingerprints_match()`.
-- **Scheduling vs provenance boundary**: See [SCHEDULING_PROVENANCE_BOUNDARY.md](living/SCHEDULING_PROVENANCE_BOUNDARY.md) for the rule on when a sub-step should be an orchestration job vs an in-job provenance event.
+- **Scheduling vs provenance boundary**: See [SCHEDULING_PROVENANCE_BOUNDARY.md](living/SCHEDULING_PROVENANCE_BOUNDARY.md) for the rule on when a sub-stage should be an orchestration job vs an in-job provenance event.
 - **Exceptions**: One-off or throwaway analyses that are not reused or versioned need not be registered; legacy or existing code that uses `metadata_json.algorithm` (or similar) can remain until migrated.
+
+### Execution Vocabulary (Terminology Guardrail)
+
+To avoid ambiguity, use the following canonical terms in docs and reviews:
+
+- **`provenance_stage`**: A lineage node within a run/request provenance graph.
+- **`algorithm_iteration`**: One inner-loop update cycle inside an iterative algorithm.
+- **`restart_try`**: One seeded restart/try for a fixed run configuration.
+- **`orchestration_job`**: One schedulable/leased control-plane unit.
+- **`planning_step`**: A roadmap milestone such as `STEP-*` in `docs/plans/*`.
+
+Rules:
+
+- Avoid bare conceptual use of "step" in prose.
+- Keep literal schema/code identifiers unchanged and quoted in backticks (for example `step_name`, `step_type`, `clustering_step`).
+- Use [SCHEDULING_PROVENANCE_BOUNDARY.md](living/SCHEDULING_PROVENANCE_BOUNDARY.md) for job-vs-stage boundary decisions.
 
 ## Git Workflow Consistency
 

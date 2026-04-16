@@ -18,6 +18,8 @@ This folder contains a contract-driven planning workflow for producing many plan
 
 Use this when a task is too large to plan in a single document and needs isolated, step-by-step planning outputs.
 
+Terminology guardrail: `STEP-*` in this archive denotes a planning milestone only, not a provenance stage, algorithm iteration, or orchestration job.
+
 ## Canonical Files
 
 - `docs/plans/MASTER_META_PLAN.md`

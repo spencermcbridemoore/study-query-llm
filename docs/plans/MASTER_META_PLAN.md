@@ -93,6 +93,7 @@ If a higher-priority source is missing, proceed to the next source.
 - Format: `STEP-XX` (example: `STEP-03`).
 - IDs are stable and never reused.
 - Each step produces one primary plan document output.
+- Terminology guardrail: `STEP-*` means a planning milestone in this archive, not a provenance stage, algorithm iteration, or orchestration job.
 
 ### Required Fields Per Step Definition
 

@@ -8,6 +8,12 @@ This runbook performs targeted migration and hardening for request-driven sweep 
 
 **CLI-first (recommended):** Long-running orchestration is available as `python -m study_query_llm.cli …` with the same flags as the legacy `scripts/run_*.py` wrappers. Examples below show both forms; behavior is equivalent because wrappers delegate to `src/study_query_llm/…` runtime modules.
 
+## Terminology Note
+
+- Numbered sections in this runbook are procedural phases, not provenance stages.
+- `run_k_try`, `reduce_k`, `finalize_run`, `mcq_run`, and `analysis_run` are `orchestration_job` types (control-plane units), not `algorithm_iteration` rows.
+- Keep schema/code literals unchanged when quoted (for example `step_name`, `clustering_step`).
+
 ## Phase 2 Preflight Checklist (Blob Ops Hardening)
 
 Complete this checklist before any Phase 2 behavior changes:

@@ -55,6 +55,7 @@ Notes:
 - Orchestration job types:
   - Clustering: `run_k_try`, `reduce_k`, `finalize_run`
   - MCQ: `mcq_run`, `analysis_run`
+  - Terminology: these are `orchestration_job` types (control-plane units), not `algorithm_iteration` records; `run_k_try` represents a seeded `restart_try` work unit.
 - CLI compatibility surfaces:
   - `python -m study_query_llm.cli sweep-worker --request-id <id>`
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)

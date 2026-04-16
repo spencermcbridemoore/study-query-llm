@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This document defines when a sub-step in a method or analysis pipeline should
+This document defines when a provenance stage candidate in a method or analysis pipeline should
 be a **schedulable unit** (orchestration job) versus an **in-job provenance
 event** (artifact, structured result, `provenanced_runs` row).
 
@@ -15,24 +15,37 @@ The distinction matters because:
 - The two should be decoupled so that changing job granularity does not change
   what the system records about *what happened to the data*.
 
+## Execution Vocabulary
+
+Use these terms consistently in prose:
+
+- **`provenance_stage`**: lineage node within run/request provenance.
+- **`algorithm_iteration`**: one inner-loop update cycle in an iterative method.
+- **`restart_try`**: one seeded restart/try for fixed run configuration.
+- **`orchestration_job`**: schedulable/leased job-table unit.
+- **`planning_step`**: roadmap milestone such as `STEP-*`.
+
+Keep literal identifiers unchanged when quoting code/schema names (for example
+`step_name`, `step_type`, `clustering_step`).
+
 ## Schedulable Unit (Orchestration Job)
 
-Use a separate orchestration job when the sub-step needs:
+Use a separate orchestration job when the candidate work unit needs:
 
 - **Its own lease**: long-running work that may time out and need re-claim.
-- **A retry boundary**: failure of this step should not abort sibling steps.
-- **Multi-worker isolation**: the step may run on a different machine or process.
-- **An explicit DAG dependency edge**: downstream steps must wait for this step.
+- **A retry boundary**: failure of this orchestration job should not abort sibling jobs.
+- **Multi-worker isolation**: the work unit may run on a different machine or process.
+- **An explicit DAG dependency edge**: downstream jobs must wait for this job.
 
 **Examples**: embedding a full dataset, running a clustering sweep across K
 values, calling an LLM API with rate limits, executing an MCQ probe.
 
 ## In-Job Provenance Event
 
-Use an in-job provenance event (artifact, Group step, `provenanced_runs` row,
+Use an in-job provenance event (artifact, Group provenance stage, `provenanced_runs` row,
 `analysis_results` entry) when:
 
-- The step is computationally trivial relative to the job it belongs to.
+- The work item is computationally trivial relative to the job it belongs to.
 - It does not need its own lease or retry boundary.
 - Failure can be handled within the enclosing job's error path.
 
@@ -43,8 +56,8 @@ of a small matrix.
 ## Fingerprint Independence Rule
 
 The **canonical run fingerprint** (`fingerprint_json` / `fingerprint_hash` on
-`provenanced_runs`) must be identical regardless of whether sub-steps are
-separate orchestration jobs or in-job provenance events.
+`provenanced_runs`) must be identical regardless of whether provenance stages
+are separate orchestration jobs or in-job provenance events.
 
 If changing granularity changes the fingerprint, either:
 

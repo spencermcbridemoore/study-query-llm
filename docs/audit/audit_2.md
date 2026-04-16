@@ -83,7 +83,7 @@ docs/history/README.md	Docs/process update	History index	Low	Keep
 docs/plans/ARCHIVE_NOTICE.md	Docs/process update	Planning workflow archival	Low	Keep
 docs/plans/MASTER_META_PLAN.md	Docs/process update	Meta-plan	Low	Keep
 docs/plans/README.md	Docs/process update	Plans index	Low	Keep
-docs/plans/STEP-01_master_bootstrap.md	Docs/process update	Step plan edits	Low	Keep
+docs/plans/STEP-01_master_bootstrap.md	Docs/process update	Planning milestone edits	Low	Keep
 docs/runbooks/README.md	Docs/process update	Runbooks index	Low	Keep
 notebooks/mcq_recent_1000_big_run_visualizer.ipynb	Intended feature work (analysis UI)	MCQ visualization workstream	Medium (output/token drift over time)	Keep; strip outputs if policy requires
 scripts/create_bank77_snapshot_and_embeddings.py	Intended feature work	Bank77 bootstrap / embeddings pipeline	Medium (size/complexity)	Keep; monitor refactors
@@ -152,7 +152,7 @@ Secret scan was heuristic (path-based + limited grep), not a full secrets scanne
 CI behavior (whether live API tests run) was not verified from workflow files in this pass.
 pre-script-cleanup tag exists locally; role and safety relative to this stack were not analyzed.
 Assumption: origin/main at cc49120 is the correct merge base for your PR; if remote moved, re-run git fetch (outside this read-only audit) before push.
-A) Repository state snapshot (required step)
+A) Repository state snapshot (required checklist item)
 Item	Value
 Branch	main @ d3e095a
 Tracking	main...origin/main [ahead 7] (not behind)

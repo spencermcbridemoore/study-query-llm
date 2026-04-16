@@ -2,6 +2,10 @@
 
 _Generated: 2026-04-07 17:53:06_
 
+_Terminology note: this transcript is preserved as historical text. Terms like
+"step" reflect original wording and may overlap between planning milestones,
+provenance stages, orchestration jobs, and algorithm iterations._
+
 ## Turn 1 - user
 
 I want your assessment of this planned framework to make our clustering much more robust and generic. This is in preparation for high volumes of runs/data on a variety of platforms. I think I understand the existing repo well that my proposed details fit but tell me whether you agree.

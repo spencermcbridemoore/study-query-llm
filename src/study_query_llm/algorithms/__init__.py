@@ -37,6 +37,16 @@ from .recipes import (
     register_clustering_components,
     ensure_composite_recipe,
 )
+from .text_classification_methods import (
+    MATURITY_REGISTERED_ONLY,
+    TEXT_CLASSIFICATION_METHODS,
+    register_text_classification_methods,
+)
+from .canonical_configs import (
+    CANONICAL_CONFIG_BUILDERS,
+    CanonicalConfigBuilder,
+    canonical_config_for,
+)
 
 __all__ = [
     # Dimensionality reduction
@@ -73,4 +83,12 @@ __all__ = [
     "build_composite_recipe",
     "register_clustering_components",
     "ensure_composite_recipe",
+    # Text-classification methods (register-only)
+    "MATURITY_REGISTERED_ONLY",
+    "TEXT_CLASSIFICATION_METHODS",
+    "register_text_classification_methods",
+    # Canonical-config builders (currently unused; future enforcement spot)
+    "CANONICAL_CONFIG_BUILDERS",
+    "CanonicalConfigBuilder",
+    "canonical_config_for",
 ]

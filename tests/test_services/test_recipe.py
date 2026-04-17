@@ -129,6 +129,28 @@ def test_register_clustering_components_idempotent():
         assert count == len(CLUSTERING_COMPONENT_METHODS)
 
 
+def test_clustering_component_methods_includes_umap_project_v1_0():
+    """umap_project@1.0 is registered in the clustering components catalog so
+    future composite recipes can reference it by canonical (name, version).
+    No recipe currently uses it; presence in the catalog is what matters."""
+    keys = {(spec["name"], spec["version"]) for spec in CLUSTERING_COMPONENT_METHODS}
+    assert ("umap_project", "1.0") in keys
+    umap = next(
+        spec for spec in CLUSTERING_COMPONENT_METHODS
+        if spec["name"] == "umap_project" and spec["version"] == "1.0"
+    )
+    assert umap["role"] == "projection"
+    schema_props = umap["parameters_schema"]["properties"]
+    for required_key in (
+        "n_neighbors",
+        "min_dist",
+        "n_components",
+        "metric",
+        "random_state",
+    ):
+        assert required_key in schema_props
+
+
 def test_ensure_composite_recipe_fresh_registration_persists_recipe():
     """Fresh composite registration writes the canonical recipe_json."""
     db = _db()

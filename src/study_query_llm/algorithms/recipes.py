@@ -131,6 +131,28 @@ CLUSTERING_COMPONENT_METHODS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "umap_project",
+        "version": "1.0",
+        "role": "projection",
+        "code_ref": None,
+        "description": (
+            "UMAP projection to a target dimensionality. Definition-only; no "
+            "implementation wired. Registered ahead of time so future "
+            "clustering composite recipes can reference a canonical "
+            "(name, version) and parameter schema."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "n_neighbors": {"type": "integer"},
+                "min_dist": {"type": "number"},
+                "n_components": {"type": "integer"},
+                "metric": {"type": "string"},
+                "random_state": {"type": "integer"},
+            },
+        },
+    },
 ]
 
 

@@ -9,7 +9,6 @@ from study_query_llm.db.models_v2 import (
     Group,
     GroupMember,
     CallArtifact,
-    EmbeddingVector,
 )
 
 
@@ -145,37 +144,3 @@ def test_call_artifact_creation():
     assert artifact.metadata_json == {"width": 1920, "height": 1080}
 
 
-def test_embedding_vector_creation():
-    """Test creating an EmbeddingVector instance."""
-    vector = EmbeddingVector(
-        call_id=1,
-        dimension=1536,
-        vector=[0.1, 0.2, 0.3] * 512,  # 1536 dimensions
-        norm=1.0,
-        metadata_json={"model": "text-embedding-3-small"},
-    )
-    
-    assert vector.call_id == 1
-    assert vector.dimension == 1536
-    assert len(vector.vector) == 1536
-    assert vector.norm == 1.0
-    assert vector.metadata_json == {"model": "text-embedding-3-small"}
-
-
-def test_embedding_vector_to_dict():
-    """Test EmbeddingVector to_dict method."""
-    vector = EmbeddingVector(
-        id=1,
-        call_id=10,
-        dimension=1024,
-        vector=[0.5] * 1024,
-        norm=0.707,
-    )
-    
-    result = vector.to_dict()
-    
-    assert result['id'] == 1
-    assert result['call_id'] == 10
-    assert result['dimension'] == 1024
-    assert len(result['vector']) == 1024
-    assert result['norm'] == 0.707

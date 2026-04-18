@@ -82,13 +82,11 @@ def persist_embedding(
     *,
     l1_put: L1PutFn = None,
 ) -> Optional[int]:
-    """Persist single embedding to RawCall, EmbeddingVector, and cache table."""
+    """Persist single embedding to RawCall + L2 cache table."""
     if not repository:
         return None
 
     try:
-        from ...db.models_v2 import EmbeddingVector
-
         request_json = {"input": request.text, "model": deployment}
         if request.dimensions:
             request_json["dimensions"] = request.dimensions
@@ -119,16 +117,6 @@ def persist_embedding(
 
         vector_norm = float(np.linalg.norm(vector))
 
-        embedding_vector = EmbeddingVector(
-            call_id=raw_call_id,
-            vector=vector,
-            dimension=dimension,
-            norm=vector_norm,
-            metadata_json={"model": deployment},
-        )
-
-        repository.session.add(embedding_vector)
-        repository.session.flush()
         repository.upsert_embedding_cache_entry(
             cache_key=request_hash,
             key_version=CACHE_KEY_VERSION,
@@ -172,8 +160,6 @@ def persist_embedding_batch(
     l1_put: L1PutFn = None,
 ) -> List[int]:
     """Persist batch of embeddings; returns raw_call_ids (0 on per-row failure)."""
-    from ...db.models_v2 import EmbeddingVector
-
     if not repository:
         return [0] * len(requests)
 
@@ -210,15 +196,6 @@ def persist_embedding_batch(
                 metadata_json=metadata_json,
             )
 
-            ev = EmbeddingVector(
-                call_id=raw_call_id,
-                vector=vector,
-                dimension=dimension,
-                norm=vector_norm,
-                metadata_json={"model": req.deployment},
-            )
-            repository.session.add(ev)
-            repository.session.flush()
             repository.upsert_embedding_cache_entry(
                 cache_key=req_hash,
                 key_version=CACHE_KEY_VERSION,

@@ -58,8 +58,6 @@ class RawCall(BaseV2):
     # Relationships
     group_members = relationship("GroupMember", back_populates="raw_call", cascade="all, delete-orphan")
     artifacts = relationship("CallArtifact", back_populates="raw_call", cascade="all, delete-orphan")
-    embedding_vectors = relationship("EmbeddingVector", back_populates="raw_call", cascade="all, delete-orphan")
-    
     __table_args__ = (
         CheckConstraint("status IN ('success', 'failed', 'timeout', 'cancelled')", name="check_status"),
         Index('idx_raw_calls_provider_status', 'provider', 'status'),
@@ -822,59 +820,6 @@ class ProvenancedRun(BaseV2):
             "fingerprint_hash": self.fingerprint_hash,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
-class EmbeddingVector(BaseV2):
-    """
-    Table for storing embedding vectors.
-    
-    Supports pgvector if available, otherwise falls back to JSON/ARRAY columns.
-    Use pgvector for efficient similarity search when the extension is enabled.
-    
-    Attributes:
-        id: Primary key
-        call_id: Foreign key to RawCall
-        vector: Embedding vector (pgvector Vector type if available, else JSON/ARRAY)
-        dimension: Vector dimensionality
-        norm: Optional L2 norm of the vector
-        metadata_json: Additional metadata as JSON
-    """
-    __tablename__ = 'embedding_vectors'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    call_id = Column(Integer, ForeignKey('raw_calls.id', ondelete='CASCADE'), nullable=False, index=True)
-    dimension = Column(Integer, nullable=False)
-    norm = Column(Float, nullable=True)
-    metadata_json = Column(JSON, nullable=True)
-    
-    # Relationships
-    raw_call = relationship("RawCall", back_populates="embedding_vectors")
-    
-    # Vector column - will be set dynamically based on pgvector availability
-    # If pgvector is available, use Vector type; otherwise use JSON or ARRAY
-    vector = Column(JSON, nullable=False)  # Default to JSON, can be overridden
-    
-    __table_args__ = (
-        Index('idx_embedding_vectors_call', 'call_id'),
-        Index('idx_embedding_vectors_dimension', 'dimension'),
-    )
-    
-    def __repr__(self) -> str:
-        return (
-            f"<EmbeddingVector(id={self.id}, call_id={self.call_id}, "
-            f"dimension={self.dimension})>"
-        )
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert model instance to dictionary."""
-        return {
-            'id': self.id,
-            'call_id': self.call_id,
-            'vector': self.vector,
-            'dimension': self.dimension,
-            'norm': self.norm,
-            'metadata_json': self.metadata_json,
         }
 
 

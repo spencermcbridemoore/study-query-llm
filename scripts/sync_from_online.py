@@ -75,11 +75,11 @@ def fetch_batch(online_engine, min_id: int, batch_size: int) -> dict:
     """
     Open a fresh short-lived source DB connection, fetch one batch, close it.
 
-    Returns dict with: calls, members, group_ids, vectors, artifacts.
+    Returns dict with: calls, members, group_ids, artifacts.
     Empty dict means no more records.
     """
     from study_query_llm.db.models_v2 import (
-        RawCall, GroupMember, EmbeddingVector, CallArtifact
+        RawCall, GroupMember, CallArtifact
     )
 
     Session = sessionmaker(bind=online_engine, autocommit=False, autoflush=False)
@@ -104,11 +104,6 @@ def fetch_batch(online_engine, min_id: int, batch_size: int) -> dict:
         )
         group_ids = list({m.group_id for m in members})
 
-        vectors = (
-            session.query(EmbeddingVector)
-            .filter(EmbeddingVector.call_id.in_(call_ids))
-            .all()
-        )
         artifacts = (
             session.query(CallArtifact)
             .filter(CallArtifact.call_id.in_(call_ids))
@@ -116,7 +111,7 @@ def fetch_batch(online_engine, min_id: int, batch_size: int) -> dict:
         )
 
         # Detach all objects from session so data is accessible after close
-        for obj in online_calls + members + vectors + artifacts:
+        for obj in online_calls + members + artifacts:
             session.expunge(obj)
             make_transient(obj)
 
@@ -124,7 +119,6 @@ def fetch_batch(online_engine, min_id: int, batch_size: int) -> dict:
             "calls": online_calls,
             "members": members,
             "group_ids": group_ids,
-            "vectors": vectors,
             "artifacts": artifacts,
         }
     finally:
@@ -155,7 +149,7 @@ def write_batch(local_engine, batch: dict, online_groups: list) -> None:
     This makes the sync idempotent — safe to re-run if interrupted.
     """
     from study_query_llm.db.models_v2 import (
-        RawCall, Group, GroupMember, EmbeddingVector, CallArtifact
+        RawCall, Group, GroupMember, CallArtifact
     )
 
     Session = sessionmaker(bind=local_engine, autocommit=False, autoflush=False)
@@ -208,16 +202,6 @@ def write_batch(local_engine, batch: dict, online_groups: list) -> None:
                 for m in batch["members"]
             ]).on_conflict_do_nothing(index_elements=["group_id", "call_id"])
             session.execute(stmt)
-
-        # Insert EmbeddingVectors
-        for v in batch["vectors"]:
-            existing = session.query(EmbeddingVector).filter_by(call_id=v.call_id).first()
-            if not existing:
-                session.add(EmbeddingVector(
-                    call_id=v.call_id, vector=v.vector,
-                    dimension=v.dimension, norm=v.norm,
-                    metadata_json=v.metadata_json,
-                ))
 
         # Insert CallArtifacts
         for a in batch["artifacts"]:

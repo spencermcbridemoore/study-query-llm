@@ -64,7 +64,7 @@ class EmbeddingService:
     - Deterministic caching based on request hash
     - Deployment validation with cached results
     - Retry/backoff for transient errors
-    - DB persistence to RawCall and EmbeddingVector
+    - DB persistence to RawCall and embedding cache rows
     - Failure logging with error details
     """
 

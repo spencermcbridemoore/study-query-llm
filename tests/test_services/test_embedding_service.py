@@ -824,12 +824,9 @@ def test_get_embedding_vectors_by_request_hashes_empty(db_connection):
 
 
 def test_get_embedding_vectors_by_request_hashes_returns_found(db_connection):
-    """Returns matching embeddings for hashes that exist in the DB."""
+    """Returns matching embeddings from embedding_cache_entries."""
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)
-
-        # Manually insert a RawCall + EmbeddingVector with a known hash
-        from study_query_llm.db.models_v2 import EmbeddingVector
 
         target_hash = "abc123"
         call_id = repo.insert_raw_call(
@@ -841,15 +838,20 @@ def test_get_embedding_vectors_by_request_hashes_returns_found(db_connection):
             response_json={"model": "test-model", "embedding_dim": 3},
             metadata_json={"request_hash": target_hash},
         )
-        ev = EmbeddingVector(
-            call_id=call_id,
+        repo.upsert_embedding_cache_entry(
+            cache_key=target_hash,
+            key_version="raw_v1",
+            provider="azure",
+            deployment="test-model",
+            dimensions=None,
+            encoding_format="float",
+            input_text_raw="test text",
+            input_text_sha256_raw="deadbeef",
             vector=[0.1, 0.2, 0.3],
             dimension=3,
             norm=0.37,
-            metadata_json={"model": "test-model"},
+            source_raw_call_id=call_id,
         )
-        session.add(ev)
-        session.flush()
 
         result = repo.get_embedding_vectors_by_request_hashes(
             "test-model", [target_hash, "not-in-db"]
@@ -857,9 +859,7 @@ def test_get_embedding_vectors_by_request_hashes_returns_found(db_connection):
 
     # "not-in-db" should be absent; target_hash should be present
     assert "not-in-db" not in result
-    # SQLite JSON path operator may not be supported; skip assertion if empty
-    if result:
-        assert target_hash in result
-        vector, rc_id = result[target_hash]
-        assert vector == [0.1, 0.2, 0.3]
-        assert rc_id == call_id
+    assert target_hash in result
+    vector, rc_id = result[target_hash]
+    assert vector == [0.1, 0.2, 0.3]
+    assert rc_id == call_id

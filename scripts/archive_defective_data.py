@@ -6,7 +6,7 @@ then delete them from Neon.
 Records in the "defective_data" label group are considered invalid and should
 not pollute the online DB or downstream analysis. This script:
   1. Finds all RawCall IDs tagged as defective_data in the online DB
-  2. Copies those records (+ GroupMembers, EmbeddingVectors, CallArtifacts, Groups)
+  2. Copies those records (+ GroupMembers, CallArtifacts, Groups)
      to the local backup DB
   3. Deletes the RawCall rows from Neon (cascades remove related rows)
 
@@ -82,7 +82,7 @@ def copy_calls_to_local(online_session, local_session, call_ids: list[int], dry_
     Returns number of RawCall rows actually copied (skipping already-present ones).
     """
     from study_query_llm.db.models_v2 import (
-        RawCall, GroupMember, EmbeddingVector, CallArtifact
+        RawCall, GroupMember, CallArtifact
     )
 
     copied = 0
@@ -134,20 +134,6 @@ def copy_calls_to_local(online_session, local_session, call_ids: list[int], dry_
                 added_at=m.added_at,
                 position=m.position,
                 role=m.role,
-            ))
-
-    # --- EmbeddingVectors ---
-    vectors = online_session.query(EmbeddingVector).filter(EmbeddingVector.call_id.in_(call_ids)).all()
-    if not dry_run:
-        for v in vectors:
-            if local_session.query(EmbeddingVector).filter_by(call_id=v.call_id).first():
-                continue
-            local_session.add(EmbeddingVector(
-                call_id=v.call_id,
-                vector=v.vector,
-                dimension=v.dimension,
-                norm=v.norm,
-                metadata_json=v.metadata_json,
             ))
 
     # --- CallArtifacts ---
@@ -242,7 +228,7 @@ def main():
         print("\nRun without --dry-run to execute.")
         return
 
-    print("Deleting from online DB (cascades will clean up GroupMembers, EmbeddingVectors, etc.)...")
+    print("Deleting from online DB (cascades will clean up GroupMembers, CallArtifacts, etc.)...")
     deleted = 0
     with online_db.session_scope() as online_session:
         # Delete in chunks to avoid very large IN clauses

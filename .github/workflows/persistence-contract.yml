@@ -28,6 +28,13 @@ jobs:
       - name: Run persistence contract lint
         run: python scripts/check_persistence_contract.py
 
+      - name: Assert EmbeddingVector refs removed
+        run: |
+          if rg "EmbeddingVector" src panel_app scripts tests --glob "*.py"; then
+            echo "Found forbidden EmbeddingVector references."
+            exit 1
+          fi
+
       - name: Run pipeline foundation tests (excluding BANK77 e2e)
         run: pytest tests/pipeline/ -q -k "not bank77_pipeline_e2e"
 

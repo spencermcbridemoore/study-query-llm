@@ -18,7 +18,6 @@ from .models_v2 import (
     Group,
     GroupMember,
     CallArtifact,
-    EmbeddingVector,
 )
 from .connection_v2 import DatabaseConnectionV2
 from .raw_call_repository import RawCallRepository
@@ -35,7 +34,6 @@ __all__ = [
     "Group",
     "GroupMember",
     "CallArtifact",
-    "EmbeddingVector",
     "DatabaseConnectionV2",
     "RawCallRepository",
 ]

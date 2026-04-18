@@ -9,7 +9,6 @@ from sqlalchemy import desc, func
 
 from study_query_llm.db.models_v2 import (
     CallArtifact,
-    EmbeddingVector,
     Group,
     GroupMember,
     ProvenancedRun,
@@ -34,8 +33,6 @@ def _v2_activity_markdown(session) -> str:
     )
     n_artifacts = session.query(CallArtifact).count()
     n_members = session.query(GroupMember).count()
-    n_embeddings = session.query(EmbeddingVector).count()
-
     lines = [
         "**v2 table counts** (same semantics as the sidebar):",
         "",
@@ -47,7 +44,6 @@ def _v2_activity_markdown(session) -> str:
         f"| `groups` where `group_type = mcq_run` | {n_mcq_groups:,} |",
         f"| `call_artifacts` | {n_artifacts:,} |",
         f"| `group_members` | {n_members:,} |",
-        f"| `embedding_vectors` | {n_embeddings:,} |",
         "",
         "_**Summary statistics** and **provider comparison** below are computed from **`raw_calls`** only. "
         "MCQ sweep work and many workers write **`provenanced_runs`** / **`groups`** without one row per "

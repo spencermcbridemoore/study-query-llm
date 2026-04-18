@@ -16,7 +16,6 @@ from .models_v2 import (
     Group,
     GroupMember,
     CallArtifact,
-    EmbeddingVector,
     EmbeddingCacheEntry,
     EmbeddingCacheLease,
     GroupLink,
@@ -663,14 +662,10 @@ class RawCallRepository:
         request_hashes: List[str],
     ) -> Dict[str, Tuple[list, int]]:
         """
-        Batch-lookup cached embeddings by their request hashes.
+        Legacy compatibility API for request-hash -> vector lookups.
 
-        Returns a dict mapping request_hash -> (vector_list, raw_call_id) for
-        every hash that already has a successful embedding RawCall persisted for
-        the given deployment.  Hashes not found are simply absent from the result.
-
-        This is used by the chunked batching path in EmbeddingService to determine
-        which texts still need API calls, enabling resume-without-re-fetching.
+        The ``embedding_vectors`` table is retired; this method now serves values
+        from ``embedding_cache_entries`` using the same return contract.
 
         Args:
             deployment: Model/deployment name (e.g. 'text-embedding-3-small').
@@ -682,54 +677,26 @@ class RawCallRepository:
         if not request_hashes:
             return {}
 
-        hash_set = set(request_hashes)
-
         try:
-            # Attempt the PostgreSQL JSON path operator (->>)
-            pg_results = (
-                self.session.query(RawCall, EmbeddingVector)
-                .join(EmbeddingVector, EmbeddingVector.call_id == RawCall.id)
+            rows = (
+                self.session.query(
+                    EmbeddingCacheEntry.cache_key,
+                    EmbeddingCacheEntry.vector,
+                    EmbeddingCacheEntry.source_raw_call_id,
+                )
                 .filter(
-                    RawCall.modality == "embedding",
-                    RawCall.model == deployment,
-                    RawCall.status == "success",
-                    RawCall.metadata_json["request_hash"].astext.in_(request_hashes),
+                    EmbeddingCacheEntry.cache_key.in_(request_hashes),
+                    EmbeddingCacheEntry.deployment == deployment,
                 )
                 .all()
             )
             return {
-                raw_call.metadata_json["request_hash"]: (ev.vector, raw_call.id)
-                for raw_call, ev in pg_results
-                if raw_call.metadata_json and "request_hash" in raw_call.metadata_json
+                str(cache_key): (list(vector or []), int(raw_call_id or 0))
+                for cache_key, vector, raw_call_id in rows
             }
-
-        except Exception:
-            # Fallback for SQLite or other backends: fetch all matching embedding
-            # calls and filter by hash in Python.
-            try:
-                all_calls = (
-                    self.session.query(RawCall, EmbeddingVector)
-                    .join(EmbeddingVector, EmbeddingVector.call_id == RawCall.id)
-                    .filter(
-                        RawCall.modality == "embedding",
-                        RawCall.model == deployment,
-                        RawCall.status == "success",
-                    )
-                    .all()
-                )
-                return {
-                    raw_call.metadata_json["request_hash"]: (ev.vector, raw_call.id)
-                    for raw_call, ev in all_calls
-                    if (
-                        raw_call.metadata_json
-                        and raw_call.metadata_json.get("request_hash") in hash_set
-                    )
-                }
-            except Exception as e2:
-                logger.warning(
-                    "Batch hash lookup fallback also failed; returning empty result: %s", e2
-                )
-                return {}
+        except Exception as exc:
+            logger.warning("Embedding cache hash lookup failed; returning empty result: %s", exc)
+            return {}
 
     # ========== EMBEDDING L2 CACHE + SINGLE-FLIGHT LEASES ==========
 

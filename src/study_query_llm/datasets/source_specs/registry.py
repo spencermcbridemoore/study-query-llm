@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
 from study_query_llm.datasets.acquisition import FileFetchSpec
+from study_query_llm.datasets.source_specs.parser_protocol import ParserCallable
 from study_query_llm.datasets.source_specs.ausem import (
     AUSEM_DATASET_SLUG,
     ausem_file_specs,
@@ -28,6 +29,7 @@ class DatasetAcquireConfig:
     slug: str
     file_specs: Callable[[], List[FileFetchSpec]]
     source_metadata: Callable[[], Dict[str, Any]]
+    default_parser: ParserCallable | None = None
 
 
 ACQUIRE_REGISTRY: Dict[str, DatasetAcquireConfig] = {

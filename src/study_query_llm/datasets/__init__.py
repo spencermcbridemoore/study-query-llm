@@ -2,6 +2,7 @@
 
 from study_query_llm.datasets.acquisition import (
     build_acquisition_manifest,
+    content_fingerprint,
     download_acquisition_files,
     fetch_url,
     sha256_hex,
@@ -11,6 +12,7 @@ from study_query_llm.datasets.acquisition import (
 
 __all__ = [
     "build_acquisition_manifest",
+    "content_fingerprint",
     "download_acquisition_files",
     "fetch_url",
     "sha256_hex",

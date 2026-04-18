@@ -31,6 +31,7 @@ setup(
         "sqlalchemy>=2.0.0",  # Database ORM
         "psycopg2-binary>=2.9.0",  # PostgreSQL driver
         "pandas>=2.0.0",  # Data analysis and DataFrames
+        "pyarrow>=17.0.0",  # Parquet parsing for snapshot stage
         "sympy>=1.12",  # domain.representation_hierarchy
         "langchain>=0.3.0",
         "langgraph>=0.2.0",

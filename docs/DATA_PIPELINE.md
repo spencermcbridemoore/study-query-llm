@@ -605,8 +605,8 @@ These checks are scope-correct for CI: they validate the contract surface (group
 
 The operator runs `python scripts/run_bank77_pipeline.py` against the actual `mteb/banking77` mirror with the real embedding provider, on whatever environment the rebuild is being deployed against (Jetstream + production Azure prefix, or local Docker clone). The runbook entry (added under [`docs/runbooks/`](runbooks/)) records:
 
-1. `dataset_snapshot` row count = **13083**, label-set size = **77** (the full mteb/banking77 mirror).
-2. `embedding_matrix(full)` shape = **(13083, d)** for the configured embedding spec.
+1. `dataset_snapshot` row count = **13069**, label-set size = **77** (the pinned mteb/banking77 mirror used by the source spec).
+2. `embedding_matrix(full)` shape = **(13069, d)** for the configured embedding spec.
 3. `embedding_matrix(means)` shape = **(77, d)**.
 4. `analysis_run` group present with the configured sweep config (e.g., `k_min=2, k_max=30, seed=7`).
 5. All idempotency claims from §9.3.1 hold on a second invocation against the real data.

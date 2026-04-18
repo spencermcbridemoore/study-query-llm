@@ -72,6 +72,7 @@ These entrypoints are currently referenced in runbooks/living docs/CI and should
 stable unless accompanied by wrappers and doc updates:
 
 - `docker_smoke.py`
+- `run_bank77_pipeline.py`
 - `create_bank77_snapshot_and_embeddings.py`
 - `create_dataset_snapshots_286.py`
 - `validate_and_backfill_run_snapshots.py`

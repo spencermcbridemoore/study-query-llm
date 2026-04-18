@@ -28,5 +28,8 @@ jobs:
       - name: Run persistence contract lint
         run: python scripts/check_persistence_contract.py
 
-      - name: Run pipeline foundation tests
-        run: pytest tests/pipeline/ -q
+      - name: Run pipeline foundation tests (excluding BANK77 e2e)
+        run: pytest tests/pipeline/ -q -k "not bank77_pipeline_e2e"
+
+      - name: Run BANK77 structural acceptance e2e
+        run: pytest tests/pipeline/test_bank77_pipeline_e2e.py -q

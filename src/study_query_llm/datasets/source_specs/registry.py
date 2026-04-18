@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
 from study_query_llm.datasets.acquisition import FileFetchSpec
+from study_query_llm.datasets.source_specs.banking77 import (
+    BANKING77_DATASET_SLUG,
+    banking77_file_specs,
+    banking77_source_metadata,
+    parse_banking77_snapshot,
+)
 from study_query_llm.datasets.source_specs.parser_protocol import ParserCallable
 from study_query_llm.datasets.source_specs.ausem import (
     AUSEM_DATASET_SLUG,
@@ -33,6 +39,12 @@ class DatasetAcquireConfig:
 
 
 ACQUIRE_REGISTRY: Dict[str, DatasetAcquireConfig] = {
+    BANKING77_DATASET_SLUG: DatasetAcquireConfig(
+        slug=BANKING77_DATASET_SLUG,
+        file_specs=banking77_file_specs,
+        source_metadata=banking77_source_metadata,
+        default_parser=parse_banking77_snapshot,
+    ),
     AUSEM_DATASET_SLUG: DatasetAcquireConfig(
         slug=AUSEM_DATASET_SLUG,
         file_specs=ausem_file_specs,

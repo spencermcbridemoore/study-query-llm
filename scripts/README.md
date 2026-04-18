@@ -56,7 +56,9 @@ Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../d
 | `start_jetstream_postgres_tunnel.py` | SSH local-forward to Jetstream Postgres | Requires Jetstream SSH host/auth env | No DB writes; network tunnel only | Low |
 | `purge_dataset_acquisition.py` | Remove Layer-0 acquisition artifacts for a dataset group | Selected DB URL + artifact storage backend | Deletes blob artifacts + matching DB rows | High (destructive by design) |
 | `record_dataset_download.py --persist-db` | Persist acquisition manifest/files as DB + blob artifacts | Dataset slug + active `DATABASE_URL` + Azure config | Creates/updates `dataset` group, artifacts, placeholders | Medium-High (writes canonical dataset artifacts) |
-| `backup_mcq_db_to_json.py` | Export MCQ-related rows to JSON backup | `LOCAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low (can contain sensitive prompts/artifacts) |
+| `backup_mcq_db_to_json.py` | Export MCQ lineage rows (`groups`, `provenanced_runs`, `analysis_results`, `call_artifacts`) to JSON + `.manifest.json` | `LOCAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low (can contain sensitive prompts/artifacts) |
+| `check_active_workers.py` | Guardrail check for non-terminal `orchestration_jobs` before destructive ops | `LOCAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low |
+| `archive_mcq_artifact_blobs.py` | Copy MCQ-linked artifact blobs to frozen `mcq-archive/<date>/` prefix and emit URI remap receipt | Export JSON from `backup_mcq_db_to_json.py`; local artifact root or Azure blob creds | Writes archived blobs + remap JSON | Medium |
 
 ## Full-Copy vs Incremental Copy
 
@@ -85,6 +87,9 @@ stable unless accompanied by wrappers and doc updates:
 - `check_orchestration_jobs.py`
 - `check_run_groups.py`
 - `check_azure_blob_storage.py`
+- `check_active_workers.py`
+- `backup_mcq_db_to_json.py`
+- `archive_mcq_artifact_blobs.py`
 
 ## Usage
 

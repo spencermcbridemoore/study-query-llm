@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-Export MCQ-related v2 Postgres rows to JSON files under scratch/mcq_db_backups/.
+Export MCQ-related v2 Postgres rows to a JSON backup + manifest.
 
-Includes ``groups`` (mcq_run / mcq_sweep / mcq_sweep_request), ``group_links`` touching
-those groups, ``group_members``, linked ``raw_calls``, ``call_artifacts``,
-``embedding_vectors``, ``sweep_run_claims`` for those requests/runs, and
-``orchestration_jobs`` for those request groups when present.
+Surface exported (per data-pipeline rebuild plan):
+- groups where group_type in (mcq_run, mcq_sweep, mcq_sweep_request)
+- provenanced_runs rows pointing at those groups
+- linked analysis_results rows
+- linked call_artifacts metadata (URIs only, no blob bytes)
 
-Prerequisites:
-  pip install -e ".[dev]"  (SQLAlchemy + python-dotenv)
-  Local Postgres up (e.g. docker compose --profile postgres up -d db)
-
-Usage (repo root):
+Usage:
   python scripts/backup_mcq_db_to_json.py
   python scripts/backup_mcq_db_to_json.py --database-url postgresql://...
-  python scripts/backup_mcq_db_to_json.py --output-dir scratch/mcq_db_backups
+  python scripts/backup_mcq_db_to_json.py --output backup_pg_dumps/mcq_export_20260417.json
 """
 
 from __future__ import annotations
@@ -25,7 +22,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, or_
@@ -34,9 +31,11 @@ from sqlalchemy.orm import Session, sessionmaker
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+if str(REPO / "src") not in sys.path:
+    sys.path.insert(0, str(REPO / "src"))
 
 MCQ_GROUP_TYPES = ("mcq_run", "mcq_sweep", "mcq_sweep_request")
-BACKUP_SCHEMA_VERSION = "study-query-llm/mcq_db_backup/v1"
+BACKUP_SCHEMA_VERSION = "study-query-llm/mcq_db_backup/v2"
 
 
 def _mask_database_url(url: str) -> str:
@@ -44,127 +43,104 @@ def _mask_database_url(url: str) -> str:
         head, tail = url.rsplit("@", 1)
         if "://" in head and ":" in head.split("://", 1)[1]:
             scheme_user, _, rest = head.partition("://")
-            user, _, _pass = rest.partition(":")
+            user, _, _password = rest.partition(":")
             return f"{scheme_user}://{user}:***@{tail}"
     return url
 
 
-def _tables_explained() -> Dict[str, str]:
+def _tables_explained() -> dict[str, str]:
     return {
         "groups": (
-            "Mutable experiment batch rows. MCQ probe results live in group_type "
-            "'mcq_run' with metadata_json (run_key, probe_details, result_summary). "
-            "'mcq_sweep' parents batch many runs; 'mcq_sweep_request' is the request-side type."
+            "MCQ lineage groups only (group_type in mcq_run/mcq_sweep/mcq_sweep_request)."
         ),
-        "group_links": (
-            "Parent/child edges between groups (e.g. sweep contains run). Included when "
-            "either endpoint is an MCQ-typed group in this export."
+        "provenanced_runs": (
+            "Canonical execution rows whose request/source/result/input snapshot references "
+            "an MCQ lineage group."
         ),
-        "group_members": (
-            "Links RawCall rows to Group rows. Each mcq_run group typically references "
-            "the underlying LLM raw_calls for the probe."
-        ),
-        "raw_calls": (
-            "Immutable provider request/response capture (JSON columns). Restoring these "
-            "elsewhere requires matching schema and id remap or insert-new-id strategy."
+        "analysis_results": (
+            "Per-metric scalar/JSON analysis rows linked to MCQ lineage (by source_group_id "
+            "or analysis_group_id)."
         ),
         "call_artifacts": (
-            "URIs / metadata for multimodal artifacts tied to a raw_call (no blob bytes)."
-        ),
-        "embedding_vectors": (
-            "Embedding vectors stored per raw_call when embeddings were recorded (JSON vector)."
-        ),
-        "sweep_run_claims": (
-            "Worker claim rows for request-driven sweeps tied to request_group_id / run_group_id."
-        ),
-        "orchestration_jobs": (
-            "Durable job queue rows scoped by request_group_id (e.g. mcq_run jobs); often empty."
+            "CallArtifact metadata for calls linked to MCQ groups via group_members; includes "
+            "URIs but never blob bytes."
         ),
     }
 
 
-def _build_metadata(
-    *,
-    source_url_redacted: str,
-    counts: Dict[str, int],
-    group_index: List[Dict[str, Any]],
-) -> Dict[str, Any]:
-    return {
-        "backup_schema": BACKUP_SCHEMA_VERSION,
-        "exported_at_utc": datetime.now(timezone.utc).isoformat(),
-        "source_database_url_redacted": source_url_redacted,
-        "purpose": (
-            "Offline backup of MCQ sweep/run graph and linked raw LLM captures from a "
-            "Study Query LLM v2 PostgreSQL database. Not a pg_dump; use for archival / "
-            "analysis or as a human-readable record. Restore to another DB is not automatic."
-        ),
-        "row_counts": counts,
-        "tables_explained": _tables_explained(),
-        "mcq_group_index": group_index,
-        "script": "scripts/backup_mcq_db_to_json.py",
-    }
+def _group_index(mcq_groups: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": group.id,
+            "group_type": group.group_type,
+            "name": group.name,
+            "created_at": group.created_at.isoformat() if group.created_at else None,
+        }
+        for group in mcq_groups
+    ]
 
 
-def _collect(session: Session) -> Dict[str, Any]:
+def _collect(session: Session) -> dict[str, Any]:
     from study_query_llm.db.models_v2 import (
+        AnalysisResult,
         CallArtifact,
-        EmbeddingVector,
         Group,
-        GroupLink,
         GroupMember,
-        OrchestrationJob,
-        RawCall,
-        SweepRunClaim,
+        ProvenancedRun,
     )
 
-    mcq_groups: List[Group] = (
+    mcq_groups = (
         session.query(Group)
         .filter(Group.group_type.in_(MCQ_GROUP_TYPES))
         .order_by(Group.id)
         .all()
     )
-    g_ids: Set[int] = {g.id for g in mcq_groups}
-    if not g_ids:
+    group_ids = {int(group.id) for group in mcq_groups}
+    if not group_ids:
+        counts = {key: 0 for key in _tables_explained()}
         return {
             "groups": [],
-            "group_links": [],
-            "group_members": [],
-            "raw_calls": [],
+            "provenanced_runs": [],
+            "analysis_results": [],
             "call_artifacts": [],
-            "embedding_vectors": [],
-            "sweep_run_claims": [],
-            "orchestration_jobs": [],
-            "counts": {k: 0 for k in _tables_explained().keys()},
-            "group_index": [],
+            "counts": counts,
+            "mcq_group_index": [],
         }
 
-    links: List[GroupLink] = (
-        session.query(GroupLink)
+    provenanced_runs = (
+        session.query(ProvenancedRun)
         .filter(
             or_(
-                GroupLink.parent_group_id.in_(g_ids),
-                GroupLink.child_group_id.in_(g_ids),
+                ProvenancedRun.request_group_id.in_(group_ids),
+                ProvenancedRun.source_group_id.in_(group_ids),
+                ProvenancedRun.result_group_id.in_(group_ids),
+                ProvenancedRun.input_snapshot_group_id.in_(group_ids),
             )
         )
-        .order_by(GroupLink.id)
+        .order_by(ProvenancedRun.id)
         .all()
     )
 
-    members: List[GroupMember] = (
+    analysis_results = (
+        session.query(AnalysisResult)
+        .filter(
+            or_(
+                AnalysisResult.source_group_id.in_(group_ids),
+                AnalysisResult.analysis_group_id.in_(group_ids),
+            )
+        )
+        .order_by(AnalysisResult.id)
+        .all()
+    )
+
+    members = (
         session.query(GroupMember)
-        .filter(GroupMember.group_id.in_(g_ids))
+        .filter(GroupMember.group_id.in_(group_ids))
         .order_by(GroupMember.id)
         .all()
     )
-    call_ids: Set[int] = {m.call_id for m in members}
-
-    raw_calls: List[RawCall] = (
-        session.query(RawCall).filter(RawCall.id.in_(call_ids)).order_by(RawCall.id).all()
-        if call_ids
-        else []
-    )
-
-    artifacts: List[CallArtifact] = (
+    call_ids = {int(member.call_id) for member in members}
+    call_artifacts = (
         session.query(CallArtifact)
         .filter(CallArtifact.call_id.in_(call_ids))
         .order_by(CallArtifact.id)
@@ -173,81 +149,87 @@ def _collect(session: Session) -> Dict[str, Any]:
         else []
     )
 
-    vectors: List[EmbeddingVector] = (
-        session.query(EmbeddingVector)
-        .filter(EmbeddingVector.call_id.in_(call_ids))
-        .order_by(EmbeddingVector.id)
-        .all()
-        if call_ids
-        else []
-    )
-
-    claims: List[SweepRunClaim] = (
-        session.query(SweepRunClaim)
-        .filter(
-            or_(
-                SweepRunClaim.request_group_id.in_(g_ids),
-                SweepRunClaim.run_group_id.in_(g_ids),
-            )
-        )
-        .order_by(SweepRunClaim.id)
-        .all()
-    )
-
-    jobs: List[OrchestrationJob] = (
-        session.query(OrchestrationJob)
-        .filter(OrchestrationJob.request_group_id.in_(g_ids))
-        .order_by(OrchestrationJob.id)
-        .all()
-    )
-
-    group_index = [
-        {
-            "id": g.id,
-            "group_type": g.group_type,
-            "name": g.name,
-            "created_at": g.created_at.isoformat() if g.created_at else None,
-        }
-        for g in mcq_groups
-    ]
-
     counts = {
         "groups": len(mcq_groups),
-        "group_links": len(links),
-        "group_members": len(members),
-        "raw_calls": len(raw_calls),
-        "call_artifacts": len(artifacts),
-        "embedding_vectors": len(vectors),
-        "sweep_run_claims": len(claims),
-        "orchestration_jobs": len(jobs),
+        "provenanced_runs": len(provenanced_runs),
+        "analysis_results": len(analysis_results),
+        "call_artifacts": len(call_artifacts),
+    }
+    return {
+        "groups": [group.to_dict() for group in mcq_groups],
+        "provenanced_runs": [run.to_dict() for run in provenanced_runs],
+        "analysis_results": [result.to_dict() for result in analysis_results],
+        "call_artifacts": [artifact.to_dict() for artifact in call_artifacts],
+        "counts": counts,
+        "mcq_group_index": _group_index(mcq_groups),
     }
 
-    return {
-        "groups": [g.to_dict() for g in mcq_groups],
-        "group_links": [x.to_dict() for x in links],
-        "group_members": [m.to_dict() for m in members],
-        "raw_calls": [r.to_dict() for r in raw_calls],
-        "call_artifacts": [a.to_dict() for a in artifacts],
-        "embedding_vectors": [v.to_dict() for v in vectors],
-        "sweep_run_claims": [c.to_dict() for c in claims],
-        "orchestration_jobs": [j.to_dict() for j in jobs],
-        "counts": counts,
-        "group_index": group_index,
+
+def _build_documents(
+    *,
+    payload: dict[str, Any],
+    source_url_redacted: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    counts = payload["counts"]
+    group_index = payload["mcq_group_index"]
+    exported_at = datetime.now(timezone.utc).isoformat()
+    manifest = {
+        "backup_schema": BACKUP_SCHEMA_VERSION,
+        "exported_at_utc": exported_at,
+        "source_database_url_redacted": source_url_redacted,
+        "row_counts": counts,
+        "tables_explained": _tables_explained(),
+        "mcq_group_index": group_index,
+        "script": "scripts/backup_mcq_db_to_json.py",
     }
+    export_doc = {
+        "backup_metadata": {
+            "backup_schema": BACKUP_SCHEMA_VERSION,
+            "exported_at_utc": exported_at,
+            "source_database_url_redacted": source_url_redacted,
+            "row_counts": counts,
+            "script": "scripts/backup_mcq_db_to_json.py",
+        },
+        "groups": payload["groups"],
+        "provenanced_runs": payload["provenanced_runs"],
+        "analysis_results": payload["analysis_results"],
+        "call_artifacts": payload["call_artifacts"],
+    }
+    return export_doc, manifest
+
+
+def _resolve_output_path(*, output: Path | None, output_dir: Path | None) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if output and output_dir:
+        raise ValueError("Use either --output or --output-dir, not both.")
+    if output is not None:
+        resolved = output if output.is_absolute() else REPO / output
+        return resolved
+    if output_dir is None:
+        default_dir = REPO / "backup_pg_dumps"
+        return default_dir / f"mcq_export_{stamp}.json"
+    resolved_dir = output_dir if output_dir.is_absolute() else REPO / output_dir
+    return resolved_dir / f"mcq_export_{stamp}.json"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Backup MCQ-related v2 DB rows to JSON.")
+    parser = argparse.ArgumentParser(description="Export MCQ-related v2 rows to JSON backup.")
     parser.add_argument(
         "--database-url",
         default=None,
         help="Postgres URL (default: LOCAL_DATABASE_URL, then DATABASE_URL from .env)",
     )
     parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output JSON path (default: backup_pg_dumps/mcq_export_<timestamp>.json)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO / "scratch" / "mcq_db_backups",
-        help="Directory for output JSON files (created if missing)",
+        default=None,
+        help="Compatibility option: output directory, filename remains timestamped.",
     )
     args = parser.parse_args()
 
@@ -262,58 +244,41 @@ def main() -> int:
         )
         return 1
 
-    out_dir: Path = args.output_dir
-    if not out_dir.is_absolute():
-        out_dir = REPO / out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = f"mcq_v2_backup_{stamp}"
-    full_path = out_dir / f"{base}_full.json"
-    summary_path = out_dir / f"{base}_summary.json"
+    try:
+        output_path = _resolve_output_path(output=args.output, output_dir=args.output_dir)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_path.with_suffix(".manifest.json")
 
     engine = create_engine(db_url, pool_pre_ping=True)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    session = SessionLocal()
+    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session = session_local()
     try:
         payload = _collect(session)
     finally:
         session.close()
-    engine.dispose()
+        engine.dispose()
 
-    counts = payload.pop("counts")
-    group_index = payload.pop("group_index")
     redacted = _mask_database_url(db_url)
-
-    backup_metadata = _build_metadata(
+    export_doc, manifest = _build_documents(
+        payload=payload,
         source_url_redacted=redacted,
-        counts=counts,
-        group_index=group_index,
+    )
+    output_path.write_text(
+        json.dumps(export_doc, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
     )
 
-    full_doc = {"backup_metadata": backup_metadata, **payload}
-    summary_doc = {
-        "backup_metadata": {
-            **backup_metadata,
-            "companion_file": full_path.name,
-            "note": (
-                "Summary backup: same backup_metadata and mcq_group_index as the full export; "
-                "no raw_calls / artifacts / vectors / links / members payloads."
-            ),
-        },
-        "mcq_group_index": group_index,
-    }
-
-    for path, doc in ((full_path, full_doc), (summary_path, summary_doc)):
-        path.write_text(
-            json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-
-    print(f"Wrote {full_path} ({full_path.stat().st_size // 1024} KiB)")
-    print(f"Wrote {summary_path} ({summary_path.stat().st_size // 1024} KiB)")
+    print(f"Wrote export: {output_path}")
+    print(f"Wrote manifest: {manifest_path}")
+    print(f"Row counts: {manifest['row_counts']}")
     print(f"Source (redacted): {redacted}")
-    print(f"Row counts: {counts}")
     return 0
 
 

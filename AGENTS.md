@@ -12,6 +12,7 @@ Panel-based web application for running LLM inference experiments across multipl
 - **Docs Navigation**: `docs/README.md` - living/runbook/history/deprecated routing
 - **Current Status**: `docs/living/CURRENT_STATE.md`
 - **Current Architecture**: `docs/living/ARCHITECTURE_CURRENT.md`
+- **Canonical Data Pipeline**: `docs/DATA_PIPELINE.md`
 - **Historical Architecture**: `docs/ARCHITECTURE.md`
 - **Jetstream: PC → Postgres SSH tunnel** (local `DATABASE_URL` via forward): `deploy/jetstream/LOCAL_DEV_TUNNEL.md`
 - **Clone Jetstream DB into local Docker** (backup local, `pg_dump` Jetstream, restore): `docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`

@@ -51,11 +51,9 @@ Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../d
 | `probe_postgres_inventory.py` | Quick inventory probe (size/tables/counts) | URL from selected env var | No writes | Low |
 | `verify_db_backup_inventory.py` | Compare local vs Jetstream table counts + backup manifests/blob listing | `JETSTREAM_DATABASE_URL`, `LOCAL_DATABASE_URL` | No writes | Low |
 | `verify_call_artifact_blob_lanes.py` | Read-only: classify `call_artifacts.uri` by Azure blob container (and optional key prefix) | `DATABASE_URL` or `--env-var` / `--database-url` | No writes | Low |
-| `report_layer0_dataset_stats.py` | Fetch pinned Layer 0 files; print/refresh measured byte + row/line stats in `docs/DATASET_ACQUISITION_LAYER0.md` | Network (Zenodo/GitHub); optional `--write-doc` | No writes (unless `--write-doc`) | Low |
 | `upload_jetstream_pg_dump_to_blob.py` | Upload `jetstream_for_local_*.dump` to Azure `db-backups` + write manifest | `AZURE_STORAGE_CONNECTION_STRING`; optional `JETSTREAM_DATABASE_URL` for manifest `table_counts` | Writes blobs + `backup_pg_dumps/*.manifest.json` | Medium (blob writes; sensitive dump contents) |
 | `start_jetstream_postgres_tunnel.py` | SSH local-forward to Jetstream Postgres | Requires Jetstream SSH host/auth env | No DB writes; network tunnel only | Low |
-| `purge_dataset_acquisition.py` | Remove Layer-0 acquisition artifacts for a dataset group | Selected DB URL + artifact storage backend | Deletes blob artifacts + matching DB rows | High (destructive by design) |
-| `record_dataset_download.py --persist-db` | Persist acquisition manifest/files as DB + blob artifacts | Dataset slug + active `DATABASE_URL` + Azure config | Creates/updates `dataset` group, artifacts, placeholders | Medium-High (writes canonical dataset artifacts) |
+| `purge_dataset_acquisition.py` | Remove dataset acquisition artifacts for a dataset group | Selected DB URL + artifact storage backend | Deletes blob artifacts + matching DB rows | High (destructive by design) |
 | `backup_mcq_db_to_json.py` | Export MCQ lineage rows (`groups`, `provenanced_runs`, `analysis_results`, `call_artifacts`) to JSON + `.manifest.json` | `LOCAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low (can contain sensitive prompts/artifacts) |
 | `check_active_workers.py` | Guardrail check for non-terminal `orchestration_jobs` before destructive ops | `LOCAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low |
 | `archive_mcq_artifact_blobs.py` | Copy MCQ-linked artifact blobs to frozen `mcq-archive/<date>/` prefix and emit URI remap receipt | Export JSON from `backup_mcq_db_to_json.py`; local artifact root or Azure blob creds | Writes archived blobs + remap JSON | Medium |
@@ -73,8 +71,7 @@ stable unless accompanied by wrappers and doc updates:
 
 - `docker_smoke.py`
 - `run_bank77_pipeline.py`
-- `create_bank77_snapshot_and_embeddings.py`
-- `create_dataset_snapshots_286.py`
+- `check_persistence_contract.py`
 - `validate_and_backfill_run_snapshots.py`
 - `run_300_bigrun_sweep.py`
 - `run_langgraph_job_worker.py`

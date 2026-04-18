@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Purge Layer-0 dataset acquisition blobs and DB rows so ``record_dataset_download.py
---persist-db`` can be re-run for the same ``--dataset-group-name``.
+Purge dataset acquisition blobs and DB rows so acquisition can be re-run cleanly
+for the same dataset group.
 
 Blob deletion order (deterministic, safe for humans re-reading logs):
   1. All ``dataset_acquisition_file`` artifacts for the group (sorted by ``call_artifacts.id``).
@@ -219,7 +219,10 @@ def main() -> int:
         session.execute(delete(Group).where(Group.id == gid))
         session.commit()
         print(f"[db] Deleted call_artifacts ids={list(art_ids)}, raw_calls ids={call_ids}, group id={gid}")
-        print("OK. You can re-run: python scripts/record_dataset_download.py ... --persist-db ...")
+        print(
+            "OK. You can re-run acquisition via python scripts/run_bank77_pipeline.py "
+            "(or call pipeline.acquire from code) to recreate the dataset group."
+        )
     except Exception:
         session.rollback()
         raise

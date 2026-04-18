@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-06
+Last reviewed: 2026-04-18
 
 This document establishes consistent practices for all development work on this project, ensuring that multiple developers (human or AI) maintain consistency in planning, implementation, and documentation.
 
@@ -11,6 +11,7 @@ This document establishes consistent practices for all development work on this 
 ### Primary Source of Truth
 - **`docs/living/CURRENT_STATE.md`** is authoritative for "what currently exists/works."
 - **`docs/living/ARCHITECTURE_CURRENT.md`** is authoritative for current architecture.
+- **`docs/DATA_PIPELINE.md`** is authoritative for the four-stage data pipeline contract.
 - **`docs/IMPLEMENTATION_PLAN.md`** and **`docs/ARCHITECTURE.md`** are historical/roadmap context unless explicitly updated as current.
 - **`docs/review/DOC_PARITY_LEDGER.md`** is the evidence ledger for doc-to-code parity claims.
 
@@ -83,6 +84,7 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 - **`docs/README.md`**: Documentation routing and taxonomy
 - **`docs/living/CURRENT_STATE.md`**: Authoritative current capabilities
 - **`docs/living/ARCHITECTURE_CURRENT.md`**: Current architecture reference
+- **`docs/DATA_PIPELINE.md`**: Canonical four-stage pipeline contract and operator acceptance checks
 - **`docs/living/API_CURRENT.md`**: Current API quick reference
 - **`docs/USER_GUIDE.md`**: End-user guide (v2-first)
 - **`docs/IMPLEMENTATION_PLAN.md`**: Historical phased roadmap
@@ -113,8 +115,13 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 
 ### Schema Usage Rules
 - **Always use v2 schema for new features**
-- v2 schema includes: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `EmbeddingVector`, `GroupLink`
+- v2 schema includes: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `GroupLink`, `ProvenancedRun`, `EmbeddingCacheEntry`
 - Migration from v1 to v2: follow currently supported migration tooling in `scripts/README.md`
+
+### Data Pipeline Persistence Contract
+- Public stage functions in `src/study_query_llm/pipeline/` must persist through `run_stage(...)` (`src/study_query_llm/pipeline/runner.py`).
+- Contract lint: `python scripts/check_persistence_contract.py`.
+- Stages and acceptance checks are defined in `docs/DATA_PIPELINE.md`; keep this in sync when stage behavior changes.
 
 ### Method Definitions and Provenance
 - **Whenever possible, register methods in the methods table** (`method_definitions`) and record results in `analysis_results`, rather than encoding "which method" only as new group types, link types, or free-form metadata in `groups.metadata_json`.

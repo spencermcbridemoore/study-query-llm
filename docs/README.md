@@ -2,12 +2,13 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-13
+Last reviewed: 2026-04-18
 
 ## Quick Route
 
 - Current product/runtime truth: [`docs/living/CURRENT_STATE.md`](living/CURRENT_STATE.md)
 - Current architecture (v2-first): [`docs/living/ARCHITECTURE_CURRENT.md`](living/ARCHITECTURE_CURRENT.md)
+- Canonical data pipeline contract: [`docs/DATA_PIPELINE.md`](DATA_PIPELINE.md)
 - Current API entrypoints: [`docs/living/API_CURRENT.md`](living/API_CURRENT.md)
 - Scheduling/provenance boundary + execution terminology: [`docs/living/SCHEDULING_PROVENANCE_BOUNDARY.md`](living/SCHEDULING_PROVENANCE_BOUNDARY.md)
 - Method recipes (composite pipeline spec): [`docs/living/METHOD_RECIPES.md`](living/METHOD_RECIPES.md)
@@ -28,7 +29,7 @@ Last reviewed: 2026-04-13
 - [`docs/living/PLOT_CONVENTIONS.md`](living/PLOT_CONVENTIONS.md)
 - [`docs/USER_GUIDE.md`](USER_GUIDE.md)
 - [`docs/STANDING_ORDERS.md`](STANDING_ORDERS.md)
-- [`docs/DATASET_SNAPSHOT_PROVENANCE.md`](DATASET_SNAPSHOT_PROVENANCE.md)
+- [`docs/DATA_PIPELINE.md`](DATA_PIPELINE.md)
 - [`docs/DESIGN_FLAWS.md`](DESIGN_FLAWS.md)
 
 ### Runbooks

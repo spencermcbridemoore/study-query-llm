@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-09
+Last reviewed: 2026-04-18
 
 ## System Shape
 
@@ -23,6 +23,7 @@ jobRuntimes --> repoLayer
 - `src/study_query_llm/providers/`: provider abstraction and factory entrypoints.
 - `src/study_query_llm/db/raw_call_repository.py`: canonical data access for v2 capture and grouping.
 - `src/study_query_llm/db/models_v2.py`: canonical schema for immutable calls + mutable grouping relationships.
+- `src/study_query_llm/pipeline/`: canonical four-stage dataset flow (`acquire`, `snapshot`, `embed`, `analyze`) with contract enforcement via `run_stage`.
 - `provenanced_runs`: first-class execution provenance row using canonical `run_kind=execution`, with role semantics in `metadata_json.execution_role`, linked to `method_definitions` for versioned method identity.
 
 ## Current Execution Surfaces
@@ -35,6 +36,13 @@ jobRuntimes --> repoLayer
   - `python -m study_query_llm.cli sweep run-bigrun`
 
 Legacy `scripts/run_*.py` files are compatibility wrappers where retained.
+
+## Data Pipeline (Canonical)
+
+- Canonical spec: [`docs/DATA_PIPELINE.md`](../DATA_PIPELINE.md).
+- Stage order: `acquisition -> snapshot -> embedding -> analysis`.
+- Runtime entrypoint: `python scripts/run_bank77_pipeline.py ...` for end-to-end execution.
+- Persistence contract: public stage functions persist through `run_stage` and are linted by `scripts/check_persistence_contract.py`.
 
 ## Orchestration and Provenance Notes
 

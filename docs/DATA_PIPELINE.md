@@ -1,11 +1,11 @@
-# Data Pipeline Rebuild — Design Doc
+# Data Pipeline (Canonical Spec)
 
-Status: **draft for ratification (revised 2026-04-17 post-peer-review)**
+Status: living
 Owner: documentation-maintainers + data-pipeline-rebuild driver
-Last reviewed: 2026-04-17 (revised same day)
-Lifecycle: transient through rebuild; on implementation completion, rename/move to `docs/DATA_PIPELINE.md` (or `docs/living/DATA_PIPELINE.md`) and replace both [`docs/DATASET_ACQUISITION_LAYER0.md`](DATASET_ACQUISITION_LAYER0.md) and [`docs/DATASET_SNAPSHOT_PROVENANCE.md`](DATASET_SNAPSHOT_PROVENANCE.md) as the canonical pipeline spec.
+Last reviewed: 2026-04-18
+Lifecycle: canonical pipeline reference for the four-stage acquisition -> snapshot -> embedding -> analysis flow; supersedes the retired Layer-0/Layer-1 docs.
 
-This doc is **descriptive of the intended end-state**, not a how-to. The implementation plan (separate session, after ratification) will turn each section into ordered, verifiable steps.
+This doc captures the implemented four-stage architecture and operator contract, with design rationale preserved for future changes.
 
 ---
 
@@ -15,8 +15,8 @@ This doc is **descriptive of the intended end-state**, not a how-to. The impleme
 
 The repo currently has two parallel, uncomposed data ingestion paths:
 
-- **Layer 0 acquisition** (per [`docs/DATASET_ACQUISITION_LAYER0.md`](DATASET_ACQUISITION_LAYER0.md), implemented in [`src/study_query_llm/datasets/acquisition.py`](../src/study_query_llm/datasets/acquisition.py)) records pinned URLs, SHA-256, and timestamps for raw download provenance, but has **no `dataset_snapshot` consumers** in the materialized data.
-- **Layer 1 dataset snapshots** (per [`docs/DATASET_SNAPSHOT_PROVENANCE.md`](DATASET_SNAPSHOT_PROVENANCE.md), with the BANK77 worked example in [`scripts/create_bank77_snapshot_and_embeddings.py`](../scripts/create_bank77_snapshot_and_embeddings.py)) loads datasets directly via the HuggingFace `datasets` library and creates `dataset_snapshot` groups, **bypassing Layer 0 entirely**.
+- **Layer 0 acquisition** (historical path, implemented in [`src/study_query_llm/datasets/acquisition.py`](../src/study_query_llm/datasets/acquisition.py)) recorded pinned URLs, SHA-256, and timestamps for raw download provenance, but had **no `dataset_snapshot` consumers** in the materialized data.
+- **Layer 1 dataset snapshots** (historical BANK77 bootstrap path) loaded datasets directly and created `dataset_snapshot` groups, **bypassing acquisition entirely**.
 
 The two were defined as a layered protocol in the docs, but never composed in the code. This is a glue-layer problem, not a substrate problem: the v2 schema, services, and embedding cache stack are sound and lane-neutral.
 
@@ -67,11 +67,11 @@ These are locked from the prior design conversation. The doc must respect them; 
    - [`src/study_query_llm/datasets/source_specs/`](../src/study_query_llm/datasets/source_specs/) (per-source URL/spec modules) — **carve-out:** registry gains a `default_parser` field per §8; `ParserCallable` is defined in a new neutral module `src/study_query_llm/datasets/source_specs/parser_protocol.py` to avoid import cycles (see §4.5).
    - [`src/study_query_llm/datasets/acquisition.py`](../src/study_query_llm/datasets/acquisition.py) — **carve-out:** add a pure helper `content_fingerprint(...)` for stage-1 idempotency per §4.1; existing functions unchanged.
    - [`src/study_query_llm/algorithms/`](../src/study_query_llm/algorithms/) (clustering recipes, sweep code)
-4. **Rewrite the entrypoint/glue layer.** This is the only code that changes (other than the schema audit deletions): scripts and per-dataset glue modules. Specifically rewrite or replace:
-   - [`scripts/create_bank77_snapshot_and_embeddings.py`](../scripts/create_bank77_snapshot_and_embeddings.py)
-   - [`scripts/create_dataset_snapshots_286.py`](../scripts/create_dataset_snapshots_286.py)
-   - [`scripts/record_dataset_download.py`](../scripts/record_dataset_download.py)
-   - per-dataset glue (e.g., [`src/study_query_llm/utils/estela_loader.py`](../src/study_query_llm/utils/estela_loader.py))
+4. **Rewrite the entrypoint/glue layer.** This is the only code that changes (other than the schema audit deletions): scripts and per-dataset glue modules. Completed replacements/deletions:
+   - `scripts/create_bank77_snapshot_and_embeddings.py` -> replaced by `scripts/run_bank77_pipeline.py` + `src/study_query_llm/pipeline/*`
+   - `scripts/create_dataset_snapshots_286.py` -> removed
+   - `scripts/record_dataset_download.py` -> removed
+   - per-dataset glue (e.g., [`src/study_query_llm/utils/estela_loader.py`](../src/study_query_llm/utils/estela_loader.py)) remains follow-on migration work
 5. **Four named stages: acquisition → snapshot → embedding → analysis.** "Layer 0 / Layer 1" naming is retired.
 6. **Snapshot stage takes a row iterator.** Future-proofs streaming/reference modes without committing to either now.
 7. **BANK77 is the end-to-end composed-pipeline demo.** Acceptance is gated on BANK77 running clean through all four stages with full lineage.
@@ -622,14 +622,14 @@ The CI acceptance is the gate for **merging** the rebuild PRs. The operator acce
 
 | Path | Action |
 |------|--------|
-| [`docs/DATA_PIPELINE_REBUILD_DESIGN.md`](DATA_PIPELINE_REBUILD_DESIGN.md) | **NEW** (this doc). Transient through implementation; on completion rename to `docs/DATA_PIPELINE.md` (or move to `docs/living/DATA_PIPELINE.md`) and replace `DATASET_ACQUISITION_LAYER0.md` + `DATASET_SNAPSHOT_PROVENANCE.md`. |
+| `docs/DATA_PIPELINE.md` | **CANONICAL** (renamed from `docs/DATA_PIPELINE_REBUILD_DESIGN.md` after implementation). |
 
 ### 10.2 Existing docs — file-by-file
 
 | Path | Action | Rationale |
 |------|--------|-----------|
-| [`docs/DATASET_ACQUISITION_LAYER0.md`](DATASET_ACQUISITION_LAYER0.md) | **DELETE on rebuild completion**; content folded into stage 1 + §8 of the canonical pipeline doc | "Layer 0" naming retired |
-| [`docs/DATASET_SNAPSHOT_PROVENANCE.md`](DATASET_SNAPSHOT_PROVENANCE.md) | **DELETE on rebuild completion**; content folded into stage 2 + §6 + §9 of the canonical pipeline doc | "Layer 1" naming retired; BANK77 worked example moves into the new doc |
+| `docs/DATASET_ACQUISITION_LAYER0.md` | **COMPLETED: deleted**; content folded into stage 1 + §8 of this canonical doc | "Layer 0" naming retired |
+| `docs/DATASET_SNAPSHOT_PROVENANCE.md` | **COMPLETED: deleted**; content folded into stage 2 + §6 + §9 of this canonical doc | "Layer 1" naming retired; BANK77 worked example moved into the pipeline flow |
 | [`docs/living/CURRENT_STATE.md`](living/CURRENT_STATE.md) | **UPDATE** (during implementation) | Replace Bank77 "scriptable" line with "BANK77 demo verified end-to-end through new pipeline" |
 | [`docs/living/ARCHITECTURE_CURRENT.md`](living/ARCHITECTURE_CURRENT.md) | **UPDATE** (during implementation) | Update data-pipeline section to reference the new doc, remove Layer 0/1 framing |
 | [`docs/living/METHOD_RECIPES.md`](living/METHOD_RECIPES.md) | **KEEP unchanged** | Recipe spec is independent of the pipeline rebuild |
@@ -958,9 +958,9 @@ The implementation plan must not begin until §11 Step 0 (pre-flight) checks are
 | [`src/study_query_llm/db/models_v2.py`](../src/study_query_llm/db/models_v2.py) | UPDATE — remove `EmbeddingVector` class only |
 | [`panel_app/views/analytics.py`](../panel_app/views/analytics.py) | UPDATE — remove `EmbeddingVector` import and count row (§11 Step 3) |
 | [`panel_app/views/embeddings.py`](../panel_app/views/embeddings.py) | UPDATE — remove `EmbeddingVector` import and per-vector DataFrame (§11 Step 3) |
-| [`scripts/create_bank77_snapshot_and_embeddings.py`](../scripts/create_bank77_snapshot_and_embeddings.py) | DELETE on rebuild completion |
-| [`scripts/create_dataset_snapshots_286.py`](../scripts/create_dataset_snapshots_286.py) | DELETE on rebuild completion (non-BANK77 datasets follow in implementation plan) |
-| [`scripts/record_dataset_download.py`](../scripts/record_dataset_download.py) | DELETE on rebuild completion |
+| `scripts/create_bank77_snapshot_and_embeddings.py` | DELETED (completed) |
+| `scripts/create_dataset_snapshots_286.py` | DELETED (completed) |
+| `scripts/record_dataset_download.py` | DELETED (completed) |
 | `scripts/run_bank77_pipeline.py` | NEW |
 | `scripts/lint_pipeline_persistence.py` | NEW |
 | `scripts/archive_mcq_artifact_blobs.py` | NEW — copies MCQ-linked blobs to a frozen archive prefix (§11 Step 5b) |

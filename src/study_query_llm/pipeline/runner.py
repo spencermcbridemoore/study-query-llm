@@ -76,6 +76,7 @@ def run_stage(
     run_kind: str = "execution",
     run_metadata: dict[str, Any] | None = None,
     depends_on_group_ids: Sequence[int] | None = None,
+    contains_parent_group_ids: Sequence[int] | None = None,
     artifact_dir: str = "artifacts",
     write_artifacts: StageArtifactWriter | None = None,
     finalize_db: StageFinalizeHook | None = None,
@@ -87,6 +88,9 @@ def run_stage(
     3) Mark run completed (or failed on error)
     """
     depends_on = [int(group_id) for group_id in (depends_on_group_ids or ())]
+    contains_parents = [
+        int(group_id) for group_id in (contains_parent_group_ids or ())
+    ]
     identity: StageIdentity | None = None
     artifact_uris: dict[str, str] = {}
     result_metadata: dict[str, Any] = {}
@@ -108,6 +112,12 @@ def run_stage(
                 parent_group_id=group_id,
                 child_group_id=dependency_group_id,
                 link_type="depends_on",
+            )
+        for parent_group_id in contains_parents:
+            repo.create_group_link(
+                parent_group_id=parent_group_id,
+                child_group_id=group_id,
+                link_type="contains",
             )
 
         run_id: int | None = None

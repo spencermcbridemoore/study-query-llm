@@ -29,6 +29,7 @@ Usage:
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from datetime import datetime, timezone
 import json
+import hashlib
 
 from ..utils.logging_config import get_logger
 
@@ -56,6 +57,10 @@ GROUP_TYPE_MCQ_RUN = "mcq_run"
 GROUP_TYPE_MCQ_SWEEP = "mcq_sweep"
 GROUP_TYPE_MCQ_SWEEP_REQUEST = "mcq_sweep_request"
 
+# New analysis group types
+GROUP_TYPE_ANALYSIS_RUN = "analysis_run"
+GROUP_TYPE_ANALYSIS_REQUEST = "analysis_request"
+
 # Backward-compat aliases (these will be removed once all callers are updated)
 GROUP_TYPE_RUN = GROUP_TYPE_CLUSTERING_RUN
 GROUP_TYPE_STEP = GROUP_TYPE_CLUSTERING_STEP
@@ -63,6 +68,14 @@ GROUP_TYPE_STEP = GROUP_TYPE_CLUSTERING_STEP
 # Dataset snapshot conventions
 LABEL_MODE_LABELED = "labeled"
 LABEL_MODE_UNLABELED = "unlabeled"
+
+
+def _cap_group_name(name: str, max_len: int = 180) -> tuple[str, str | None]:
+    if len(name) <= max_len:
+        return name, None
+    suffix = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+    prefix_len = max_len - 9
+    return f"{name[:prefix_len]}:{suffix}", name
 
 
 class ProvenanceService:
@@ -132,6 +145,109 @@ class ProvenanceService:
 
         logger.info(f"Created run group: id={group_id}, algorithm={algorithm}, name={name}")
         return group_id
+
+    def create_analysis_run_group(
+        self,
+        *,
+        method_name: str,
+        input_id: int,
+        run_key: str,
+        request_group_id: Optional[int] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Create an analysis_run group for a concrete analysis execution.
+        """
+        full_name = name or f"analyze:{method_name}:{input_id}:{run_key}"
+        capped_name, preserved_full_name = _cap_group_name(full_name)
+        metadata_json = {
+            "method_name": method_name,
+            "input_id": int(input_id),
+            "run_key": str(run_key),
+            "request_group_id": int(request_group_id) if request_group_id is not None else None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if preserved_full_name is not None:
+            metadata_json["full_name"] = preserved_full_name
+        if metadata:
+            metadata_json.update(metadata)
+
+        group_id = self.repository.create_group(
+            group_type=GROUP_TYPE_ANALYSIS_RUN,
+            name=capped_name,
+            description=description or f"Analysis run: {method_name}",
+            metadata_json=metadata_json,
+        )
+        logger.info(
+            "Created analysis_run group: id=%s method=%s input_id=%s run_key=%s",
+            group_id,
+            method_name,
+            input_id,
+            run_key,
+        )
+        return int(group_id)
+
+    def create_analysis_request_group(
+        self,
+        *,
+        method_name: str,
+        input_id: int,
+        run_key: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Get-or-create an analysis_request group for one-off analysis execution.
+        """
+        from ..db.models_v2 import Group
+
+        normalized_method = str(method_name)
+        normalized_input_id = int(input_id)
+        normalized_run_key = str(run_key)
+        existing_groups = (
+            self.repository.session.query(Group)
+            .filter(Group.group_type == GROUP_TYPE_ANALYSIS_REQUEST)
+            .all()
+        )
+        for existing in existing_groups:
+            existing_meta = dict(existing.metadata_json or {})
+            if (
+                str(existing_meta.get("method_name") or "") == normalized_method
+                and int(existing_meta.get("input_id") or -1) == normalized_input_id
+                and str(existing_meta.get("run_key") or "") == normalized_run_key
+            ):
+                return int(existing.id)
+
+        full_name = name or f"analyze_request:{normalized_method}:{normalized_input_id}:{normalized_run_key}"
+        capped_name, preserved_full_name = _cap_group_name(full_name)
+        metadata_json = {
+            "method_name": normalized_method,
+            "input_id": normalized_input_id,
+            "run_key": normalized_run_key,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if preserved_full_name is not None:
+            metadata_json["full_name"] = preserved_full_name
+        if metadata:
+            metadata_json.update(metadata)
+
+        group_id = self.repository.create_group(
+            group_type=GROUP_TYPE_ANALYSIS_REQUEST,
+            name=capped_name,
+            description=description or f"Analysis request: {normalized_method}",
+            metadata_json=metadata_json,
+        )
+        logger.info(
+            "Created analysis_request group: id=%s method=%s input_id=%s run_key=%s",
+            group_id,
+            normalized_method,
+            normalized_input_id,
+            normalized_run_key,
+        )
+        return int(group_id)
 
     def create_step_group(
         self,

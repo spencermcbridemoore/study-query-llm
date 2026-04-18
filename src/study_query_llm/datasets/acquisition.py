@@ -175,3 +175,35 @@ def acquisition_manifest_sha256(manifest: Dict[str, Any]) -> str:
     """Stable hash of canonical manifest JSON (for idempotency hints)."""
     payload = json.dumps(manifest, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def content_fingerprint(*, dataset_slug: str, manifest: Dict[str, Any]) -> str:
+    """
+    Compute semantic acquisition fingerprint independent from timestamps.
+
+    Fingerprint contract:
+    - dataset slug
+    - source.pinning_identity when available
+    - sorted (relative_path, sha256) pairs
+    """
+    source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    pinning_identity = source.get("pinning_identity")
+    files_raw = manifest.get("files")
+    file_pairs: list[tuple[str, str]] = []
+    if isinstance(files_raw, list):
+        for item in files_raw:
+            if not isinstance(item, dict):
+                continue
+            rel_path = str(item.get("relative_path") or "").strip()
+            digest = str(item.get("sha256") or "").strip()
+            if rel_path and digest:
+                file_pairs.append((rel_path, digest))
+    file_pairs.sort()
+
+    payload = {
+        "dataset_slug": str(dataset_slug),
+        "pinning_identity": pinning_identity,
+        "files": file_pairs,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

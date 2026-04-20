@@ -52,3 +52,21 @@ def test_xlsx_row_count_minimal(stats_mod):
         )
     n = stats_mod._xlsx_sheet1_row_count(buf.getvalue())
     assert n == 2
+
+
+def test_main_write_doc_flag_is_deprecated_and_short_circuits(stats_mod, monkeypatch, capsys):
+    def _unexpected_slug_stats(_slug):
+        raise AssertionError("_slug_stats should not be called for --write-doc")
+
+    monkeypatch.setattr(stats_mod, "_slug_stats", _unexpected_slug_stats)
+    monkeypatch.setattr(
+        stats_mod.sys,
+        "argv",
+        ["report_layer0_dataset_stats.py", "--write-doc"],
+    )
+
+    rc = stats_mod.main()
+    out = capsys.readouterr()
+
+    assert rc == 2
+    assert "--write-doc is no longer supported" in out.err

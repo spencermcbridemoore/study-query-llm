@@ -1,8 +1,13 @@
 """
-End-to-End Test Verification Script
+End-to-End Test Verification Script (Legacy v1 compatibility)
 
-This script verifies that inferences run through the GUI are properly stored
-in the database and can be queried.
+Status: historical compatibility helper.
+
+This script verifies legacy `InferenceRepository` / `inference_runs` behavior for
+v1-style GUI flows. It is not a canonical v2 pipeline validator.
+
+For current v2-first validation, use `docs/TESTING_CHECKLIST.md` and
+`tests/pipeline/test_bank77_pipeline_e2e.py`.
 """
 
 import sys

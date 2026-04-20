@@ -41,7 +41,7 @@ RUN pip install --no-cache-dir -e ".[dev]"
 
 ARG RUN_TESTS=0
 RUN if [ "$RUN_TESTS" = "1" ]; then \
-        pytest test_e2e_verification.py || pytest test_phase_1_1.py; \
+        pytest tests/test_scripts/test_report_layer0_dataset_stats.py; \
     else \
         echo "Skipping build-time tests"; \
     fi

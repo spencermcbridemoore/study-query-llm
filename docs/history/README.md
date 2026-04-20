@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-06
+Last reviewed: 2026-04-19
 
 History docs preserve implementation chronology, migration context, and dated verification snapshots.
 They are not the default source for current behavior.

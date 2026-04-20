@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Download Layer 0 registry datasets and print byte sizes + coarse row/line stats.
+Download acquisition-registry datasets and print coarse size/row/line stats.
 
-Read-only upstream; writes nothing unless --write-doc is passed.
+This script is read-only with respect to upstream source data. The historical
+`--write-doc` mode is retained as a compatibility flag, but now fails fast with
+guidance because `docs/DATASET_ACQUISITION_LAYER0.md` was retired.
 
 Usage (repo root):
   python scripts/report_layer0_dataset_stats.py
-  python scripts/report_layer0_dataset_stats.py --write-doc
+  python scripts/report_layer0_dataset_stats.py --json
 """
 
 from __future__ import annotations
@@ -157,35 +159,12 @@ def _markdown_table(results: list[dict[str, Any]], measured_at: str) -> str:
     return "\n".join(lines)
 
 
-def _inject_into_doc(doc_path: Path, block: str, measured_at: str) -> None:
-    text = doc_path.read_text(encoding="utf-8")
-    start = "<!-- LAYER0_STATS_BEGIN -->"
-    end = "<!-- LAYER0_STATS_END -->"
-    if start in text and end in text:
-        pre, _, rest = text.partition(start)
-        _, _, post = rest.partition(end)
-        new_text = pre + start + "\n" + block.strip() + "\n" + end + post
-    else:
-        new_text = (
-            text.rstrip()
-            + "\n\n"
-            + start
-            + "\n"
-            + block.strip()
-            + "\n"
-            + end
-            + "\n"
-        )
-    doc_path.write_text(new_text, encoding="utf-8")
-    print(f"[OK] Wrote stats block into {doc_path} (markers {start!r} … {end!r})", file=sys.stderr)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Report Layer 0 dataset sizes and coarse counts")
     parser.add_argument(
         "--write-doc",
         action="store_true",
-        help="Inject/replace stats block in docs/DATASET_ACQUISITION_LAYER0.md (between HTML comment markers)",
+        help="Deprecated compatibility flag; use stdout output and redirect to a file if needed.",
     )
     parser.add_argument(
         "--json",
@@ -193,6 +172,19 @@ def main() -> int:
         help="Print full JSON stats to stdout",
     )
     args = parser.parse_args()
+
+    if args.write_doc:
+        print(
+            "[DEPRECATED] --write-doc is no longer supported because "
+            "docs/DATASET_ACQUISITION_LAYER0.md was retired during pipeline cutover.",
+            file=sys.stderr,
+        )
+        print(
+            "Use stdout output (default or --json) and redirect to your target file. "
+            "See docs/DATA_PIPELINE.md for canonical acquisition documentation.",
+            file=sys.stderr,
+        )
+        return 2
 
     from datetime import datetime, timezone
 
@@ -207,9 +199,6 @@ def main() -> int:
     else:
         print(_markdown_table(results, measured_at))
 
-    if args.write_doc:
-        doc_path = REPO / "docs" / "DATASET_ACQUISITION_LAYER0.md"
-        _inject_into_doc(doc_path, _markdown_table(results, measured_at), measured_at)
     return 0
 
 

@@ -137,6 +137,9 @@ experimental_results/
 # Log files
 *.log
 
+# Local SQLite scratch DB artifact
+study_query_llm.db
+
 # Data directory (keep sample data)
 data/
 !data/sample_data.csv

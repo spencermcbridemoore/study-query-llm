@@ -32,7 +32,7 @@ docker build -t study-query-llm:test --build-arg RUN_TESTS=1 .
 
 | Arg | Default | Description |
 | --- | --- | --- |
-| `RUN_TESTS` | `0` | When set to `1`, runs `pytest test_e2e_verification.py` (falls back to `pytest test_phase_1_1.py` if data is missing). |
+| `RUN_TESTS` | `0` | When set to `1`, runs `pytest tests/test_scripts/test_report_layer0_dataset_stats.py` as a lightweight build-time smoke gate. |
 
 ## 3. Run with `docker run`
 
@@ -142,7 +142,7 @@ Run these quick checks before publishing or tagging a release:
 3. `docker run --rm study-query-llm:local --address 127.0.0.1 --port 5007`
    - Verify logs show `Panel application available at http://...`
 4. `curl http://localhost:5007/health` (from host) returns `{"status": "ok"}`
-5. `docker exec` into the container and run `python -m pytest tests/test_phase_1_1.py`
+5. `docker exec` into the container and run `python -m pytest tests/test_scripts/test_report_layer0_dataset_stats.py`
 6. If API keys are available, run a real inference through the UI and confirm it
    lands in the database volume.
 

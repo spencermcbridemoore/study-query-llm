@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility wrapper for moved history script."""
+"""Compatibility wrapper: canonical implementation under `scripts/deprecated/run_custom_full_categories_sweep.py`."""
 
 from __future__ import annotations
 
@@ -11,16 +11,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.history.experiments.run_custom_full_categories_sweep import *  # noqa: F401,F403
-
-
 if __name__ == "__main__":
     print(
-        "[DEPRECATED] scripts/run_custom_full_categories_sweep.py moved to "
-        "scripts/history/experiments/run_custom_full_categories_sweep.py",
+        "[DEPRECATED] scripts/run_custom_full_categories_sweep.py forwards to scripts.deprecated.",
         file=sys.stderr,
     )
     runpy.run_module(
-        "scripts.history.experiments.run_custom_full_categories_sweep",
+        "scripts.deprecated.run_custom_full_categories_sweep",
         run_name="__main__",
     )

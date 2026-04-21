@@ -33,11 +33,17 @@ The following no-PCA/experimental scripts were moved into `history`:
 - `scripts/history/experiments/run_no_pca_multi_embedding_sweep.py`
 - `scripts/history/experiments/test_no_pca_sweep.py`
 
-Compatibility wrappers remain at their original root paths under `scripts/` and print
-a deprecation notice when executed.
+Thin compatibility wrappers remain at their original root paths under `scripts/` and
+print a deprecation notice when executed. **Move set v1.1:** no-PCA/history forwarding
+scripts delegate to [`scripts/deprecated/`](deprecated/) (canonical relocated surface);
+root → `scripts/deprecated/*` → `scripts/history/*` (or `scripts/run_pca_kllmeans_sweep.py`
+for the legacy PCA name). Incident recovery scripts live under
+[`scripts/history/sweep_recovery/`](history/sweep_recovery/); root `archive_pre_fix_runs.py`
+/ `label_pre_fix_runs.py` forward there.
 
-Historical compatibility stubs also exist for legacy names that still appear in
-historical docs (`scripts/pca_kllmeans_sweep.py`, `scripts/migrate_v1_to_v2.py`).
+Historical compatibility stubs for names that still appear in historical docs
+(`scripts/pca_kllmeans_sweep.py`, `scripts/migrate_v1_to_v2.py`) have implementations
+under `scripts/deprecated/` with root wrappers preserved.
 
 ## Canonical DB Ops Matrix
 

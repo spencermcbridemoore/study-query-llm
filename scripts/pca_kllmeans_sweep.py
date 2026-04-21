@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility wrapper for renamed sweep entrypoint."""
+"""Compatibility wrapper: canonical implementation under `scripts/deprecated/pca_kllmeans_sweep.py`."""
 
 from __future__ import annotations
 
@@ -11,12 +11,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.run_pca_kllmeans_sweep import *  # noqa: F401,F403
-
-
 if __name__ == "__main__":
     print(
-        "[DEPRECATED] scripts/pca_kllmeans_sweep.py renamed to scripts/run_pca_kllmeans_sweep.py",
+        "[DEPRECATED] scripts/pca_kllmeans_sweep.py forwards to scripts.deprecated "
+        "(still delegates to scripts/run_pca_kllmeans_sweep.py).",
         file=sys.stderr,
     )
-    runpy.run_module("scripts.run_pca_kllmeans_sweep", run_name="__main__")
+    runpy.run_module("scripts.deprecated.pca_kllmeans_sweep", run_name="__main__")

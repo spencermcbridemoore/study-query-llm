@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
-"""Deprecated compatibility stub for historical v1->v2 migration."""
+"""Compatibility wrapper: canonical implementation under `scripts/deprecated/migrate_v1_to_v2.py`."""
 
 from __future__ import annotations
 
+import runpy
 import sys
+from pathlib import Path
 
-
-def main() -> int:
-    print(
-        "scripts/migrate_v1_to_v2.py is deprecated and retained only for historical references.",
-        file=sys.stderr,
-    )
-    print(
-        "See docs/IMPLEMENTATION_PLAN.md and docs/history/README.md for migration chronology.",
-        file=sys.stderr,
-    )
-    return 1
-
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    print(
+        "[DEPRECATED] scripts/migrate_v1_to_v2.py forwards to scripts.deprecated.migrate_v1_to_v2.",
+        file=sys.stderr,
+    )
+    runpy.run_module("scripts.deprecated.migrate_v1_to_v2", run_name="__main__")

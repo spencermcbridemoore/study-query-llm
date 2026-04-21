@@ -7,6 +7,8 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from study_query_llm.pipeline.runner import allow_no_run_stage
+
 
 def _bool_param(params: Mapping[str, Any], *keys: str, default: bool) -> bool:
     for key in keys:
@@ -83,6 +85,7 @@ def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+@allow_no_run_stage
 def run_hdbscan_analysis(
     *,
     method_name: str,

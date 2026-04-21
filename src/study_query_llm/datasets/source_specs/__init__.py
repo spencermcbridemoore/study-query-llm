@@ -3,6 +3,11 @@
 from study_query_llm.datasets.source_specs.ausem import (
     AUSEM_DATASET_SLUG,
     ausem_file_specs,
+    parse_ausem_problem1_snapshot,
+    parse_ausem_problem2_snapshot,
+    parse_ausem_problem3_snapshot,
+    parse_ausem_problem4_snapshot,
+    parse_ausem_snapshot,
     ausem_source_metadata,
 )
 from study_query_llm.datasets.source_specs.banking77 import (
@@ -45,6 +50,11 @@ __all__ = [
     "SEMEVAL2013_SRA_5WAY_SLUG",
     "SOURCES_UNCERTAINTY_QC_SLUG",
     "ausem_file_specs",
+    "parse_ausem_problem1_snapshot",
+    "parse_ausem_problem2_snapshot",
+    "parse_ausem_problem3_snapshot",
+    "parse_ausem_problem4_snapshot",
+    "parse_ausem_snapshot",
     "ausem_source_metadata",
     "banking77_file_specs",
     "banking77_resolve_url",

@@ -15,6 +15,7 @@ from study_query_llm.datasets.acquisition import (
     write_acquisition_bundle,
     zenodo_file_download_url,
 )
+from study_query_llm.datasets.source_specs.ausem import parse_ausem_snapshot
 from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 
 
@@ -89,6 +90,7 @@ def test_acquisition_manifest_sha256_stable_for_identical_dict():
 def test_acquire_registry_contains_ausem():
     assert "ausem" in ACQUIRE_REGISTRY
     cfg = ACQUIRE_REGISTRY["ausem"]
+    assert cfg.default_parser is parse_ausem_snapshot
     files = cfg.file_specs()
     assert len(files) == 4
     assert all("Student_Explanations/problem" in f.relative_path for f in files)

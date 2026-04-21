@@ -16,6 +16,7 @@ from study_query_llm.datasets.source_specs.parser_protocol import ParserCallable
 from study_query_llm.datasets.source_specs.ausem import (
     AUSEM_DATASET_SLUG,
     ausem_file_specs,
+    parse_ausem_snapshot,
     ausem_source_metadata,
 )
 from study_query_llm.datasets.source_specs.semeval2013_sra_5way import (
@@ -50,6 +51,7 @@ ACQUIRE_REGISTRY: Dict[str, DatasetAcquireConfig] = {
         slug=AUSEM_DATASET_SLUG,
         file_specs=ausem_file_specs,
         source_metadata=ausem_source_metadata,
+        default_parser=parse_ausem_snapshot,
     ),
     SOURCES_UNCERTAINTY_QC_SLUG: DatasetAcquireConfig(
         slug=SOURCES_UNCERTAINTY_QC_SLUG,

@@ -66,7 +66,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Data pipeline behavior/acceptance criteria are documented in `docs/DATA_PIPELINE.md`; use this as the canonical contract for acquisition/snapshot/embedding/analysis behavior.
 - Optional Jetstream `pg_dump` archival to Azure container `db-backups`: `scripts/upload_jetstream_pg_dump_to_blob.py` writes the dump blob plus `backup_pg_dumps/*.manifest.json` for `scripts/verify_db_backup_inventory.py` (uses `AZURE_STORAGE_CONNECTION_STRING`, same account as artifacts).
 - High-risk DB scripts now enforce write-target guardrails (remote-target overrides, same-target refusal, and explicit destructive confirmations).
-- Scripts use lane governance (`scripts/living`, `scripts/history`, `scripts/deprecated`, `scripts/internal`). No-PCA/experiment drivers live under `scripts/history`; **move set v1.1** adds canonical implementations under `scripts/deprecated/` (thin root wrappers forward there, then into history where applicable). Incident sweep tooling: `scripts/history/sweep_recovery/` (`archive_pre_fix_runs`, `label_pre_fix_runs`) with root wrappers preserved.
+- Scripts use lane governance (`scripts/living`, `scripts/history`, `scripts/deprecated`, `scripts/internal`). No-PCA/experiment drivers live under `scripts/history`; **move set v1.1** adds canonical implementations under `scripts/deprecated/` (thin root wrappers forward there, then into history where applicable). **Move set v1.2** adds `scripts/history/one_offs/` for ad-hoc probes/utilities moved out of root without wrappers where no active references required path stability. Incident sweep tooling: `scripts/history/sweep_recovery/` (`archive_pre_fix_runs`, `label_pre_fix_runs`) with root wrappers preserved.
 
 ## Known Legacy / Transitional Areas
 
@@ -79,3 +79,4 @@ This document is the canonical "what exists and works now" summary for the repos
 - Keep parity with `docs/review/DOC_PARITY_LEDGER.md`.
 - Update living docs first; append historical notes instead of mixing modes.
 - Avoid fixed claims that go stale quickly (for example exact test counts).
+

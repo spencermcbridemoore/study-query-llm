@@ -9,6 +9,7 @@ but are not the primary operational entrypoints.
 - `scripts/history/experiments/`: older experimental sweep drivers and harnesses
 - `scripts/history/sweep_recovery/`: one-off clustering/sweep incident tooling
   (`archive_pre_fix_runs.py`, `label_pre_fix_runs.py`)
+- `scripts/history/one_offs/`: ad-hoc probes/utilities moved from root in v1.2
 
 ## Compatibility
 
@@ -16,3 +17,4 @@ Several moved scripts still have root-level wrappers under `scripts/` that print
 deprecation notice and forward execution (often via `scripts/deprecated/` first, then
 into this lane). Update any saved commands to use the `scripts/history/...` path
 directly when practical.
+

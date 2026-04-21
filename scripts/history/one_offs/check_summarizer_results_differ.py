@@ -7,7 +7,7 @@ available) full objective lists per k. If an LLM summarizer matches None (same m
 or identical list), the script reports FAIL; otherwise PASS.
 
 Usage:
-  python scripts/check_summarizer_results_differ.py
+  python scripts/history/one_offs/check_summarizer_results_differ.py
 
 Requires DATABASE_URL and existing clustering_run data from sweep ingestion.
 """
@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -117,3 +117,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+

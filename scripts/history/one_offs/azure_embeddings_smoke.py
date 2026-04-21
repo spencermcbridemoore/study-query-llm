@@ -43,7 +43,7 @@ def _load_env() -> dict:
         load_dotenv = None
 
     info["dotenv_available"] = True
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
     env_path = repo_root / ".env"
     info["env_path"] = str(env_path)
     info["env_found"] = env_path.exists()
@@ -159,3 +159,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

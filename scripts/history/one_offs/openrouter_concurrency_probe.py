@@ -6,8 +6,8 @@ OpenRouter behaves under parallel load. Does not use the MCQ probe, DB, or
 disk artifacts beyond an optional JSON summary path.
 
 Examples:
-  python scripts/openrouter_concurrency_probe.py --concurrency 30 --requests 60
-  python scripts/openrouter_concurrency_probe.py --matrix 15,30,60 --requests-per-phase 40
+  python scripts/history/one_offs/openrouter_concurrency_probe.py --concurrency 30 --requests 60
+  python scripts/history/one_offs/openrouter_concurrency_probe.py --matrix 15,30,60 --requests-per-phase 40
 """
 
 from __future__ import annotations
@@ -23,11 +23,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-import study_query_llm.config  # noqa: F401 — load .env
+import study_query_llm.config  # noqa: F401 - load .env
 
 from study_query_llm.config import Config
 from study_query_llm.providers.factory import ProviderFactory
@@ -248,3 +248,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

@@ -7,9 +7,9 @@ OPENROUTER_API_KEY and uses ProviderFactory(openrouter, model_id).
 Default model list matches models intended for the [3,4,5,6] options sweep.
 
 Examples:
-  python scripts/verify_openrouter_chat_models.py
-  python scripts/verify_openrouter_chat_models.py --models openai/gpt-oss-20b,allenai/olmo-3.1-32b-instruct
-  python scripts/verify_openrouter_chat_models.py --parallel 2 --json-out experimental_results/openrouter_model_ping.json
+  python scripts/history/one_offs/verify_openrouter_chat_models.py
+  python scripts/history/one_offs/verify_openrouter_chat_models.py --models openai/gpt-oss-20b,allenai/olmo-3.1-32b-instruct
+  python scripts/history/one_offs/verify_openrouter_chat_models.py --parallel 2 --json-out experimental_results/openrouter_model_ping.json
 """
 
 from __future__ import annotations
@@ -23,11 +23,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-import study_query_llm.config  # noqa: F401 — load .env
+import study_query_llm.config  # noqa: F401 - load .env
 
 from study_query_llm.config import Config
 from study_query_llm.providers.factory import ProviderFactory
@@ -221,3 +221,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

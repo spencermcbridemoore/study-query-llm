@@ -1,23 +1,23 @@
-"""
+﻿"""
 One-time migration: rename generic group types to clustering-specific names.
 
 Before:
-    groups.group_type  = 'run'   → 'clustering_run'
-    groups.group_type  = 'step'  → 'clustering_step'
-    group_links.link_type = 'step' → 'clustering_step'
+    groups.group_type  = 'run'   -> 'clustering_run'
+    groups.group_type  = 'step'  -> 'clustering_step'
+    group_links.link_type = 'step' -> 'clustering_step'
 
 'run' groups created by inference.py (panel UI) are identifiable by
 description = 'Run group created from Panel UI' and are renamed to
 'inference_run' so the generic 'run' name stays free for the future.
 
-The script is idempotent — re-running is safe.
+The script is idempotent - re-running is safe.
 """
 
 import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from sqlalchemy import text as sa_text
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
@@ -53,7 +53,7 @@ def main() -> None:
         print(f"  groups  group_type='inference_run'  : {before['i_run']}  (already migrated)")
 
         if before["run"] == 0 and before["step"] == 0 and before["link_step"] == 0:
-            print("\nNothing to migrate — all rows already use new type names.")
+            print("\nNothing to migrate - all rows already use new type names.")
             return
 
         # ------------------------------------------------------------------ #
@@ -126,8 +126,9 @@ def main() -> None:
         if after["run"] == 0 and after["step"] == 0 and after["link_step"] == 0:
             print("\n[OK] Migration complete.")
         else:
-            print("\n[WARN] Some rows still have old type names — investigate manually.")
+            print("\n[WARN] Some rows still have old type names - investigate manually.")
 
 
 if __name__ == "__main__":
     main()
+

@@ -11,7 +11,7 @@ datetime.date objects). The pickle preserves those native Python types and is
 the format expected by load_estela_dict() across all sweep and analysis scripts.
 
 To update the snapshot:
-    python scripts/export_estela_prompt_data.py
+    python scripts/history/one_offs/export_estela_prompt_data.py
     git add notebooks/estela_prompt_data.pkl
     git commit -m "data: update estela snapshot (<reason>)"
 """
@@ -20,7 +20,7 @@ import runpy
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ESTELA_DB_PY = REPO_ROOT / "data" / "estela" / "estela_db.py"
 OUT_PKL = REPO_ROOT / "notebooks" / "estela_prompt_data.pkl"
 
@@ -50,3 +50,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

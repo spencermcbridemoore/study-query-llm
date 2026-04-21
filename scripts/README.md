@@ -18,7 +18,7 @@ Lane directories:
 - [`scripts/deprecated/`](deprecated/README.md)
 - [`scripts/internal/`](internal/README.md)
 
-## Current Lane Assignments (First Cleanup Pass)
+## Current Lane Assignments (Cleanup Passes)
 
 The following no-PCA/experimental scripts were moved into `history`:
 
@@ -33,10 +33,14 @@ The following no-PCA/experimental scripts were moved into `history`:
 - `scripts/history/experiments/run_no_pca_multi_embedding_sweep.py`
 - `scripts/history/experiments/test_no_pca_sweep.py`
 
+Move set v1.2 moved one-off probes/utilities into `scripts/history/one_offs/`
+(for example: `check_db_empty.py`, `check_all_data.py`, `check_embedding_calls.py`,
+`check_rate_limits.py`, TEI/OpenRouter probes, and export/migration one-offs).
+
 Thin compatibility wrappers remain at their original root paths under `scripts/` and
 print a deprecation notice when executed. **Move set v1.1:** no-PCA/history forwarding
 scripts delegate to [`scripts/deprecated/`](deprecated/) (canonical relocated surface);
-root → `scripts/deprecated/*` → `scripts/history/*` (or `scripts/run_pca_kllmeans_sweep.py`
+root -> `scripts/deprecated/*` -> `scripts/history/*` (or `scripts/run_pca_kllmeans_sweep.py`
 for the legacy PCA name). Incident recovery scripts live under
 [`scripts/history/sweep_recovery/`](history/sweep_recovery/); root `archive_pre_fix_runs.py`
 / `label_pre_fix_runs.py` forward there.
@@ -66,7 +70,7 @@ Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../d
 
 ## Full-Copy vs Incremental Copy
 
-- **Full-copy replace/clone:** `dump_postgres_for_jetstream_migration.py` + restore runbooks/scripts (`pg_dump`/`pg_restore`); optional off-VM archival: `upload_jetstream_pg_dump_to_blob.py` → Azure `db-backups` + manifest for `verify_db_backup_inventory.py`
+- **Full-copy replace/clone:** `dump_postgres_for_jetstream_migration.py` + restore runbooks/scripts (`pg_dump`/`pg_restore`); optional off-VM archival: `upload_jetstream_pg_dump_to_blob.py` -> Azure `db-backups` + manifest for `verify_db_backup_inventory.py`
 - **Incremental sync:** `sync_from_online.py` for additive v2-row transfer into a local clone, not full replacement
 - **Compatibility note:** `dump_postgres_for_jetstream_migration.py` keeps its filename for backward compatibility
 
@@ -106,7 +110,7 @@ python scripts/<entrypoint>.py
 Or pass explicit environment values inline:
 
 ```bash
-DATABASE_URL=postgresql://... python scripts/check_all_data.py
+DATABASE_URL=postgresql://... python scripts/probe_postgres_inventory.py
 ```
 
 ## Maintenance Rules
@@ -116,3 +120,6 @@ DATABASE_URL=postgresql://... python scripts/check_all_data.py
 - Run `python scripts/verify_script_path_references.py` after doc/script path changes.
 - Use `encoding='utf-8'` for Python file operations.
 - When moving a referenced entrypoint, keep a compatibility wrapper and update runbooks/docs/parity evidence in the same change.
+
+
+

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import os
 from dotenv import load_dotenv
@@ -101,3 +101,4 @@ print("Rate Limit Check Complete")
 print("="*80)
 print("\nNote: For complete rate limit details, visit:")
 print("  https://platform.openai.com/settings/organization/limits")
+

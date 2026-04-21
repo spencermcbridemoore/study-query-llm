@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from sqlalchemy import text as sa_text
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
@@ -80,7 +80,7 @@ def main() -> None:
             )
 
         if not runs:
-            print("Nothing to link — aborting.")
+            print("Nothing to link - aborting.")
             return
 
         # ------------------------------------------------------------------ #
@@ -152,3 +152,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

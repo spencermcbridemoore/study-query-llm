@@ -3,7 +3,7 @@ Quick connectivity check for ACI + HuggingFace credentials.
 Read-only -- does NOT create any Azure resources.
 
 Run with:
-    python scripts/check_aci_credentials.py
+    python scripts/history/one_offs/check_aci_credentials.py
 """
 
 import os
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 sub_id = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
 rg = os.environ.get("AZURE_RESOURCE_GROUP", "")
@@ -97,3 +97,5 @@ else:
 print("\n" + "=" * 60)
 print("All checks complete.")
 print("=" * 60)
+
+

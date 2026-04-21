@@ -8,7 +8,7 @@ from pathlib import Path
 # Load .env file if available
 try:
     from dotenv import load_dotenv
-    env_path = Path(__file__).parent.parent / ".env"
+    env_path = Path(__file__).resolve().parents[3] / ".env"
     if env_path.exists():
         load_dotenv(env_path)
     else:
@@ -79,3 +79,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

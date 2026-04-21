@@ -18,6 +18,7 @@ from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
 from study_query_llm.pipeline.embed import embed
+from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.snapshot import snapshot
 from study_query_llm.pipeline.types import SnapshotRow
 
@@ -275,6 +276,117 @@ def test_analyze_auto_request_group_and_idempotent_reuse(
             ):
                 matches.append(group.id)
         assert len(matches) == 1
+
+
+def test_analyze_enriches_execution_row_with_canonical_fingerprint(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    input_group_id = _prepare_embedding_input(db=db, artifact_dir=artifact_dir)
+    request_group_id = _create_request_group(db, "request_canonical")
+
+    def runner(**kwargs):
+        embeddings = np.asarray(kwargs["embeddings"], dtype=np.float64)
+        return {
+            "scalar_results": {"row_count": float(embeddings.shape[0])},
+            "structured_results": {"canonical": {"ok": True}},
+            "artifacts": {"canonical.json": b'{"canonical":true}'},
+            "result_ref": "canonical.json",
+        }
+
+    result = analyze(
+        input_group_id,
+        method_name="canonical_identity_method",
+        run_key="rk_canonical",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        parameters={
+            "dataset_slug": "analyze_fixture",
+            "representation_type": "full",
+            "embedding_provider": "test-provider",
+            "embedding_deployment": "test-embedding-model",
+            "determinism_class": "non_deterministic",
+        },
+        method_runner=runner,
+    )
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_row = repo.get_provenanced_run_by_request_and_key(
+            request_group_id=request_group_id,
+            run_key="rk_canonical",
+            run_kind="analysis_execution",
+        )
+        assert run_row is not None
+        assert int(run_row.id) == int(result.run_id or -1)
+        assert run_row.method_definition_id is not None
+        assert run_row.config_json is not None
+        assert run_row.config_json["parameters"]["dataset_slug"] == "analyze_fixture"
+        assert run_row.config_hash is not None
+        assert len(str(run_row.config_hash)) == 64
+        assert run_row.fingerprint_json is not None
+        assert run_row.fingerprint_json["method_name"] == "canonical_identity_method"
+        assert run_row.fingerprint_json["determinism_class"] == "non_deterministic"
+        assert run_row.fingerprint_hash is not None
+        assert len(str(run_row.fingerprint_hash)) == 64
+
+
+def test_analyze_hdbscan_runner_persists_expected_results(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    pytest.importorskip("hdbscan")
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    input_group_id = _prepare_embedding_input(db=db, artifact_dir=artifact_dir)
+    request_group_id = _create_request_group(db, "request_hdbscan")
+
+    result = analyze(
+        input_group_id,
+        method_name="phase1_hdbscan_fixture",
+        run_key="rk_hdbscan",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        method_runner=run_hdbscan_analysis,
+        parameters={
+            "dataset_slug": "analyze_fixture",
+            "representation_type": "full",
+            "embedding_provider": "test-provider",
+            "embedding_deployment": "test-embedding-model",
+            "hdbscan_min_cluster_size": 2,
+            "hdbscan_min_samples": 1,
+            "hdbscan_metric": "euclidean",
+            "hdbscan_cluster_selection_method": "eom",
+            "hdbscan_normalize_embeddings": True,
+        },
+    )
+
+    assert "hdbscan_summary.json" in result.artifact_uris
+    assert "hdbscan_labels.json" in result.artifact_uris
+
+    with db.session_scope() as session:
+        result_rows = (
+            session.query(AnalysisResult)
+            .filter(AnalysisResult.analysis_group_id == result.group_id)
+            .all()
+        )
+        result_keys = {row.result_key for row in result_rows}
+        assert "hdbscan_summary" in result_keys
+        assert "hdbscan_cluster_labels" in result_keys
+        assert "cluster_count" in result_keys
+        assert "noise_count" in result_keys
+
+        labels_row = next(
+            row for row in result_rows if row.result_key == "hdbscan_cluster_labels"
+        )
+        labels_payload = labels_row.result_json["value"]
+        assert len(labels_payload["cluster_labels"]) == 3
 
 
 def test_analyze_race_same_key_runs_once(

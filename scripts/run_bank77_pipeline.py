@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -19,6 +20,7 @@ from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
 from study_query_llm.pipeline.embed import embed
+from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.snapshot import snapshot
 
 
@@ -82,16 +84,70 @@ def _parse_args() -> argparse.Namespace:
         help="Method name persisted by stage 4 analysis.",
     )
     parser.add_argument(
+        "--analysis-strategy",
+        type=str,
+        choices=["default", "hdbscan"],
+        default="default",
+        help="Analysis implementation strategy (default or hdbscan).",
+    )
+    parser.add_argument(
         "--analysis-run-key",
         type=str,
         default=None,
-        help="Deterministic run key; defaults to UTC timestamp key.",
+        help="Deterministic run key; hdbscan defaults to params-hash key.",
     )
     parser.add_argument(
         "--analysis-method-version",
         type=str,
         default=None,
         help="Optional method version for analysis result rows.",
+    )
+    parser.add_argument(
+        "--hdbscan-min-cluster-size",
+        type=int,
+        default=5,
+        help="HDBSCAN min_cluster_size (used only with --analysis-strategy hdbscan).",
+    )
+    parser.add_argument(
+        "--hdbscan-min-samples",
+        type=int,
+        default=None,
+        help="Optional HDBSCAN min_samples (used only with --analysis-strategy hdbscan).",
+    )
+    parser.add_argument(
+        "--hdbscan-metric",
+        type=str,
+        default="euclidean",
+        help="HDBSCAN distance metric (used only with --analysis-strategy hdbscan).",
+    )
+    parser.add_argument(
+        "--hdbscan-cluster-selection-method",
+        type=str,
+        choices=["eom", "leaf"],
+        default="eom",
+        help="HDBSCAN cluster selection method.",
+    )
+    parser.add_argument(
+        "--hdbscan-cluster-selection-epsilon",
+        type=float,
+        default=0.0,
+        help="HDBSCAN cluster_selection_epsilon.",
+    )
+    parser.add_argument(
+        "--hdbscan-alpha",
+        type=float,
+        default=1.0,
+        help="HDBSCAN alpha parameter.",
+    )
+    parser.add_argument(
+        "--hdbscan-allow-single-cluster",
+        action="store_true",
+        help="Enable HDBSCAN allow_single_cluster.",
+    )
+    parser.add_argument(
+        "--hdbscan-normalize-embeddings",
+        action="store_true",
+        help="L2-normalize embeddings before HDBSCAN fit.",
     )
     parser.add_argument(
         "--force-acquire",
@@ -121,6 +177,86 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _safe_token(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(value).strip().lower())
+    return cleaned.strip("_") or "value"
+
+
+def _resolve_analysis_method_name(args: argparse.Namespace) -> str:
+    method_name = str(args.analysis_method).strip()
+    if (
+        str(args.analysis_strategy) == "hdbscan"
+        and method_name == "bank77_structural_summary"
+    ):
+        return "bank77_hdbscan_analysis"
+    return method_name
+
+
+def _build_analysis_parameters(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {
+        "dataset_slug": str(args.dataset_slug),
+        "representation_type": str(args.embedding_representation),
+        "embedding_representation": str(args.embedding_representation),
+        "embedding_deployment": str(args.embedding_deployment),
+        "embedding_provider": str(args.embedding_provider),
+        "analysis_strategy": str(args.analysis_strategy),
+    }
+    if str(args.analysis_strategy) == "hdbscan":
+        params.update(
+            {
+                "hdbscan_min_cluster_size": int(args.hdbscan_min_cluster_size),
+                "hdbscan_min_samples": (
+                    int(args.hdbscan_min_samples)
+                    if args.hdbscan_min_samples is not None
+                    else None
+                ),
+                "hdbscan_metric": str(args.hdbscan_metric),
+                "hdbscan_cluster_selection_method": str(
+                    args.hdbscan_cluster_selection_method
+                ),
+                "hdbscan_cluster_selection_epsilon": float(
+                    args.hdbscan_cluster_selection_epsilon
+                ),
+                "hdbscan_alpha": float(args.hdbscan_alpha),
+                "hdbscan_allow_single_cluster": bool(args.hdbscan_allow_single_cluster),
+                "hdbscan_normalize_embeddings": bool(args.hdbscan_normalize_embeddings),
+            }
+        )
+    return params
+
+
+def _resolve_run_key(
+    args: argparse.Namespace,
+    *,
+    method_name: str,
+    parameters: dict[str, object],
+) -> str:
+    if args.analysis_run_key:
+        return str(args.analysis_run_key).strip()
+    strategy = str(args.analysis_strategy)
+    if strategy != "hdbscan":
+        return datetime.now(timezone.utc).strftime("bank77_%Y%m%d_%H%M%S")
+    canonical = json.dumps(
+        {
+            "method_name": method_name,
+            "parameters": parameters,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+    dataset_token = _safe_token(str(parameters.get("dataset_slug") or "dataset"))
+    deployment_token = _safe_token(str(parameters.get("embedding_deployment") or "embed"))
+    return f"{dataset_token}_{deployment_token}_hdbscan_{digest}"
+
+
+def _resolve_method_runner(args: argparse.Namespace):
+    if str(args.analysis_strategy) == "hdbscan":
+        return run_hdbscan_analysis
+    return None
+
+
 def main() -> None:
     args = _parse_args()
     database_url = str(args.database_url or os.environ.get("DATABASE_URL") or "").strip()
@@ -131,12 +267,6 @@ def main() -> None:
     if acquire_spec is None:
         known = ", ".join(sorted(ACQUIRE_REGISTRY.keys()))
         raise ValueError(f"Unknown dataset slug {args.dataset_slug!r}. Known: {known}")
-
-    run_key = (
-        str(args.analysis_run_key).strip()
-        if args.analysis_run_key
-        else datetime.now(timezone.utc).strftime("bank77_%Y%m%d_%H%M%S")
-    )
 
     db = DatabaseConnectionV2(database_url, enable_pgvector=False)
     db.init_db()
@@ -167,20 +297,23 @@ def main() -> None:
 
     analyzed = None
     if not args.skip_analysis:
+        analysis_method_name = _resolve_analysis_method_name(args)
+        analysis_parameters = _build_analysis_parameters(args)
+        run_key = _resolve_run_key(
+            args,
+            method_name=analysis_method_name,
+            parameters=analysis_parameters,
+        )
         analyzed = analyze(
             embedded.group_id,
-            method_name=str(args.analysis_method),
+            method_name=analysis_method_name,
             method_version=args.analysis_method_version,
             run_key=run_key,
             force=bool(args.force_analyze),
             db=db,
             artifact_dir=str(args.artifact_dir),
-            parameters={
-                "dataset_slug": str(args.dataset_slug),
-                "embedding_representation": str(args.embedding_representation),
-                "embedding_deployment": str(args.embedding_deployment),
-                "embedding_provider": str(args.embedding_provider),
-            },
+            parameters=analysis_parameters,
+            method_runner=_resolve_method_runner(args),
         )
 
     summary = {

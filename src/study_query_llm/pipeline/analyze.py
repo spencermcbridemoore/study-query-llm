@@ -20,6 +20,7 @@ from study_query_llm.pipeline.types import StageResult
 from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.provenance_service import ProvenanceService
+from study_query_llm.services.provenanced_run_service import ProvenancedRunService
 
 ARTIFACT_TYPE_EMBEDDING_MATRIX = "embedding_matrix"
 ARTIFACT_TYPE_DATASET_SNAPSHOT_PARQUET = "dataset_snapshot_parquet"
@@ -481,17 +482,79 @@ def analyze(
                 )
                 result_count += 1
 
-            if identity.run_id is not None and payload.result_ref:
-                resolved_result_ref = artifact_uris.get(payload.result_ref, payload.result_ref)
-                repo.update_provenanced_run(
-                    int(identity.run_id),
-                    result_ref=str(resolved_result_ref),
+            resolved_result_ref: str | None = None
+            if payload.result_ref:
+                resolved_result_ref = str(artifact_uris.get(payload.result_ref, payload.result_ref))
+
+            existing_run_metadata: dict[str, Any] = {}
+            if identity.run_id is not None:
+                existing_run = repo.get_provenanced_run_by_id(int(identity.run_id))
+                if existing_run is not None:
+                    existing_run_metadata = dict(existing_run.metadata_json or {})
+
+            execution_metadata: dict[str, Any] = dict(existing_run_metadata)
+            execution_metadata["stage_name"] = "analyze"
+            execution_metadata["analysis_key"] = str(method_name)
+            execution_metadata["analysis_group_id"] = int(identity.group_id)
+            execution_metadata["input_group_id"] = int(input_group_id)
+            execution_metadata["request_group_id"] = int(resolved_request_group_id)
+
+            manifest_hash = input_group_metadata.get("source_manifest_hash") or input_group_metadata.get(
+                "manifest_hash"
+            )
+            if manifest_hash is not None:
+                execution_metadata.setdefault("manifest_hash", str(manifest_hash))
+
+            data_regime = {
+                key: resolved_params[key]
+                for key in (
+                    "dataset_slug",
+                    "representation_type",
+                    "embedding_provider",
+                    "embedding_deployment",
+                )
+                if key in resolved_params and resolved_params[key] is not None
+            }
+            if data_regime:
+                execution_metadata.setdefault("data_regime", data_regime)
+
+            canonical_config: dict[str, Any] = {
+                "parameters": dict(resolved_params),
+                "input_group_id": int(input_group_id),
+                "input_group_type": str(input_group_type),
+            }
+            if method_version is not None:
+                canonical_config["method_version"] = str(method_version)
+
+            determinism_class = str(
+                resolved_params.get("determinism_class") or "non_deterministic"
+            )
+            provenanced_run_service = ProvenancedRunService(repo)
+            enriched_run_id = int(
+                provenanced_run_service.record_analysis_execution(
+                    request_group_id=int(resolved_request_group_id),
+                    source_group_id=int(input_group_id),
+                    method_definition_id=method_definition_id,
+                    analysis_key=method_name,
+                    analysis_run_key=run_key,
+                    result_ref=resolved_result_ref,
+                    config_json=canonical_config,
+                    determinism_class=determinism_class,
+                    metadata_json=execution_metadata,
+                )
+            )
+
+            if identity.run_id is not None and int(identity.run_id) != enriched_run_id:
+                raise RuntimeError(
+                    "analysis execution provenance upsert targeted a different run row "
+                    f"(stage_run_id={identity.run_id}, enriched_run_id={enriched_run_id})"
                 )
 
             return {
                 "method_definition_id": method_definition_id,
                 "result_count": result_count,
                 "request_group_id": int(resolved_request_group_id),
+                "analysis_execution_run_id": enriched_run_id,
             }
 
         result = run_stage(

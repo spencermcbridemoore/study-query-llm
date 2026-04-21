@@ -25,6 +25,7 @@ from study_query_llm.datasets.source_specs.semeval2013_sra_5way import (
 )
 from study_query_llm.datasets.source_specs.sources_uncertainty_zenodo import (
     SOURCES_UNCERTAINTY_QC_SLUG,
+    parse_sources_uncertainty_snapshot,
     sources_uncertainty_file_specs,
     sources_uncertainty_source_metadata,
 )
@@ -54,6 +55,7 @@ ACQUIRE_REGISTRY: Dict[str, DatasetAcquireConfig] = {
         slug=SOURCES_UNCERTAINTY_QC_SLUG,
         file_specs=sources_uncertainty_file_specs,
         source_metadata=sources_uncertainty_source_metadata,
+        default_parser=parse_sources_uncertainty_snapshot,
     ),
     SEMEVAL2013_SRA_5WAY_SLUG: DatasetAcquireConfig(
         slug=SEMEVAL2013_SRA_5WAY_SLUG,

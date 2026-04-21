@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-18
+Last reviewed: 2026-04-20
 
 ## Scope
 
@@ -52,6 +52,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Canonical pipeline package lives in `src/study_query_llm/pipeline/` and implements four stages: `acquire`, `snapshot`, `embed`, `analyze` (with persistence-contract enforcement via `run_stage` + `scripts/check_persistence_contract.py`).
 - BANK77 full-data execution is scriptable via `scripts/run_bank77_pipeline.py`; the latest operator acceptance run completed with stage reuse verified on second invocation (idempotent group/artifact/run reuse).
 - Dataset source specs remain in `src/study_query_llm/datasets/source_specs/` (including `banking77.py` with pinned HuggingFace resolve URLs); "Layer 0 / Layer 1" terminology is retired in favor of stage names.
+- `sources_uncertainty_qc` now has a default snapshot parser (`parse_sources_uncertainty_snapshot`) plus a PM-only parser variant (`parse_sources_uncertainty_pm_snapshot`). Snapshot provenance captures parser identity and representation, enabling parallel all-experiment and PM-focused snapshots from the same acquired dataset group.
 - Artifact writes enforce an Azure blob quota hard-stop (default 100 GiB; configurable via env).
 - Embedding token-limit validation can use discovered model `context_length` from `ModelRegistry` cache when available (provider+deployment key match), then falls back to existing static/inferred limits.
 

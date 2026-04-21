@@ -24,6 +24,20 @@ ARTIFACT_TYPE_SNAPSHOT_PARQUET = "dataset_snapshot_parquet"
 ARTIFACT_TYPE_EMBEDDING_MATRIX = "embedding_matrix"
 ARTIFACT_TYPE_SPARSE_SIDECAR = "embedding_sparse_sidecar"
 
+REPRESENTATION_FULL = "full"
+REPRESENTATION_LABEL_CENTROID = "label_centroid"
+REPRESENTATION_LABEL_CENTROID_LEGACY = "intent_mean"
+REPRESENTATION_SPARSE = "sparse"
+
+LEGACY_REPRESENTATION_ALIASES: dict[str, str] = {
+    REPRESENTATION_LABEL_CENTROID_LEGACY: REPRESENTATION_LABEL_CENTROID,
+}
+ALLOWED_REPRESENTATIONS = {
+    REPRESENTATION_FULL,
+    REPRESENTATION_LABEL_CENTROID,
+    REPRESENTATION_SPARSE,
+}
+
 EmbeddingFetcher = Callable[..., np.ndarray]
 
 
@@ -122,7 +136,7 @@ def _default_embedding_fetcher(
     return np.asarray(matrix, dtype=np.float64)
 
 
-def _pool_intent_mean(
+def _pool_label_centroid(
     *,
     matrix: np.ndarray,
     labels: list[int | None],
@@ -133,7 +147,7 @@ def _pool_intent_mean(
             continue
         buckets.setdefault(int(label), []).append(matrix[idx])
     if not buckets:
-        raise ValueError("intent_mean representation requires at least one labeled row")
+        raise ValueError("label_centroid representation requires at least one labeled row")
     sorted_labels = sorted(buckets.keys())
     pooled = np.vstack(
         [
@@ -146,6 +160,22 @@ def _pool_intent_mean(
         "pooled_labels": sorted_labels,
     }
     return pooled, metadata
+
+
+def _normalize_representation(representation: str) -> tuple[str, list[str]]:
+    input_repr = str(representation).strip().lower()
+    canonical_repr = LEGACY_REPRESENTATION_ALIASES.get(input_repr, input_repr)
+    if canonical_repr not in ALLOWED_REPRESENTATIONS:
+        allowed_tokens = sorted(
+            ALLOWED_REPRESENTATIONS.union(LEGACY_REPRESENTATION_ALIASES.keys())
+        )
+        raise ValueError(
+            f"representation must be one of {allowed_tokens}, got {representation!r}"
+        )
+    lookup_reprs = [canonical_repr]
+    if input_repr != canonical_repr:
+        lookup_reprs.append(input_repr)
+    return canonical_repr, lookup_reprs
 
 
 def embed(
@@ -167,12 +197,7 @@ def embed(
     """
     Build/reuse an embedding matrix artifact for a snapshot group.
     """
-    normalized_repr = str(representation).strip().lower()
-    allowed_representations = {"full", "intent_mean", "sparse"}
-    if normalized_repr not in allowed_representations:
-        raise ValueError(
-            f"representation must be one of {sorted(allowed_representations)}, got {representation!r}"
-        )
+    canonical_repr, lookup_reprs = _normalize_representation(representation)
 
     db_conn, _owned_db = _resolve_db(db=db, database_url=database_url)
     with db_conn.session_scope() as session:
@@ -197,19 +222,28 @@ def embed(
     if not texts:
         raise ValueError("snapshot parquet has no rows to embed")
 
-    dataset_key = f"snap:{int(snapshot_group_id)}:{normalized_repr}"
+    dataset_key = f"snap:{int(snapshot_group_id)}:{canonical_repr}"
+    lookup_dataset_keys = [
+        f"snap:{int(snapshot_group_id)}:{lookup_repr}" for lookup_repr in lookup_reprs
+    ]
     initial_entry_max = int(entry_max if entry_max is not None else len(texts))
 
     with db_conn.session_scope() as session:
         repo = RawCallRepository(session)
         artifacts = ArtifactService(repository=repo, artifact_dir=artifact_dir)
-        hit = artifacts.find_embedding_matrix_artifact(
-            dataset_key=dataset_key,
-            embedding_engine=deployment,
-            provider=provider,
-            entry_max=initial_entry_max,
-            key_version=key_version,
-        )
+        hit = None
+        hit_dataset_key = dataset_key
+        for lookup_dataset_key in lookup_dataset_keys:
+            hit = artifacts.find_embedding_matrix_artifact(
+                dataset_key=lookup_dataset_key,
+                embedding_engine=deployment,
+                provider=provider,
+                entry_max=initial_entry_max,
+                key_version=key_version,
+            )
+            if hit is not None:
+                hit_dataset_key = lookup_dataset_key
+                break
         if hit is not None and not force:
             group_id = int(hit.get("group_id") or 0)
             artifact_uris = {"embedding_matrix.npy": str(hit["uri"])}
@@ -224,7 +258,8 @@ def embed(
                 metadata={
                     "reused": True,
                     "dataset_key": dataset_key,
-                    "representation": normalized_repr,
+                    "representation": canonical_repr,
+                    "matched_dataset_key": hit_dataset_key,
                 },
             )
 
@@ -253,16 +288,16 @@ def embed(
 
     matrix = base_matrix
     matrix_metadata: dict[str, Any] = {
-        "representation": normalized_repr,
+        "representation": canonical_repr,
         "source_snapshot_group_id": int(snapshot_group_id),
     }
-    if normalized_repr == "intent_mean":
-        matrix, pooled_meta = _pool_intent_mean(matrix=base_matrix, labels=labels)
+    if canonical_repr == REPRESENTATION_LABEL_CENTROID:
+        matrix, pooled_meta = _pool_label_centroid(matrix=base_matrix, labels=labels)
         matrix_metadata.update(pooled_meta)
 
     effective_entry_max = int(matrix.shape[0])
     sparse_sidecar: dict[str, Any] | None = None
-    if normalized_repr == "sparse":
+    if canonical_repr == REPRESENTATION_SPARSE:
         nnz = int(np.count_nonzero(matrix))
         total = int(matrix.size)
         sparse_sidecar = {
@@ -306,7 +341,7 @@ def embed(
                 artifact_type=ARTIFACT_TYPE_SPARSE_SIDECAR,
                 content_type="application/json",
                 metadata={
-                    "representation": normalized_repr,
+                    "representation": canonical_repr,
                     "dataset_key": dataset_key,
                 },
             )
@@ -317,12 +352,12 @@ def embed(
         db=db_conn,
         stage_name="embed",
         group_type="embedding_batch",
-        group_name=f"embed:{dataset_slug}:{snapshot_group_id}:{deployment}:{normalized_repr}",
+        group_name=f"embed:{dataset_slug}:{snapshot_group_id}:{deployment}:{canonical_repr}",
         group_description=f"Embedding batch for snapshot {snapshot_group_id}",
         group_metadata={
             "dataset_slug": dataset_slug,
             "dataset_key": dataset_key,
-            "representation": normalized_repr,
+            "representation": canonical_repr,
             "provider": provider,
             "embedding_engine": deployment,
             "entry_max": effective_entry_max,
@@ -342,7 +377,7 @@ def embed(
             **result.metadata,
             "reused": False,
             "dataset_key": dataset_key,
-            "representation": normalized_repr,
+            "representation": canonical_repr,
             "row_count": int(matrix.shape[0]),
             "dimension": int(matrix.shape[1]) if matrix.size else 0,
         },

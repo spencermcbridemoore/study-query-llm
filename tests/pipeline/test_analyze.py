@@ -62,6 +62,7 @@ def _prepare_embedding_input(
     *,
     db: DatabaseConnectionV2,
     artifact_dir: str,
+    representation: str = "full",
 ) -> int:
     acquired = acquire(
         _fixture_spec(),
@@ -87,6 +88,7 @@ def _prepare_embedding_input(
         snapped.group_id,
         deployment="test-embedding-model",
         provider="test-provider",
+        representation=representation,
         db=db,
         artifact_dir=artifact_dir,
         embedding_fetcher=fake_fetcher,
@@ -387,6 +389,40 @@ def test_analyze_hdbscan_runner_persists_expected_results(
         )
         labels_payload = labels_row.result_json["value"]
         assert len(labels_payload["cluster_labels"]) == 3
+
+
+def test_analyze_hdbscan_runner_rejects_non_full_representation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    input_group_id = _prepare_embedding_input(
+        db=db,
+        artifact_dir=artifact_dir,
+        representation="label_centroid",
+    )
+    request_group_id = _create_request_group(db, "request_hdbscan_non_full")
+
+    with pytest.raises(ValueError, match="requires embedding representation 'full'"):
+        analyze(
+            input_group_id,
+            method_name="phase1_hdbscan_fixture",
+            run_key="rk_hdbscan_non_full",
+            request_group_id=request_group_id,
+            db=db,
+            artifact_dir=artifact_dir,
+            method_runner=run_hdbscan_analysis,
+            parameters={
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "label_centroid",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "hdbscan_min_cluster_size": 2,
+                "hdbscan_min_samples": 1,
+            },
+        )
 
 
 def test_analyze_race_same_key_runs_once(

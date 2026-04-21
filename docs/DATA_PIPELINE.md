@@ -187,7 +187,7 @@ def embed(
     snapshot_group_id: int,
     *,
     embedding_spec: EmbeddingSpec,         # provider, deployment, dimensions, key_version
-    representations: list[Representation], # ["full", "intent_means", ...]
+    representations: list[Representation], # ["full", "label_centroid", ...]
 ) -> int:  # returns embedding_batch_group_id
     ...
 ```
@@ -195,8 +195,9 @@ def embed(
 - `EmbeddingSpec` is locked to (`provider`, `deployment`, `dimensions`, `encoding_format`, `key_version`).
 - Reads the snapshot manifest, drives existing `fetch_embeddings_async` (which transparently uses L1+L2 caches), then for each representation materializes the appropriate matrix:
   - `full` → `N × d` from per-row vectors.
-  - `intent_means` (or generally `group_means`) → `K × d` mean per integer label.
+  - `label_centroid` (legacy alias: `intent_mean`) → `K × d` mean per integer label.
   - Future: `centroids`, `pooled_quantiles`, etc. — additive only.
+- Clustering methods that assume row-level samples (for example HDBSCAN) must consume `full`, not `label_centroid`.
 - For each representation: `ArtifactService.store_embedding_matrix(...)` with `dataset_key` per §6.
 - Creates one `embedding_batch` group per call; links `embedding_batch → dataset_snapshot` (`depends_on`).
 - Idempotency: for each representation, `ArtifactService.find_embedding_matrix_artifact(...)` (existing API) — if hit, reuse the URI; only create new artifact rows for misses. Group reuse is allowed when **all** representations match.

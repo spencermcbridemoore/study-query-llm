@@ -97,6 +97,21 @@ def run_hdbscan_analysis(
     parameters: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Run HDBSCAN on embedding rows and return an ``AnalysisPayload``-like dict."""
+    params = dict(parameters or {})
+    resolved_representation = str(
+        input_group_metadata.get("representation")
+        or params.get("embedding_representation")
+        or params.get("representation_type")
+        or "full"
+    ).strip().lower()
+    if resolved_representation == "intent_mean":
+        resolved_representation = "label_centroid"
+    if resolved_representation != "full":
+        raise ValueError(
+            "HDBSCAN analysis requires embedding representation 'full' "
+            f"(one vector per text row), got {resolved_representation!r}"
+        )
+
     if embeddings is None:
         raise ValueError("HDBSCAN analysis requires embedding_matrix on the input group")
     matrix = np.asarray(embeddings, dtype=np.float64)
@@ -105,7 +120,6 @@ def run_hdbscan_analysis(
     if matrix.shape[0] == 0:
         raise ValueError("HDBSCAN analysis requires at least one embedding row")
 
-    params = dict(parameters or {})
     min_cluster_size = _required_int_param(
         params,
         "hdbscan_min_cluster_size",

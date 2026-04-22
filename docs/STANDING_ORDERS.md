@@ -11,7 +11,7 @@ This document establishes consistent practices for all development work on this 
 ### Primary Source of Truth
 - **`docs/living/CURRENT_STATE.md`** is authoritative for "what currently exists/works."
 - **`docs/living/ARCHITECTURE_CURRENT.md`** is authoritative for current architecture.
-- **`docs/DATA_PIPELINE.md`** is authoritative for the four-stage data pipeline contract.
+- **`docs/DATA_PIPELINE.md`** is authoritative for the five-stage data pipeline contract.
 - **`docs/IMPLEMENTATION_PLAN.md`** and **`docs/ARCHITECTURE.md`** are historical/roadmap context unless explicitly updated as current.
 - **`docs/review/DOC_PARITY_LEDGER.md`** is the evidence ledger for doc-to-code parity claims.
 
@@ -84,7 +84,7 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 - **`docs/README.md`**: Documentation routing and taxonomy
 - **`docs/living/CURRENT_STATE.md`**: Authoritative current capabilities
 - **`docs/living/ARCHITECTURE_CURRENT.md`**: Current architecture reference
-- **`docs/DATA_PIPELINE.md`**: Canonical four-stage pipeline contract and operator acceptance checks
+- **`docs/DATA_PIPELINE.md`**: Canonical five-stage pipeline contract and operator acceptance checks
 - **`docs/living/API_CURRENT.md`**: Current API quick reference
 - **`docs/USER_GUIDE.md`**: End-user guide (v2-first)
 - **`docs/IMPLEMENTATION_PLAN.md`**: Historical phased roadmap

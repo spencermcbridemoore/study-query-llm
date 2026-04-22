@@ -21,6 +21,8 @@ AUSEM_GITHUB_ORG = "tufts-ml"
 AUSEM_GITHUB_REPO = "AuSeM"
 # Pinned commit (repo main as of integration); update intentionally when bumping data version.
 AUSEM_PINNED_GIT_REF = "271b93baa0ab9aae70806c7364a4c4304f927143"
+AUSEM_DEFAULT_PARSER_ID = "ausem.default"
+AUSEM_DEFAULT_PARSER_VERSION = "v1"
 
 _STUDENT_EXPLANATION_CSV: tuple[str, ...] = (
     "problem1.csv",

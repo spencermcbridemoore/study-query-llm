@@ -1,4 +1,4 @@
-"""End-to-end fixture test for acquire -> snapshot chain."""
+"""End-to-end fixture test for acquire -> parse -> snapshot chain."""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ from study_query_llm.datasets.acquisition import FileFetchSpec
 from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.pipeline.acquire import acquire
+from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
-from study_query_llm.pipeline.types import SnapshotRow
+from study_query_llm.pipeline.types import SnapshotRow, SubquerySpec
 
 REPO = Path(__file__).resolve().parent.parent.parent
 LINT_SCRIPT = REPO / "scripts" / "check_persistence_contract.py"
@@ -47,6 +48,8 @@ def _chain_spec() -> DatasetAcquireConfig:
         file_specs=file_specs,
         source_metadata=source_metadata,
         default_parser=_chain_parser,
+        default_parser_id="chain_fixture.default",
+        default_parser_version="v1",
     )
 
 
@@ -71,16 +74,25 @@ def test_acquire_snapshot_chain_and_lint_clean(tmp_path: Path, monkeypatch) -> N
         artifact_dir=artifact_dir,
         fetch=lambda url: source_bytes[url],
     )
-    snapped = snapshot(
+    parsed = parse(
         acquired.group_id,
         parser=_chain_parser,
+        parser_id="chain_fixture.default",
+        parser_version="v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    snapped = snapshot(
+        parsed.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
 
     assert acquired.group_id > 0
+    assert parsed.group_id > 0
     assert snapped.group_id > 0
-    assert "snapshot.parquet" in snapped.artifact_uris
+    assert "subquery_spec.json" in snapped.artifact_uris
 
     lint_mod = _load_lint_module()
     violations = lint_mod.lint_pipeline_dir(REPO / "src" / "study_query_llm" / "pipeline")

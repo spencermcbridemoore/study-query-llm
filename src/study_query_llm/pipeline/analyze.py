@@ -1,4 +1,4 @@
-"""Stage 4: analyze (input group -> analysis_run + provenanced_run + results)."""
+"""Stage 5: analyze (snapshot + embedding batch -> analysis_run + provenance)."""
 
 from __future__ import annotations
 
@@ -13,8 +13,9 @@ import numpy as np
 import pyarrow.parquet as pq
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.db.models_v2 import AnalysisResult, CallArtifact, Group, GroupLink
+from study_query_llm.db.models_v2 import CallArtifact, Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.pipeline.parse import find_dataframe_parquet_uri
 from study_query_llm.pipeline.runner import StageIdentity, run_stage
 from study_query_llm.pipeline.types import StageResult
 from study_query_llm.services.artifact_service import ArtifactService
@@ -23,9 +24,12 @@ from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.provenanced_run_service import ProvenancedRunService
 
 ARTIFACT_TYPE_EMBEDDING_MATRIX = "embedding_matrix"
-ARTIFACT_TYPE_DATASET_SNAPSHOT_PARQUET = "dataset_snapshot_parquet"
+ARTIFACT_TYPE_SUBQUERY_SPEC = "dataset_subquery_spec"
 ARTIFACT_TYPE_ANALYSIS_RESULT_JSON = "analysis_result_json"
 ARTIFACT_TYPE_ANALYSIS_RESULT_BLOB = "analysis_result_blob"
+REPRESENTATION_FULL = "full"
+REPRESENTATION_LABEL_CENTROID = "label_centroid"
+REPRESENTATION_LEGACY_INTENT_MEAN = "intent_mean"
 
 _ANALYZE_LOCK_GUARD = threading.Lock()
 _ANALYZE_LOCKS: dict[str, threading.Lock] = {}
@@ -90,10 +94,7 @@ def _coerce_artifact_bytes(payload: Any) -> bytes:
 def _coerce_payload(raw: AnalysisPayload | Mapping[str, Any]) -> AnalysisPayload:
     if isinstance(raw, AnalysisPayload):
         return raw
-    scalar = {
-        str(k): float(v)
-        for k, v in dict(raw.get("scalar_results") or {}).items()
-    }
+    scalar = {str(k): float(v) for k, v in dict(raw.get("scalar_results") or {}).items()}
     structured = {str(k): v for k, v in dict(raw.get("structured_results") or {}).items()}
     artifacts = {
         str(k): _coerce_artifact_bytes(v)
@@ -131,10 +132,14 @@ def _collect_analysis_artifact_uris(session, analysis_group_id: int) -> dict[str
     return artifact_uris
 
 
-def _require_group(session, group_id: int) -> Group:
+def _require_group(session, group_id: int, *, expected_type: str | None = None) -> Group:
     row = session.query(Group).filter(Group.id == int(group_id)).first()
     if row is None:
         raise ValueError(f"group id={group_id} not found")
+    if expected_type is not None and str(row.group_type) != expected_type:
+        raise ValueError(
+            f"group id={group_id} must be type {expected_type!r}, got {row.group_type!r}"
+        )
     return row
 
 
@@ -160,59 +165,150 @@ def _latest_artifact_uri_for_group(
 def _load_embedding_matrix(
     session,
     *,
-    input_group_id: int,
+    embedding_batch_group_id: int,
     artifact_dir: str,
-) -> np.ndarray | None:
+) -> np.ndarray:
     uri = _latest_artifact_uri_for_group(
         session,
-        group_id=int(input_group_id),
+        group_id=int(embedding_batch_group_id),
         artifact_type=ARTIFACT_TYPE_EMBEDDING_MATRIX,
     )
     if uri is None:
-        return None
-    artifact_service = ArtifactService(artifact_dir=artifact_dir)
-    return np.asarray(artifact_service.load_artifact(uri, ARTIFACT_TYPE_EMBEDDING_MATRIX))
-
-
-def _infer_snapshot_group_id(session, *, input_group_id: int) -> int | None:
-    input_group = _require_group(session, int(input_group_id))
-    metadata = dict(input_group.metadata_json or {})
-    from_metadata = metadata.get("source_snapshot_group_id")
-    if from_metadata is not None:
-        return int(from_metadata)
-
-    links = (
-        session.query(GroupLink)
-        .filter(
-            GroupLink.parent_group_id == int(input_group_id),
-            GroupLink.link_type == "depends_on",
+        raise ValueError(
+            f"embedding_batch group id={embedding_batch_group_id} has no embedding_matrix artifact"
         )
-        .all()
+    artifact_service = ArtifactService(artifact_dir=artifact_dir)
+    matrix = np.asarray(
+        artifact_service.load_artifact(uri, ARTIFACT_TYPE_EMBEDDING_MATRIX),
+        dtype=np.float64,
     )
-    for link in links:
-        child = _require_group(session, int(link.child_group_id))
-        if child.group_type == "dataset_snapshot":
-            return int(child.id)
-    return None
+    if matrix.ndim != 2:
+        raise ValueError(f"embedding matrix must be 2D, got shape={matrix.shape}")
+    return matrix
 
 
-def _load_snapshot_texts(
+def _load_snapshot_subquery(
     session,
     *,
     snapshot_group_id: int,
     artifact_dir: str,
-) -> list[str]:
-    parquet_uri = _latest_artifact_uri_for_group(
+) -> dict[str, Any]:
+    uri = _latest_artifact_uri_for_group(
         session,
         group_id=int(snapshot_group_id),
-        artifact_type=ARTIFACT_TYPE_DATASET_SNAPSHOT_PARQUET,
+        artifact_type=ARTIFACT_TYPE_SUBQUERY_SPEC,
     )
-    if parquet_uri is None:
-        return []
+    if uri is None:
+        raise ValueError(
+            f"dataset_snapshot group id={snapshot_group_id} has no {ARTIFACT_TYPE_SUBQUERY_SPEC} artifact"
+        )
+    artifact_service = ArtifactService(artifact_dir=artifact_dir)
+    payload = artifact_service.storage.read_from_uri(uri)
+    parsed = json.loads(payload.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError("dataset_subquery_spec payload must be a JSON object")
+    return parsed
+
+
+def _load_dataframe_slice(
+    session,
+    *,
+    dataframe_group_id: int,
+    positions: list[int],
+    artifact_dir: str,
+) -> tuple[list[str], list[int | None], list[str | None]]:
+    parquet_uri = find_dataframe_parquet_uri(session, int(dataframe_group_id))
     artifact_service = ArtifactService(artifact_dir=artifact_dir)
     payload = artifact_service.storage.read_from_uri(parquet_uri)
-    table = pq.read_table(io.BytesIO(payload), columns=["text"])
-    return [str(value) for value in table.column("text").to_pylist()]
+    table = pq.read_table(
+        io.BytesIO(payload),
+        columns=["position", "text", "label", "label_name"],
+    )
+    frame = table.to_pandas().set_index("position", drop=False)
+    texts: list[str] = []
+    labels: list[int | None] = []
+    label_names: list[str | None] = []
+
+    def _as_optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            if bool(np.isnan(value)):
+                return None
+        except Exception:
+            pass
+        return int(value)
+
+    def _as_optional_str(value: Any) -> str | None:
+        if value is None:
+            return None
+        try:
+            if bool(np.isnan(value)):
+                return None
+        except Exception:
+            pass
+        text = str(value).strip()
+        return text or None
+
+    for pos in positions:
+        if pos not in frame.index:
+            raise ValueError(f"snapshot resolved position {pos} not found in dataframe")
+        row = frame.loc[pos]
+        texts.append(str(row["text"]))
+        labels.append(_as_optional_int(row["label"]))
+        label_names.append(_as_optional_str(row["label_name"]))
+    return texts, labels, label_names
+
+
+def _resolve_representation(parameters: Mapping[str, Any]) -> str:
+    raw = str(
+        parameters.get("representation_type")
+        or parameters.get("embedding_representation")
+        or REPRESENTATION_FULL
+    ).strip().lower()
+    if raw == REPRESENTATION_LEGACY_INTENT_MEAN:
+        return REPRESENTATION_LABEL_CENTROID
+    return raw
+
+
+def _derive_representation_view(
+    *,
+    base_embeddings: np.ndarray,
+    texts: list[str],
+    labels: list[int | None],
+    label_names: list[str | None],
+    representation: str,
+) -> tuple[np.ndarray, list[str], dict[str, Any]]:
+    if representation == REPRESENTATION_FULL:
+        return base_embeddings, texts, {}
+    if representation != REPRESENTATION_LABEL_CENTROID:
+        raise ValueError(f"unsupported analysis representation {representation!r}")
+
+    buckets: dict[int, list[np.ndarray]] = {}
+    name_by_label: dict[int, str] = {}
+    for idx, label in enumerate(labels):
+        if label is None:
+            continue
+        label_int = int(label)
+        buckets.setdefault(label_int, []).append(base_embeddings[idx])
+        if label_int not in name_by_label:
+            preferred = label_names[idx]
+            name_by_label[label_int] = preferred or f"label_{label_int}"
+    if not buckets:
+        raise ValueError("label_centroid representation requires at least one labeled row")
+    ordered_labels = sorted(buckets.keys())
+    pooled = np.vstack(
+        [
+            np.mean(np.asarray(buckets[label], dtype=np.float64), axis=0)
+            for label in ordered_labels
+        ]
+    )
+    pooled_texts = [name_by_label[label] for label in ordered_labels]
+    meta = {
+        "pooled_labels": ordered_labels,
+        "pooled_label_count": len(ordered_labels),
+    }
+    return pooled, pooled_texts, meta
 
 
 def _resolve_request_group_id(
@@ -305,7 +401,8 @@ def _default_method_runner(
 
 
 def analyze(
-    input_group_id: int,
+    snapshot_group_id: int,
+    embedding_batch_group_id: int,
     *,
     method_name: str,
     run_key: str,
@@ -318,19 +415,90 @@ def analyze(
     artifact_dir: str = "artifacts",
     method_runner: AnalysisRunner | None = None,
 ) -> StageResult:
-    """
-    Execute analysis stage with provenanced_run + analysis_result persistence.
-    """
+    """Execute analysis stage with explicit snapshot and embedding batch inputs."""
     resolved_params = dict(parameters or {})
     db_conn, _owned_db = _resolve_db(db=db, database_url=database_url)
     with db_conn.session_scope() as session:
-        _require_group(session, int(input_group_id))
+        snapshot_group = _require_group(
+            session,
+            int(snapshot_group_id),
+            expected_type="dataset_snapshot",
+        )
+        embedding_group = _require_group(
+            session,
+            int(embedding_batch_group_id),
+            expected_type="embedding_batch",
+        )
+        snapshot_metadata = dict(snapshot_group.metadata_json or {})
+        embedding_metadata = dict(embedding_group.metadata_json or {})
+        snapshot_df_id = int(snapshot_metadata.get("source_dataframe_group_id") or -1)
+        embedding_df_id = int(embedding_metadata.get("source_dataframe_group_id") or -1)
+        if snapshot_df_id <= 0 or embedding_df_id <= 0:
+            raise ValueError(
+                "snapshot and embedding metadata must include source_dataframe_group_id"
+            )
+        if snapshot_df_id != embedding_df_id:
+            raise ValueError(
+                "snapshot and embedding batch reference different dataframe groups "
+                f"(snapshot={snapshot_df_id}, embedding={embedding_df_id})"
+            )
+        dataframe_group_id = snapshot_df_id
+
+        snapshot_payload = _load_snapshot_subquery(
+            session,
+            snapshot_group_id=int(snapshot_group_id),
+            artifact_dir=artifact_dir,
+        )
+        resolved_index_raw = list(snapshot_payload.get("resolved_index") or [])
+        resolved_positions: list[int] = []
+        for item in resolved_index_raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 1:
+                resolved_positions.append(int(item[0]))
+                continue
+            raise ValueError("resolved_index entries must be [position, source_id]")
+        if not resolved_positions:
+            raise ValueError("snapshot resolved_index is empty; nothing to analyze")
+
+        embedding_matrix = _load_embedding_matrix(
+            session,
+            embedding_batch_group_id=int(embedding_batch_group_id),
+            artifact_dir=artifact_dir,
+        )
+        max_pos = max(resolved_positions)
+        if max_pos >= int(embedding_matrix.shape[0]):
+            raise ValueError(
+                "snapshot resolved_index position exceeds embedding matrix bounds: "
+                f"max_position={max_pos} matrix_rows={embedding_matrix.shape[0]}"
+            )
+        sliced_embeddings = np.asarray(embedding_matrix[resolved_positions], dtype=np.float64)
+        texts, labels, label_names = _load_dataframe_slice(
+            session,
+            dataframe_group_id=int(dataframe_group_id),
+            positions=resolved_positions,
+            artifact_dir=artifact_dir,
+        )
+        if len(texts) != int(sliced_embeddings.shape[0]):
+            raise ValueError(
+                "text/vector alignment mismatch after resolved-index slicing: "
+                f"texts={len(texts)} vectors={sliced_embeddings.shape[0]}"
+            )
+        representation = _resolve_representation(resolved_params)
+        resolved_params.setdefault("representation_type", representation)
+        resolved_params.setdefault("embedding_representation", representation)
+        analysis_embeddings, analysis_texts, representation_meta = _derive_representation_view(
+            base_embeddings=sliced_embeddings,
+            texts=texts,
+            labels=labels,
+            label_names=label_names,
+            representation=representation,
+        )
+
         repo = RawCallRepository(session)
         resolved_request_group_id = _resolve_request_group_id(
             repo,
             request_group_id=request_group_id,
             method_name=method_name,
-            input_group_id=int(input_group_id),
+            input_group_id=int(embedding_batch_group_id),
             run_key=run_key,
         )
 
@@ -362,33 +530,21 @@ def analyze(
                         "reused": True,
                         "request_group_id": int(resolved_request_group_id),
                         "method_name": method_name,
+                        "representation": representation,
                     },
                 )
 
-            input_group = _require_group(session, int(input_group_id))
-            input_group_type = str(input_group.group_type)
-            input_group_metadata = dict(input_group.metadata_json or {})
-            embeddings = _load_embedding_matrix(
-                session,
-                input_group_id=int(input_group_id),
-                artifact_dir=artifact_dir,
-            )
-            upstream_snapshot_group_id = _infer_snapshot_group_id(
-                session,
-                input_group_id=int(input_group_id),
-            )
-            texts = (
-                _load_snapshot_texts(
-                    session,
-                    snapshot_group_id=int(upstream_snapshot_group_id),
-                    artifact_dir=artifact_dir,
-                )
-                if upstream_snapshot_group_id is not None
-                else []
-            )
-
         runner = method_runner or _default_method_runner
         payload_holder: dict[str, AnalysisPayload] = {}
+
+        runner_input_metadata = {
+            **embedding_metadata,
+            "representation": representation,
+            "source_snapshot_group_id": int(snapshot_group_id),
+            "source_dataframe_group_id": int(dataframe_group_id),
+            "resolved_index_row_count": len(resolved_positions),
+            **representation_meta,
+        }
 
         def _write_analysis_artifacts(
             artifact_service: ArtifactService,
@@ -399,11 +555,11 @@ def analyze(
                 raise RuntimeError("ArtifactService requires repository for analyze stage writes")
             raw_payload = runner(
                 method_name=method_name,
-                input_group_id=int(input_group_id),
-                input_group_type=input_group_type,
-                input_group_metadata=input_group_metadata,
-                embeddings=embeddings,
-                texts=texts,
+                input_group_id=int(embedding_batch_group_id),
+                input_group_type="embedding_batch",
+                input_group_metadata=runner_input_metadata,
+                embeddings=analysis_embeddings,
+                texts=analysis_texts,
                 parameters=resolved_params,
             )
             payload = _coerce_payload(raw_payload)
@@ -421,7 +577,8 @@ def analyze(
                     content_type=content_type,
                     metadata={
                         "method_name": method_name,
-                        "input_group_id": int(input_group_id),
+                        "embedding_batch_group_id": int(embedding_batch_group_id),
+                        "snapshot_group_id": int(snapshot_group_id),
                         "run_key": run_key,
                     },
                 )
@@ -448,7 +605,7 @@ def analyze(
             for key, value in payload.scalar_results.items():
                 method_service.record_result(
                     method_definition_id=method_definition_id,
-                    source_group_id=int(input_group_id),
+                    source_group_id=int(embedding_batch_group_id),
                     analysis_group_id=identity.group_id,
                     result_key=str(key),
                     result_value=float(value),
@@ -459,7 +616,7 @@ def analyze(
             for key, value in payload.structured_results.items():
                 method_service.record_result(
                     method_definition_id=method_definition_id,
-                    source_group_id=int(input_group_id),
+                    source_group_id=int(embedding_batch_group_id),
                     analysis_group_id=identity.group_id,
                     result_key=str(key),
                     result_json={
@@ -472,7 +629,7 @@ def analyze(
             if artifact_uris:
                 method_service.record_result(
                     method_definition_id=method_definition_id,
-                    source_group_id=int(input_group_id),
+                    source_group_id=int(embedding_batch_group_id),
                     analysis_group_id=identity.group_id,
                     result_key="artifacts",
                     result_json={
@@ -496,12 +653,12 @@ def analyze(
             execution_metadata["stage_name"] = "analyze"
             execution_metadata["analysis_key"] = str(method_name)
             execution_metadata["analysis_group_id"] = int(identity.group_id)
-            execution_metadata["input_group_id"] = int(input_group_id)
+            execution_metadata["embedding_batch_group_id"] = int(embedding_batch_group_id)
+            execution_metadata["input_snapshot_group_id"] = int(snapshot_group_id)
             execution_metadata["request_group_id"] = int(resolved_request_group_id)
+            execution_metadata["representation_type"] = representation
 
-            manifest_hash = input_group_metadata.get("source_manifest_hash") or input_group_metadata.get(
-                "manifest_hash"
-            )
+            manifest_hash = embedding_metadata.get("manifest_hash")
             if manifest_hash is not None:
                 execution_metadata.setdefault("manifest_hash", str(manifest_hash))
 
@@ -520,8 +677,9 @@ def analyze(
 
             canonical_config: dict[str, Any] = {
                 "parameters": dict(resolved_params),
-                "input_group_id": int(input_group_id),
-                "input_group_type": str(input_group_type),
+                "embedding_batch_group_id": int(embedding_batch_group_id),
+                "snapshot_group_id": int(snapshot_group_id),
+                "representation_type": representation,
             }
             if method_version is not None:
                 canonical_config["method_version"] = str(method_version)
@@ -533,7 +691,7 @@ def analyze(
             enriched_run_id = int(
                 provenanced_run_service.record_analysis_execution(
                     request_group_id=int(resolved_request_group_id),
-                    source_group_id=int(input_group_id),
+                    source_group_id=int(embedding_batch_group_id),
                     method_definition_id=method_definition_id,
                     analysis_key=method_name,
                     analysis_run_key=run_key,
@@ -541,6 +699,7 @@ def analyze(
                     config_json=canonical_config,
                     determinism_class=determinism_class,
                     metadata_json=execution_metadata,
+                    input_snapshot_group_id=int(snapshot_group_id),
                 )
             )
 
@@ -555,31 +714,39 @@ def analyze(
                 "result_count": result_count,
                 "request_group_id": int(resolved_request_group_id),
                 "analysis_execution_run_id": enriched_run_id,
+                "representation": representation,
             }
 
         result = run_stage(
             db=db_conn,
             stage_name="analyze",
             group_type="analysis_run",
-            group_name=f"analyze:{method_name}:{input_group_id}:{run_key}",
-            group_description=f"Analysis run for {method_name} on group {input_group_id}",
+            group_name=(
+                f"analyze:{method_name}:{embedding_batch_group_id}:{snapshot_group_id}:{run_key}"
+            ),
+            group_description=(
+                f"Analysis run for {method_name} on embedding {embedding_batch_group_id} "
+                f"and snapshot {snapshot_group_id}"
+            ),
             group_metadata={
                 "method_name": method_name,
                 "method_version": method_version,
-                "input_group_id": int(input_group_id),
+                "embedding_batch_group_id": int(embedding_batch_group_id),
+                "snapshot_group_id": int(snapshot_group_id),
                 "run_key": run_key,
+                "representation_type": representation,
                 "parameters": resolved_params,
                 "request_group_id": int(resolved_request_group_id),
             },
             request_group_id=int(resolved_request_group_id),
-            source_group_id=int(input_group_id),
+            source_group_id=int(embedding_batch_group_id),
             run_key=run_key,
             run_kind="analysis_execution",
             run_metadata={
                 "execution_role": "analysis_execution",
                 "method_name": method_name,
             },
-            depends_on_group_ids=[int(input_group_id)],
+            depends_on_group_ids=[int(embedding_batch_group_id), int(snapshot_group_id)],
             contains_parent_group_ids=[int(resolved_request_group_id)],
             artifact_dir=artifact_dir,
             write_artifacts=_write_analysis_artifacts,
@@ -595,5 +762,6 @@ def analyze(
                 "reused": False,
                 "request_group_id": int(resolved_request_group_id),
                 "method_name": method_name,
+                "representation": representation,
             },
         )

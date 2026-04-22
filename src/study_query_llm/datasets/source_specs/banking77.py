@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 BANKING77_DATASET_SLUG = "banking77"
 BANKING77_HF_DATASET = "mteb/banking77"
 BANKING77_HF_REVISION = "18072d2685ea682290f7b8924d94c62acc19c0b2"
+BANKING77_DEFAULT_PARSER_ID = "banking77.default"
+BANKING77_DEFAULT_PARSER_VERSION = "v1"
 
 _BANKING77_SPLIT_FILES: tuple[tuple[str, str], ...] = (
     ("data/train-00000-of-00001.parquet", "train"),

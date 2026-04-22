@@ -13,6 +13,7 @@ Panel-based web application for running LLM inference experiments across multipl
 - **Current Status**: `docs/living/CURRENT_STATE.md`
 - **Current Architecture**: `docs/living/ARCHITECTURE_CURRENT.md`
 - **Canonical Data Pipeline**: `docs/DATA_PIPELINE.md`
+- **Five-stage pipeline contract**: `acquire -> parse -> snapshot -> embed -> analyze` (full-matrix embed; non-full representations derived in analyze)
 - **Historical Architecture**: `docs/ARCHITECTURE.md`
 - **Jetstream: PC → Postgres SSH tunnel** (local `DATABASE_URL` via forward): `deploy/jetstream/LOCAL_DEV_TUNNEL.md`
 - **Clone Jetstream DB into local Docker** (backup local, `pg_dump` Jetstream, restore): `docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`
@@ -26,6 +27,7 @@ Panel-based web application for running LLM inference experiments across multipl
 
 ## Essential Constraints
 - Always use v2 database schema for new features (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`)
+- Pipeline changes must preserve five-stage contracts in `docs/DATA_PIPELINE.md` (parser identity/version, deterministic snapshot sampling, analyze dual-input lineage).
 - Follow bottom-up, incremental development approach
 - Update `docs/living/CURRENT_STATE.md` and `docs/review/DOC_PARITY_LEDGER.md` when current behavior/claims change
 - **MANDATORY: Stage and commit when completing features/tasks** - do not wait for user to ask

@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-
-import pyarrow.parquet as pq
 
 from study_query_llm.datasets.acquisition import FileFetchSpec
 from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.db.models_v2 import GroupLink
 from study_query_llm.pipeline.acquire import acquire
+from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
-from study_query_llm.pipeline.types import SnapshotRow
+from study_query_llm.pipeline.types import SnapshotRow, SubquerySpec
 
 
 def _db(tmp_path: Path) -> DatabaseConnectionV2:
@@ -39,6 +38,9 @@ def _fixture_spec() -> DatasetAcquireConfig:
         slug="fixture_dataset",
         file_specs=file_specs,
         source_metadata=source_metadata,
+        default_parser=_fixture_parser,
+        default_parser_id="fixture_dataset.default",
+        default_parser_version="v1",
     )
 
 
@@ -71,38 +73,87 @@ def test_snapshot_writes_parquet_manifest_and_depends_on_link(
         artifact_dir=artifact_dir,
         fetch=lambda url: payload_by_url[url],
     )
-    first = snapshot(
+    parsed = parse(
         dataset_result.group_id,
         parser=_fixture_parser,
+        parser_id="fixture_dataset.default",
+        parser_version="v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    first = snapshot(
+        parsed.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
     second = snapshot(
-        dataset_result.group_id,
-        parser=_fixture_parser,
+        parsed.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
 
     assert first.group_id == second.group_id
-    parquet_uri = first.artifact_uris["snapshot.parquet"]
-    index_uri = first.artifact_uris["snapshot_index.json"]
-    assert Path(parquet_uri).is_file()
-    assert Path(index_uri).is_file()
+    payload_uri = first.artifact_uris["subquery_spec.json"]
+    payload = json.loads(Path(payload_uri).read_text(encoding="utf-8"))
+    assert payload["row_count"] == 3
+    assert payload["resolved_index"] == [[0, "row-0"], [1, "row-1"], [2, "row-2"]]
 
-    table = pq.read_table(parquet_uri)
-    assert table.column("position").to_pylist() == [0, 1, 2]
-    assert table.column("source_id").to_pylist() == ["row-0", "row-1", "row-2"]
-    assert table.column("label").to_pylist() == [0, 1, 1]
 
-    with db.session_scope() as session:
-        link = (
-            session.query(GroupLink)
-            .filter(
-                GroupLink.parent_group_id == first.group_id,
-                GroupLink.child_group_id == dataset_result.group_id,
-                GroupLink.link_type == "depends_on",
-            )
-            .first()
+def test_snapshot_sampling_requires_seed_and_changes_hash(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db = _db(tmp_path)
+    spec = _fixture_spec()
+    payload_by_url = {
+        "https://example.test/train.csv": b"id,text\n1,hello\n2,world\n",
+        "https://example.test/test.csv": b"id,text\n3,test\n",
+    }
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    dataset_result = acquire(
+        spec,
+        db=db,
+        artifact_dir=artifact_dir,
+        fetch=lambda url: payload_by_url[url],
+    )
+    parsed = parse(
+        dataset_result.group_id,
+        parser=_fixture_parser,
+        parser_id="fixture_dataset.default",
+        parser_version="v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    seeded_a = snapshot(
+        parsed.group_id,
+        subquery_spec=SubquerySpec(sample_n=2, sampling_seed=17, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    seeded_b = snapshot(
+        parsed.group_id,
+        subquery_spec=SubquerySpec(sample_n=2, sampling_seed=17, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    seeded_c = snapshot(
+        parsed.group_id,
+        subquery_spec=SubquerySpec(sample_n=2, sampling_seed=19, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    assert seeded_a.group_id == seeded_b.group_id
+    assert seeded_a.group_id != seeded_c.group_id
+
+    try:
+        snapshot(
+            parsed.group_id,
+            subquery_spec=SubquerySpec(sample_n=2, label_mode="all"),
+            db=db,
+            artifact_dir=artifact_dir,
         )
-        assert link is not None
+    except ValueError as exc:
+        assert "sampling_seed" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected unseeded sampling to fail")

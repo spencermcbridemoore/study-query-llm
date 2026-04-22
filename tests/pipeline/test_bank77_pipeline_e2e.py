@@ -1,4 +1,4 @@
-"""Structural acceptance test for BANKING77 pipeline stages."""
+"""Structural acceptance test for BANKING77 five-stage pipeline."""
 
 from __future__ import annotations
 
@@ -22,7 +22,9 @@ from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
 from study_query_llm.pipeline.embed import embed
 from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
+from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
+from study_query_llm.pipeline.types import SubquerySpec
 
 
 def _db(tmp_path: Path) -> DatabaseConnectionV2:
@@ -76,8 +78,14 @@ def test_bank77_pipeline_chain_structural_acceptance(
         artifact_dir=artifact_dir,
         fetch=lambda url: payload_by_url[url],
     )
-    snapped = snapshot(
+    parsed = parse(
         acquired.group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    snapped = snapshot(
+        parsed.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
@@ -90,7 +98,7 @@ def test_bank77_pipeline_chain_structural_acceptance(
         )
 
     embedded = embed(
-        snapped.group_id,
+        parsed.group_id,
         deployment="fixture-embedding-model",
         provider="fixture-provider",
         db=db,
@@ -115,6 +123,7 @@ def test_bank77_pipeline_chain_structural_acceptance(
         }
 
     analyzed = analyze(
+        snapped.group_id,
         embedded.group_id,
         method_name="bank77_structural_acceptance",
         run_key="fixture_bank77_run",
@@ -125,8 +134,8 @@ def test_bank77_pipeline_chain_structural_acceptance(
 
     assert "data/train-00000-of-00001.parquet" in acquired.artifact_uris
     assert "data/test-00000-of-00001.parquet" in acquired.artifact_uris
+    assert parsed.metadata["row_count"] == 4
     assert snapped.metadata["row_count"] == 4
-    assert snapped.metadata["label_count"] == 2
     assert embedded.metadata["row_count"] == 4
     assert embedded.metadata["dimension"] == 2
     assert analyzed.run_id is not None
@@ -166,6 +175,16 @@ def test_bank77_pipeline_chain_structural_acceptance(
             .first()
         )
         assert depends_on is not None
+        depends_on_snapshot = (
+            session.query(GroupLink)
+            .filter(
+                GroupLink.parent_group_id == analyzed.group_id,
+                GroupLink.child_group_id == snapped.group_id,
+                GroupLink.link_type == "depends_on",
+            )
+            .first()
+        )
+        assert depends_on_snapshot is not None
 
         analysis_result_count = (
             session.query(AnalysisResult)
@@ -207,8 +226,14 @@ def test_bank77_pipeline_hdbscan_phase1_analyze(
         artifact_dir=artifact_dir,
         fetch=lambda url: payload_by_url[url],
     )
-    snapped = snapshot(
+    parsed = parse(
         acquired.group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    snapped = snapshot(
+        parsed.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
@@ -221,7 +246,7 @@ def test_bank77_pipeline_hdbscan_phase1_analyze(
         )
 
     embedded = embed(
-        snapped.group_id,
+        parsed.group_id,
         deployment="fixture-embedding-model",
         provider="fixture-provider",
         db=db,
@@ -229,6 +254,7 @@ def test_bank77_pipeline_hdbscan_phase1_analyze(
         embedding_fetcher=fake_embedding_fetcher,
     )
     analyzed = analyze(
+        snapped.group_id,
         embedded.group_id,
         method_name="bank77_hdbscan_phase1",
         run_key="fixture_bank77_hdbscan",

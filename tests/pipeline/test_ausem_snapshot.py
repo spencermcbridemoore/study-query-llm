@@ -17,7 +17,9 @@ from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
 from study_query_llm.pipeline.acquire import acquire
+from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
+from study_query_llm.pipeline.types import SubquerySpec
 
 
 def _db(tmp_path: Path) -> DatabaseConnectionV2:
@@ -70,36 +72,52 @@ def test_ausem_snapshot_default_and_problem_profiles(
         fetch=lambda url: payload_by_url[url],
     )
 
-    full = snapshot(
+    full_df = parse(
         acquired.group_id,
-        representation="raw_all_v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    full_df_reuse = parse(
+        acquired.group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    problem2_df = parse(
+        acquired.group_id,
+        parser=parse_ausem_problem2_snapshot,
+        parser_id="ausem.problem2",
+        parser_version="v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    full = snapshot(
+        full_df.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
     full_reuse = snapshot(
-        acquired.group_id,
-        representation="raw_all_v1",
+        full_df.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
     problem2 = snapshot(
-        acquired.group_id,
-        parser=parse_ausem_problem2_snapshot,
-        representation="raw_problem2_v1",
+        problem2_df.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
 
+    assert full_df.group_id == full_df_reuse.group_id
     assert full.group_id == full_reuse.group_id
     assert full_reuse.metadata["reused"] is True
     assert full.metadata["row_count"] == 5
-    assert full.metadata["label_count"] == 2
     assert problem2.metadata["row_count"] == 1
-    assert problem2.metadata["label_count"] == 1
     assert problem2.group_id != full.group_id
 
-    full_table = pq.read_table(full.artifact_uris["snapshot.parquet"])
-    problem2_table = pq.read_table(problem2.artifact_uris["snapshot.parquet"])
+    full_table = pq.read_table(full_df.artifact_uris["dataframe.parquet"])
+    problem2_table = pq.read_table(problem2_df.artifact_uris["dataframe.parquet"])
     full_extras = [json.loads(value) for value in full_table.column("extra_json").to_pylist()]
     problem2_extras = [json.loads(value) for value in problem2_table.column("extra_json").to_pylist()]
     assert {extra["subset_profile"] for extra in full_extras} == {"all"}
@@ -113,13 +131,13 @@ def test_ausem_snapshot_default_and_problem_profiles(
     assert {extra["problem"] for extra in problem2_extras} == {"problem2"}
 
     with db.session_scope() as session:
-        full_group = session.query(Group).filter(Group.id == full.group_id).first()
-        problem2_group = session.query(Group).filter(Group.id == problem2.group_id).first()
+        full_group = session.query(Group).filter(Group.id == full_df.group_id).first()
+        problem2_group = session.query(Group).filter(Group.id == problem2_df.group_id).first()
         assert full_group is not None
         assert problem2_group is not None
         full_md = dict(full_group.metadata_json or {})
         problem2_md = dict(problem2_group.metadata_json or {})
-        assert full_md["representation"] == "raw_all_v1"
-        assert problem2_md["representation"] == "raw_problem2_v1"
-        assert full_md["parser_identity"].endswith("parse_ausem_snapshot")
-        assert problem2_md["parser_identity"].endswith("parse_ausem_problem2_snapshot")
+        assert full_md["parser_id"] == "ausem.default"
+        assert full_md["parser_version"] == "v1"
+        assert problem2_md["parser_id"] == "ausem.problem2"
+        assert problem2_md["parser_version"] == "v1"

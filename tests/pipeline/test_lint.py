@@ -59,3 +59,49 @@ def test_lint_allows_decorator_escape_hatch(lint_mod, tmp_path: Path) -> None:
 
     violations = lint_mod.lint_pipeline_dir(pipeline_dir)
     assert violations == []
+
+
+def test_lint_group_boundary_rejects_unauthorized_create_group(
+    lint_mod,
+    tmp_path: Path,
+) -> None:
+    rogue_file = tmp_path / "rogue.py"
+    rogue_file.write_text(
+        dedent(
+            """
+            def bad(repo):
+                repo.create_group(group_type="dataset_snapshot", name="rogue")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    violations = lint_mod.lint_group_type_boundaries(
+        scan_root=tmp_path,
+        allowlist_prefixes=(),
+    )
+    assert len(violations) == 1
+    assert "dataset_snapshot" in violations[0]
+
+
+def test_lint_group_boundary_allows_allowlisted_paths(lint_mod, tmp_path: Path) -> None:
+    allowed_dir = tmp_path / "allowed"
+    allowed_dir.mkdir(parents=True, exist_ok=True)
+    allowed_file = allowed_dir / "stage.py"
+    allowed_file.write_text(
+        dedent(
+            """
+            def good(repo):
+                repo.create_group(group_type="dataset_dataframe", name="allowed")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    allow_prefix = (f"{allowed_dir.as_posix()}/",)
+    violations = lint_mod.lint_group_type_boundaries(
+        scan_root=tmp_path,
+        allowlist_prefixes=allow_prefix,
+    )
+    assert violations == []

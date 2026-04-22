@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run BANKING77 through acquire -> snapshot -> embed -> analyze."""
+"""Run BANKING77 through acquire -> parse -> snapshot -> embed -> analyze."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
 from study_query_llm.pipeline.embed import embed
 from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
+from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
 
 EMBEDDING_REPRESENTATION_ALIAS: dict[str, str] = {
@@ -65,11 +66,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--embedding-representation",
         type=str,
-        choices=["full", "label_centroid", "sparse", "intent_mean"],
+        choices=["full", "label_centroid", "intent_mean"],
         default="full",
         help=(
-            "Embedding representation persisted by stage 3 "
-            "(legacy alias: intent_mean -> label_centroid)."
+            "Representation used by stage 5 analysis (embed stage is always full). "
+            "Legacy alias: intent_mean -> label_centroid."
         ),
     )
     parser.add_argument(
@@ -88,7 +89,7 @@ def _parse_args() -> argparse.Namespace:
         "--analysis-method",
         type=str,
         default="bank77_structural_summary",
-        help="Method name persisted by stage 4 analysis.",
+        help="Method name persisted by stage 5 analysis.",
     )
     parser.add_argument(
         "--analysis-strategy",
@@ -164,17 +165,22 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force-snapshot",
         action="store_true",
+        help="Bypass stage-3 idempotent reuse.",
+    )
+    parser.add_argument(
+        "--force-parse",
+        action="store_true",
         help="Bypass stage-2 idempotent reuse.",
     )
     parser.add_argument(
         "--force-embed",
         action="store_true",
-        help="Bypass stage-3 idempotent reuse.",
+        help="Bypass stage-4 idempotent reuse.",
     )
     parser.add_argument(
         "--force-analyze",
         action="store_true",
-        help="Bypass stage-4 completed-run reuse.",
+        help="Bypass stage-5 completed-run reuse.",
     )
     parser.add_argument(
         "--skip-analysis",
@@ -304,17 +310,23 @@ def main() -> None:
         db=db,
         artifact_dir=str(args.artifact_dir),
     )
-    snapped = snapshot(
+    parsed = parse(
         acquired.group_id,
+        force=bool(args.force_parse),
+        db=db,
+        artifact_dir=str(args.artifact_dir),
+    )
+    snapped = snapshot(
+        parsed.group_id,
         force=bool(args.force_snapshot),
         db=db,
         artifact_dir=str(args.artifact_dir),
     )
     embedded = embed(
-        snapped.group_id,
+        parsed.group_id,
         deployment=str(args.embedding_deployment),
         provider=str(args.embedding_provider),
-        representation=str(args.embedding_representation),
+        representation="full",
         force=bool(args.force_embed),
         db=db,
         artifact_dir=str(args.artifact_dir),
@@ -332,6 +344,7 @@ def main() -> None:
             parameters=analysis_parameters,
         )
         analyzed = analyze(
+            snapped.group_id,
             embedded.group_id,
             method_name=analysis_method_name,
             method_version=args.analysis_method_version,
@@ -349,6 +362,11 @@ def main() -> None:
             "group_id": int(acquired.group_id),
             "metadata": acquired.metadata,
             "artifact_uris": acquired.artifact_uris,
+        },
+        "parse": {
+            "group_id": int(parsed.group_id),
+            "metadata": parsed.metadata,
+            "artifact_uris": parsed.artifact_uris,
         },
         "snapshot": {
             "group_id": int(snapped.group_id),

@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 SOURCES_UNCERTAINTY_QC_SLUG = "sources_uncertainty_qc"
 ZENODO_RECORD_ID = 16912394
 ZENODO_DOI = "10.5281/zenodo.16912394"
+SOURCES_UNCERTAINTY_DEFAULT_PARSER_ID = "sources_uncertainty_qc.default"
+SOURCES_UNCERTAINTY_DEFAULT_PARSER_VERSION = "v1"
 _DATA_FILE = "sources_v2.xlsx"
 _REQUIRED_COLUMNS: tuple[str, ...] = (
     "ResponseId",

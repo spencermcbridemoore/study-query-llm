@@ -17,7 +17,9 @@ from study_query_llm.datasets.source_specs.sources_uncertainty_zenodo import (
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
 from study_query_llm.pipeline.acquire import acquire
+from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
+from study_query_llm.pipeline.types import SubquerySpec
 
 
 def _db(tmp_path: Path) -> DatabaseConnectionV2:
@@ -90,36 +92,52 @@ def test_sources_uncertainty_snapshot_default_and_pm_variants(
         fetch=lambda _url: payload,
     )
 
-    full = snapshot(
+    full_df = parse(
         acquired.group_id,
-        representation="raw_all_v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    full_df_reuse = parse(
+        acquired.group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    pm_df = parse(
+        acquired.group_id,
+        parser=parse_sources_uncertainty_pm_snapshot,
+        parser_id="sources_uncertainty_qc.pm_only",
+        parser_version="v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    full = snapshot(
+        full_df.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
     full_reuse = snapshot(
-        acquired.group_id,
-        representation="raw_all_v1",
+        full_df.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
     pm_only = snapshot(
-        acquired.group_id,
-        parser=parse_sources_uncertainty_pm_snapshot,
-        representation="raw_exp_pm_v1",
+        pm_df.group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
         db=db,
         artifact_dir=artifact_dir,
     )
 
+    assert full_df.group_id == full_df_reuse.group_id
     assert full.group_id == full_reuse.group_id
     assert full_reuse.metadata["reused"] is True
     assert full.metadata["row_count"] == 5
-    assert full.metadata["label_count"] == 4
     assert pm_only.metadata["row_count"] == 3
-    assert pm_only.metadata["label_count"] == 3
     assert pm_only.group_id != full.group_id
 
-    full_table = pq.read_table(full.artifact_uris["snapshot.parquet"])
-    pm_table = pq.read_table(pm_only.artifact_uris["snapshot.parquet"])
+    full_table = pq.read_table(full_df.artifact_uris["dataframe.parquet"])
+    pm_table = pq.read_table(pm_df.artifact_uris["dataframe.parquet"])
     full_extras = [
         json.loads(value)
         for value in full_table.column("extra_json").to_pylist()
@@ -130,13 +148,13 @@ def test_sources_uncertainty_snapshot_default_and_pm_variants(
     assert {extra["experiment"] for extra in pm_extras} == {"PM"}
 
     with db.session_scope() as session:
-        full_group = session.query(Group).filter(Group.id == full.group_id).first()
-        pm_group = session.query(Group).filter(Group.id == pm_only.group_id).first()
+        full_group = session.query(Group).filter(Group.id == full_df.group_id).first()
+        pm_group = session.query(Group).filter(Group.id == pm_df.group_id).first()
         assert full_group is not None
         assert pm_group is not None
         full_md = dict(full_group.metadata_json or {})
         pm_md = dict(pm_group.metadata_json or {})
-        assert full_md["representation"] == "raw_all_v1"
-        assert pm_md["representation"] == "raw_exp_pm_v1"
-        assert full_md["parser_identity"].endswith("parse_sources_uncertainty_snapshot")
-        assert pm_md["parser_identity"].endswith("parse_sources_uncertainty_pm_snapshot")
+        assert full_md["parser_id"] == "sources_uncertainty_qc.default"
+        assert full_md["parser_version"] == "v1"
+        assert pm_md["parser_id"] == "sources_uncertainty_qc.pm_only"
+        assert pm_md["parser_version"] == "v1"

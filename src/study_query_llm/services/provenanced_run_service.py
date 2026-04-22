@@ -226,6 +226,7 @@ class ProvenancedRunService:
         metadata_json: Optional[Dict[str, Any]] = None,
         run_status: str = RUN_STATUS_COMPLETED,
         orchestration_job_id: Optional[int] = None,
+        input_snapshot_group_id: Optional[int] = None,
     ) -> int:
         """Create an analysis execution run linked to method definition/spec."""
         synthetic_run_key = analysis_run_key or f"{analysis_key}:{source_group_id}"
@@ -238,6 +239,7 @@ class ProvenancedRunService:
             method_name=method_name,
             method_version=method_version,
             config_json=config_json,
+            input_snapshot_group_id=input_snapshot_group_id,
             manifest_hash=meta.get("manifest_hash"),
             data_regime=meta.get("data_regime"),
             determinism_class=determinism_class,
@@ -248,6 +250,7 @@ class ProvenancedRunService:
             run_status=run_status,
             request_group_id=request_group_id,
             source_group_id=source_group_id,
+            input_snapshot_group_id=input_snapshot_group_id,
             method_definition_id=method_definition_id,
             orchestration_job_id=orchestration_job_id,
             run_key=synthetic_run_key,

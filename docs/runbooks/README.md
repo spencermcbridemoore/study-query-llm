@@ -54,7 +54,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 - Script lane note: active operational entrypoints remain under `scripts/`; historical experiment drivers are being moved under `scripts/history/` with compatibility wrappers.
 - Data pipeline flow:
   - contract: [`docs/DATA_PIPELINE.md`](../DATA_PIPELINE.md)
-  - run BANK77 end-to-end (acquire -> snapshot -> embed -> analyze):
+  - run BANK77 end-to-end (acquire -> parse -> snapshot -> embed -> analyze):
     - `python scripts/run_bank77_pipeline.py --embedding-provider azure --embedding-deployment text-embedding-3-small --embedding-representation full --embedding-chunk-size 128 --analysis-method cosine_kllmeans_no_pca --analysis-run-key bank77_full_run_seed7`
   - idempotency check: rerun the exact same command and confirm stage metadata reports `reused: true`
   - validate/backfill legacy snapshot linkage: `scripts/validate_and_backfill_run_snapshots.py`

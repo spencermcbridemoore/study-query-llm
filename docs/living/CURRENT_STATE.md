@@ -1,4 +1,4 @@
-# Current State (Authoritative)
+﻿# Current State (Authoritative)
 
 Status: living  
 Owner: documentation-maintainers  
@@ -49,14 +49,17 @@ This document is the canonical "what exists and works now" summary for the repos
 - MCQ orchestration now plans both `mcq_run` execution jobs and dependent `analysis_run` jobs; `python -m study_query_llm.cli analyze` is a compatibility wrapper that processes those orchestration analysis jobs rather than a separate analysis write path.
 - New MCQ runs persist explicit `provenanced_runs` method-execution rows with `determinism_class=non_deterministic`; analysis outcomes dual-write to compatibility `analysis_results` and canonical `provenanced_runs` execution rows; legacy rows remain visible through compatibility mapping in the unified execution view.
 - Clustering ingestion now normalizes `dataset_snapshot_ids` and writes a primary snapshot pointer to `provenanced_runs.input_snapshot_group_id`; unified compatibility reads infer this pointer from legacy run metadata or `depends_on` run->snapshot links when explicit execution rows are absent.
-- Canonical pipeline package lives in `src/study_query_llm/pipeline/` and implements four stages: `acquire`, `snapshot`, `embed`, `analyze` (with persistence-contract enforcement via `run_stage` + `scripts/check_persistence_contract.py`).
-- BANK77 full-data execution is scriptable via `scripts/run_bank77_pipeline.py`; the latest operator acceptance run completed with stage reuse verified on second invocation (idempotent group/artifact/run reuse).
-- Phase-1 unknown-`k` analysis support is available through stage-4 `analyze` via `src/study_query_llm/pipeline/hdbscan_runner.py` and `scripts/run_bank77_pipeline.py --analysis-strategy hdbscan`; this path now enriches the same stage-created execution row with canonical config/fingerprint fields through `ProvenancedRunService.record_analysis_execution(..., analysis_run_key=run_key)`.
-- Stage-3 embedding representation `label_centroid` is now the canonical name for label-level centroid pooling (`intent_mean` remains as a backward-compatible alias), and stage-4 HDBSCAN rejects non-`full` embedding representations to preserve row-level clustering semantics.
+- Canonical pipeline package lives in `src/study_query_llm/pipeline/` and implements five stages: `acquire`, `parse`, `snapshot`, `embed`, `analyze` (with persistence-contract enforcement via `run_stage` + `scripts/check_persistence_contract.py`).
+- `parse` is the canonical dataframe stage: it writes `dataset_dataframe` groups and `dataset_canonical_parquet` artifacts keyed by stable parser identity (`parser_id` + `parser_version`) and dataframe hash.
+- `snapshot` is now declarative (`SubquerySpec`) and writes deterministic resolved-index artifacts (`dataset_subquery_spec`) keyed by `spec_hash` + `resolved_index_hash`; unseeded sampling requests are rejected.
+- `embed` now persists/reuses dataframe-level `full` matrices only (`dataset_key=dataframe:<id>:full`); non-full representations are intentionally deferred to analyze-time derivation.
+- `analyze` now requires dual input lineage (`snapshot_group_id`, `embedding_batch_group_id`), slices text/vectors by the same resolved-index ordering, and includes representation identity plus `input_snapshot_group_id` in canonical run fingerprinting.
+- BANK77 execution is scriptable via `scripts/run_bank77_pipeline.py` using the five-stage flow; idempotent reuse is verified in pipeline tests and full-suite regression runs.
+- Phase-1 unknown-`k` analysis support remains available via `src/study_query_llm/pipeline/hdbscan_runner.py` + `scripts/run_bank77_pipeline.py --analysis-strategy hdbscan`, with canonical provenance enrichment through `ProvenancedRunService.record_analysis_execution(..., analysis_run_key=run_key)`.
 - Deferred Phase-2 scope: unknown-`k` sweep-worker/ingestion contract generalization remains out of the active path (`src/study_query_llm/experiments/sweep_worker_main.py`, `src/study_query_llm/experiments/ingestion.py`, `src/study_query_llm/experiments/sweep_io.py`, `src/study_query_llm/experiments/result_metrics.py`, `src/study_query_llm/experiments/sweep_request_types.py`).
 - Dataset source specs remain in `src/study_query_llm/datasets/source_specs/` (including `banking77.py` with pinned HuggingFace resolve URLs); "Layer 0 / Layer 1" terminology is retired in favor of stage names.
-- `sources_uncertainty_qc` now has a default snapshot parser (`parse_sources_uncertainty_snapshot`) plus a PM-only parser variant (`parse_sources_uncertainty_pm_snapshot`). Snapshot provenance captures parser identity and representation, enabling parallel all-experiment and PM-focused snapshots from the same acquired dataset group.
-- `ausem` now has a default snapshot parser (`parse_ausem_snapshot`) plus four per-problem parser profiles (`parse_ausem_problem1_snapshot` through `parse_ausem_problem4_snapshot`). Snapshot provenance captures parser identity and representation, enabling combined and per-problem educational analysis views from the same acquired dataset group.
+- `sources_uncertainty_qc` has a default parser plus PM-only parser variant; parser identities/versioning are explicit and feed parse-stage idempotency and lineage.
+- `ausem` has a default parser plus four per-problem parser profiles; parser identities/versioning are explicit and feed parse-stage idempotency and lineage.
 - Artifact writes enforce an Azure blob quota hard-stop (default 100 GiB; configurable via env).
 - Embedding token-limit validation can use discovered model `context_length` from `ModelRegistry` cache when available (provider+deployment key match), then falls back to existing static/inferred limits.
 

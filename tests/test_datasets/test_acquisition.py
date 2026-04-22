@@ -19,6 +19,9 @@ from study_query_llm.datasets.source_specs.ausem import parse_ausem_snapshot
 from study_query_llm.datasets.source_specs.semeval2013_sra_5way import (
     parse_semeval2013_sra_5way_snapshot,
 )
+from study_query_llm.datasets.source_specs.twenty_newsgroups import (
+    parse_twenty_newsgroups_snapshot,
+)
 from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 
 
@@ -143,3 +146,21 @@ def test_acquire_registry_semeval2013_sra_5way():
     meta = cfg.source_metadata()
     assert meta["kind"] == "github_raw"
     assert "ldc" in meta["note"].lower()
+
+
+def test_acquire_registry_twenty_newsgroups() -> None:
+    cfg = ACQUIRE_REGISTRY["twenty_newsgroups"]
+    assert cfg.default_parser is parse_twenty_newsgroups_snapshot
+    assert cfg.default_parser_id == "twenty_newsgroups.default"
+    assert cfg.default_parser_version == "v1"
+
+    files = cfg.file_specs()
+    assert len(files) == 1
+    assert files[0].relative_path == "20news-bydate.tar.gz"
+    assert "ndownloader.figshare.com/files/5975967" in files[0].url
+
+    meta = cfg.source_metadata()
+    assert meta["kind"] == "figshare_file"
+    assert meta["dataset"] == "20newsgroups-bydate"
+    pinning_identity = meta["pinning_identity"]
+    assert pinning_identity["archive_path"] == "20news-bydate.tar.gz"

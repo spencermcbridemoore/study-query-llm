@@ -46,6 +46,15 @@ from study_query_llm.datasets.source_specs.sources_uncertainty_zenodo import (
     sources_uncertainty_file_specs,
     sources_uncertainty_source_metadata,
 )
+from study_query_llm.datasets.source_specs.twenty_newsgroups import (
+    TWENTY_NEWSGROUPS_DATASET_SLUG,
+    TWENTY_NEWSGROUPS_DEFAULT_PARSER_ID,
+    TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION,
+    TWENTY_NEWSGROUPS_6CAT,
+    parse_twenty_newsgroups_snapshot,
+    twenty_newsgroups_file_specs,
+    twenty_newsgroups_source_metadata,
+)
 
 __all__ = [
     "ACQUIRE_REGISTRY",
@@ -61,6 +70,10 @@ __all__ = [
     "SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_ID",
     "SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_VERSION",
     "SOURCES_UNCERTAINTY_QC_SLUG",
+    "TWENTY_NEWSGROUPS_DATASET_SLUG",
+    "TWENTY_NEWSGROUPS_DEFAULT_PARSER_ID",
+    "TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION",
+    "TWENTY_NEWSGROUPS_6CAT",
     "ausem_file_specs",
     "parse_ausem_problem1_snapshot",
     "parse_ausem_problem2_snapshot",
@@ -80,4 +93,7 @@ __all__ = [
     "semeval2013_sra_5way_source_metadata",
     "sources_uncertainty_file_specs",
     "sources_uncertainty_source_metadata",
+    "parse_twenty_newsgroups_snapshot",
+    "twenty_newsgroups_file_specs",
+    "twenty_newsgroups_source_metadata",
 ]

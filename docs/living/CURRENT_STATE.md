@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-20
+Last reviewed: 2026-04-22
 
 ## Scope
 
@@ -57,7 +57,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - BANK77 execution is scriptable via `scripts/run_bank77_pipeline.py` using the five-stage flow; idempotent reuse is verified in pipeline tests and full-suite regression runs.
 - Phase-1 unknown-`k` analysis support remains available via `src/study_query_llm/pipeline/hdbscan_runner.py` + `scripts/run_bank77_pipeline.py --analysis-strategy hdbscan`, with canonical provenance enrichment through `ProvenancedRunService.record_analysis_execution(..., analysis_run_key=run_key)`.
 - Deferred Phase-2 scope: unknown-`k` sweep-worker/ingestion contract generalization remains out of the active path (`src/study_query_llm/experiments/sweep_worker_main.py`, `src/study_query_llm/experiments/ingestion.py`, `src/study_query_llm/experiments/sweep_io.py`, `src/study_query_llm/experiments/result_metrics.py`, `src/study_query_llm/experiments/sweep_request_types.py`).
-- Dataset source specs remain in `src/study_query_llm/datasets/source_specs/` (including `banking77.py` with pinned HuggingFace resolve URLs and `estela.py` with a pinned repository pickle for uncategorized prompts); "Layer 0 / Layer 1" terminology is retired in favor of stage names.
+- Dataset source specs remain in `src/study_query_llm/datasets/source_specs/` (including `banking77.py` with pinned HuggingFace resolve URLs, `estela.py` with a pinned repository pickle for uncategorized prompts, and `twenty_newsgroups.py` with a pinned full train+test archive plus parser-emitted `extra.newsgroup`/`extra.split` fields for snapshot-time category slicing); "Layer 0 / Layer 1" terminology is retired in favor of stage names.
 - `sources_uncertainty_qc` has a default parser plus PM-only parser variant; parser identities/versioning are explicit and feed parse-stage idempotency and lineage.
 - `ausem` has a default parser plus four per-problem parser profiles; parser identities/versioning are explicit and feed parse-stage idempotency and lineage.
 - Artifact writes enforce an Azure blob quota hard-stop (default 100 GiB; configurable via env).

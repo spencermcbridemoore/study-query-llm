@@ -52,6 +52,7 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 - **Output artifacts:** `dataset_subquery_spec` (`subquery_spec.json`)
 - **Idempotency key:** `(source_dataframe_group_id, spec_hash, resolved_index_hash)`
 - **Determinism rule:** reject unseeded sampling (`sampling_seed` required whenever sampling is requested)
+- **Category filter:** `SubquerySpec.category_filter` selects rows by membership against keys nested in `extra_json`; semantics are AND across keys and IN within each key list, with strict typed equality (no coercion). Rows missing a requested key are excluded. Empty outer dictionaries and empty inner lists are rejected at spec construction.
 - **Key metadata:** `source_dataframe_group_id`, `spec_hash`, `resolved_index_hash`, `row_count`
 
 ### Stage 4: `embed`
@@ -77,7 +78,7 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 ## Core Data Structures
 
 - `SnapshotRow`: normalized parser output row shape.
-- `SubquerySpec`: declarative snapshot query with deterministic sampling policy.
+- `SubquerySpec`: declarative snapshot query with deterministic sampling policy; supports `label_mode`, top-level `filter_expr`, and `category_filter` membership predicates over `extra_json`.
 - `StageResult`: standard stage return payload.
 
 ## Parser Identity Contract

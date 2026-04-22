@@ -35,6 +35,9 @@ from study_query_llm.datasets.source_specs.parser_protocol import (
 )
 from study_query_llm.datasets.source_specs.semeval2013_sra_5way import (
     SEMEVAL2013_SRA_5WAY_SLUG,
+    SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_ID,
+    SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_VERSION,
+    parse_semeval2013_sra_5way_snapshot,
     semeval2013_sra_5way_file_specs,
     semeval2013_sra_5way_source_metadata,
 )
@@ -55,6 +58,8 @@ __all__ = [
     "ParserCallable",
     "ParserContext",
     "SEMEVAL2013_SRA_5WAY_SLUG",
+    "SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_ID",
+    "SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_VERSION",
     "SOURCES_UNCERTAINTY_QC_SLUG",
     "ausem_file_specs",
     "parse_ausem_problem1_snapshot",
@@ -70,6 +75,7 @@ __all__ = [
     "estela_source_metadata",
     "parse_banking77_snapshot",
     "parse_estela_snapshot",
+    "parse_semeval2013_sra_5way_snapshot",
     "semeval2013_sra_5way_file_specs",
     "semeval2013_sra_5way_source_metadata",
     "sources_uncertainty_file_specs",

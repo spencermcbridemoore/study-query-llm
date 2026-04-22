@@ -33,6 +33,9 @@ from study_query_llm.datasets.source_specs.ausem import (
 )
 from study_query_llm.datasets.source_specs.semeval2013_sra_5way import (
     SEMEVAL2013_SRA_5WAY_SLUG,
+    SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_ID,
+    SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_VERSION,
+    parse_semeval2013_sra_5way_snapshot,
     semeval2013_sra_5way_file_specs,
     semeval2013_sra_5way_source_metadata,
 )
@@ -103,5 +106,8 @@ ACQUIRE_REGISTRY: Dict[str, DatasetAcquireConfig] = {
         slug=SEMEVAL2013_SRA_5WAY_SLUG,
         file_specs=semeval2013_sra_5way_file_specs,
         source_metadata=semeval2013_sra_5way_source_metadata,
+        default_parser=parse_semeval2013_sra_5way_snapshot,
+        default_parser_id=SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_ID,
+        default_parser_version=SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_VERSION,
     ),
 }

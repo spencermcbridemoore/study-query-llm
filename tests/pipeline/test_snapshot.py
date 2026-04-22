@@ -56,6 +56,87 @@ def _fixture_parser(ctx) -> list[SnapshotRow]:
     ]
 
 
+def _fixture_parser_with_extras(ctx) -> list[SnapshotRow]:
+    assert (ctx.artifact_dir_local / "data" / "train.csv").is_file()
+    assert (ctx.artifact_dir_local / "data" / "test.csv").is_file()
+    return [
+        SnapshotRow(
+            position=0,
+            source_id="extra-0",
+            text="alpha",
+            label=1,
+            label_name="y",
+            extra={
+                "qid": "Q1",
+                "module": "M1",
+                "correct": True,
+                "source_path": ["folder", "leaf"],
+            },
+        ),
+        SnapshotRow(
+            position=1,
+            source_id="extra-1",
+            text="beta",
+            label=0,
+            label_name="x",
+            extra={"qid": "Q2", "module": "M1", "correct": False},
+        ),
+        SnapshotRow(
+            position=2,
+            source_id="extra-2",
+            text="gamma",
+            label=1,
+            label_name="y",
+            extra={"qid": "Q1", "module": "M2", "correct": True},
+        ),
+        SnapshotRow(
+            position=3,
+            source_id="extra-3",
+            text="delta",
+            label=1,
+            label_name="y",
+            extra={"qid": "Q3", "correct": True},
+        ),
+    ]
+
+
+def _parsed_group(
+    *,
+    tmp_path: Path,
+    monkeypatch,
+    parser,
+    parser_id: str,
+) -> tuple[DatabaseConnectionV2, int, str]:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db = _db(tmp_path)
+    spec = _fixture_spec()
+    payload_by_url = {
+        "https://example.test/train.csv": b"id,text\n1,hello\n2,world\n",
+        "https://example.test/test.csv": b"id,text\n3,test\n",
+    }
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    dataset_result = acquire(
+        spec,
+        db=db,
+        artifact_dir=artifact_dir,
+        fetch=lambda url: payload_by_url[url],
+    )
+    parsed = parse(
+        dataset_result.group_id,
+        parser=parser,
+        parser_id=parser_id,
+        parser_version="v1",
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    return db, parsed.group_id, artifact_dir
+
+
+def _snapshot_payload(result) -> dict[str, object]:
+    payload_uri = result.artifact_uris["subquery_spec.json"]
+    return json.loads(Path(payload_uri).read_text(encoding="utf-8"))
+
+
 def test_subquery_spec_canonical_dict_omits_category_filter_when_unset() -> None:
     spec = SubquerySpec()
     canonical = spec.to_canonical_dict()
@@ -198,3 +279,148 @@ def test_snapshot_sampling_requires_seed_and_changes_hash(tmp_path: Path, monkey
         assert "sampling_seed" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected unseeded sampling to fail")
+
+
+def test_snapshot_category_filter_filters_on_extra_keys(tmp_path: Path, monkeypatch) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_extras,
+        parser_id="fixture_dataset.extra",
+    )
+
+    result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(
+            category_filter={"qid": ["Q2", "Q1"], "module": ["M1"]},
+            label_mode="all",
+        ),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    payload = _snapshot_payload(result)
+    assert payload["resolved_index"] == [[0, "extra-0"], [1, "extra-1"]]
+
+
+def test_snapshot_category_filter_excludes_missing_keys(tmp_path: Path, monkeypatch) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_extras,
+        parser_id="fixture_dataset.extra",
+    )
+
+    result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(
+            category_filter={"qid": ["Q3"], "module": ["M1", "M2"]},
+            label_mode="all",
+        ),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    payload = _snapshot_payload(result)
+    assert payload["resolved_index"] == []
+
+
+def test_snapshot_category_filter_excludes_typed_mismatches(tmp_path: Path, monkeypatch) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_extras,
+        parser_id="fixture_dataset.extra",
+    )
+
+    result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(
+            category_filter={"correct": [1]},
+            label_mode="all",
+        ),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    payload = _snapshot_payload(result)
+    assert payload["resolved_index"] == []
+
+
+def test_snapshot_category_filter_handles_list_valued_extras(tmp_path: Path, monkeypatch) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_extras,
+        parser_id="fixture_dataset.extra",
+    )
+
+    result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(
+            category_filter={"source_path": ["folder/leaf"]},
+            label_mode="all",
+        ),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    payload = _snapshot_payload(result)
+    assert payload["resolved_index"] == []
+
+
+def test_snapshot_category_filter_changes_hash_but_unset_preserves_legacy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_extras,
+        parser_id="fixture_dataset.extra",
+    )
+
+    legacy_a = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    legacy_b = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    filtered = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"module": ["M1"]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    assert legacy_a.group_id == legacy_b.group_id
+    assert legacy_a.group_id != filtered.group_id
+
+
+def test_snapshot_category_filter_handles_empty_post_filter_frame(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_extras,
+        parser_id="fixture_dataset.extra",
+    )
+
+    result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"qid": ["DOES_NOT_EXIST"]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    payload = _snapshot_payload(result)
+    assert payload["row_count"] == 0
+    assert payload["resolved_index"] == []

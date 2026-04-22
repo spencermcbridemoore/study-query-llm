@@ -6,7 +6,7 @@ import hashlib
 import io
 import json
 import os
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -56,6 +56,61 @@ def _normalize_spec(spec: SubquerySpec | None) -> SubquerySpec:
 def _hash_payload(payload: Any) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _decode_extra(payload: Any, *, position: int, source_id: str) -> dict[str, Any]:
+    if payload is None:
+        return {}
+    if not isinstance(payload, str) or payload == "":
+        raise ValueError(
+            f"snapshot row position={position} source_id={source_id!r} "
+            "has invalid extra_json payload"
+        )
+    try:
+        decoded = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"snapshot row position={position} source_id={source_id!r} "
+            f"has malformed extra_json: {exc}"
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise ValueError(
+            f"snapshot row position={position} source_id={source_id!r} "
+            "has non-object extra_json payload"
+        )
+    return decoded
+
+
+def _typed_equals(actual: Any, candidate: Any) -> bool:
+    return type(actual) is type(candidate) and actual == candidate
+
+
+def _apply_category_filter(
+    filtered: pd.DataFrame,
+    *,
+    category_filter: Mapping[str, Sequence[Any]],
+) -> pd.DataFrame:
+    if filtered.empty:
+        return filtered
+
+    decoded = filtered.apply(
+        lambda row: _decode_extra(
+            row["extra_json"],
+            position=int(row["position"]),
+            source_id=str(row["source_id"]),
+        ),
+        axis=1,
+    )
+    mask = pd.Series(True, index=filtered.index)
+    for key, allowed in category_filter.items():
+        candidates = tuple(allowed)
+        mask &= decoded.map(
+            lambda parsed, filter_key=key, filter_candidates=candidates: any(
+                _typed_equals(parsed.get(filter_key), candidate)
+                for candidate in filter_candidates
+            )
+        )
+    return filtered[mask]
 
 
 def _load_dataframe_frame(
@@ -133,6 +188,10 @@ def _apply_subquery(
             filtered = filtered.query(str(filter_expr), engine="python")
         except Exception as exc:
             raise ValueError(f"invalid filter_expr {filter_expr!r}: {exc}") from exc
+
+    category_filter = normalized.get("category_filter")
+    if category_filter:
+        filtered = _apply_category_filter(filtered, category_filter=category_filter)
 
     sample_n = normalized.get("sample_n")
     sample_fraction = normalized.get("sample_fraction")

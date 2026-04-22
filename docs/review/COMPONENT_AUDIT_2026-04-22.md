@@ -25,6 +25,7 @@ This document is an audit artifact; concrete fixes belong in PRs and the
 6. [Doc Parity Actions](#6-doc-parity-actions)
 7. [Open Questions for Human Judgment](#7-open-questions-for-human-judgment)
 8. [Audit Methodology](#8-audit-methodology)
+9. [Cross-Critique Addendum](#9-cross-critique-addendum-2026-04-22)
 
 ---
 
@@ -575,6 +576,90 @@ These need product/architectural decision rather than code fix.
 | 8 | Tests | `tests/pipeline/*.py`, `tests/test_datasets/*.py`, `tests/test_experiments/test_ingestion.py`, `tests/test_scripts/test_upload_jetstream_pg_dump_to_blob.py` | ~3500 combined |
 | 9 | Docs parity | `docs/DATA_PIPELINE.md`, `docs/living/CURRENT_STATE.md`, `docs/review/DOC_PARITY_LEDGER.md` | 152 + 90 + 104 |
 | 10 | Acquisition layer | `datasets/acquisition.py` | ~210 |
+
+---
+
+## 9. Cross-Critique Addendum (2026-04-22)
+
+After the initial audit, this document was cross-critiqued by a second model
+pass and then re-checked against code. This section captures the corrections
+to §1-§8, findings missed on the first pass, and the merged action plan.
+
+**Where this section conflicts with §1-§8, this section wins.**
+
+### 9.1. Corrections to original audit findings
+
+| location | original claim | correction | reason |
+|---|---|---|---|
+| §3.2, §2.5 | `_normalize_rows` may mutate caller's buffer when `embeddings` is a writable view | **Strike.** Returns a new array. | `matrix / np.maximum(norms, 1e-12)` produces a fresh ndarray; numpy doesn't mutate `matrix` in place. The other §3.2 items (no seed, default metric, no `core_dist_n_jobs` pin, mismatched-length zeroing) stand. |
+| §3.3 Critical | `sample_n` / `sampling_seed` int coercion in `to_canonical_dict` | Re-bucket as **High**. | Requires non-int caller input; no current call site does this. Still worth fixing because it fails silently when it does happen. |
+| §3.5 Critical | `estela.py` `pickle.load` supply-chain risk | Re-bucket as **Medium today, High the moment a new pickle source is added**. | Bytes pinned to project's own GitHub repo at a recorded commit SHA; threat surface narrow until the source list expands. |
+| §6.1 C048 | proposed `verified` -> `partial` | **Keep `verified`.** | Per-stage idempotency *is* asserted in `tests/pipeline/test_parse.py`, `test_snapshot.py`, `test_embed.py`, `test_analyze.py`. The e2e file is single-pass, but the contract claim "idempotent reuse asserted across parse/snapshot/embed/analyze" holds via the union of tests. |
+| §1 #1, §6.1 C041 | doc says "four component methods" | Doc is **even more off** than stated: `algorithms/recipes.py:134-155` registers a 5th component (`umap_project`); the composite recipe still has **3** stages. The right framing is *5 registered components, 3 recipe stages*. | Confirmed by direct re-read of `algorithms/recipes.py`. |
+| §2.4, §3.6 | "ingestion TOCTOU race" framed inside `ingest_result_to_db` | **Reframe.** The race is in the public `run_key_exists_in_db` API surface, called *before* a long sweep from 8+ sites. The insert-time `IntegrityError` handler in `ingest_result_to_db` is a backstop, not the contract; it doesn't recover wasted sweep compute. Severity stays **High**. | See call-site evidence below. |
+
+`run_key_exists_in_db` external callers (each runs a long sweep between the
+existence check and the eventual ingest):
+
+- `scripts/run_pca_kllmeans_sweep.py:258`
+- `scripts/run_pca_kllmeans_sweep_full.py:465`
+- `scripts/history/experiments/run_no_pca_50runs_sweep.py:204`
+- `scripts/history/experiments/run_no_pca_multi_embedding_sweep.py:360`
+- `scripts/history/experiments/run_custom_full_categories_sweep.py:233`
+- `scripts/history/experiments/run_experimental_sweep.py:676`
+- `src/study_query_llm/experiments/runtime_sweeps.py:451`
+- `src/study_query_llm/experiments/sweep_worker_main.py:1070`
+
+### 9.2. Findings missed on the first pass
+
+- **Repeated O(N) artifact / group scans in 6+ places.** Same anti-pattern across:
+  - `pipeline/snapshot.py:40-49` (`_collect_snapshot_artifact_uris`)
+  - `pipeline/snapshot.py:140-155` (`_find_existing_snapshot_group`)
+  - `pipeline/parse.py:46-59` (`_collect_acquisition_artifact_uris`)
+  - `pipeline/parse.py:62-73` (`_collect_dataframe_artifact_uris`)
+  - `pipeline/parse.py:177-194` (`_find_existing_dataframe_group`)
+  - `pipeline/acquire.py:43-60` (`_collect_acquisition_artifact_uris`)
+  - `pipeline/acquire.py:67-78` (`_find_dataset_group_by_fingerprint`)
+
+  All of these load the full `CallArtifact` / `Group` table, then filter in
+  Python by `metadata_json->>'group_id'` / `content_fingerprint`. No
+  correctness bug today; pure latency tax that grows with project age. A
+  JSONB expression index plus a thin helper would convert each to a point
+  lookup.
+
+### 9.3. Merged action list (canonical fix order)
+
+This list supersedes the §4 ordering.
+
+1. **`verify_db_backup_inventory.py` hardening.** Failure accumulator,
+   non-zero exit on any mismatch / Azure failure / missing blob,
+   `encoding="utf-8"` on `load_dotenv`, minimum tests for mismatch + error
+   paths. **High.** *(Only finding with current CI consequence — placed first.)*
+2. **Docs parity sweep.** C041 (5 registered components / 3 recipe stages),
+   C043 / C044 / C045 stage-numbering wording, `METHOD_RECIPES.md:88`
+   component list, `CURRENT_STATE.md:25` and `:60` wording, `extra.<key>` ->
+   "top-level key in parsed `extra_json`" notation. **Medium-High.**
+3. **`category_filter` contract.** Document semantics in `DATA_PIPELINE.md`
+   ("Filter semantics" subsection): missing-key vs explicit-null, strict
+   typed equality after `json.loads`, allowed value types, AND-across-keys /
+   IN-within-key. Add 4 regression tests covering each silent-misfire path.
+   **Medium-High.**
+4. **SemEval `gold_count` normalization.** Emit one stable type (preferred:
+   always `int`; fallback: split into `gold_count_int` + `gold_count_raw`);
+   bump `parser_version`. **Medium.**
+5. **JSONB metadata `group_id` index + helper.** Replace the ~6 O(N) scans
+   listed in §9.2 with point lookups. **Medium.**
+6. **Fingerprint input forwarding.** Pass `manifest_hash` / `data_regime`
+   from sweep metadata into `record_method_execution`; make `recipe_hash`
+   injection uniform across all `recipe_json`-bearing methods, not just
+   members of `COMPOSITE_RECIPES`. **Medium.**
+7. **Ingestion idempotency reshape.** Deprecate standalone
+   `run_key_exists_in_db` in favor of an atomic claim-or-skip call (single
+   transaction with the unique-index-backed insert), or document the TOCTOU
+   contract loudly and audit the 8 existing callers. **Medium.**
+8. **HDBSCAN deterministic-defaults policy.** Decide cosine vs euclidean
+   default, seed pin, `core_dist_n_jobs` policy. **Low-Medium — product
+   call needed.**
 
 ---
 

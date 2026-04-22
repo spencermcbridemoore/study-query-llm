@@ -14,6 +14,14 @@ from study_query_llm.datasets.source_specs.banking77 import (
     banking77_source_metadata,
     parse_banking77_snapshot,
 )
+from study_query_llm.datasets.source_specs.estela import (
+    ESTELA_DATASET_SLUG,
+    ESTELA_DEFAULT_PARSER_ID,
+    ESTELA_DEFAULT_PARSER_VERSION,
+    estela_file_specs,
+    estela_source_metadata,
+    parse_estela_snapshot,
+)
 from study_query_llm.datasets.source_specs.parser_protocol import ParserCallable
 from study_query_llm.datasets.source_specs.ausem import (
     AUSEM_DATASET_SLUG,
@@ -66,6 +74,14 @@ ACQUIRE_REGISTRY: Dict[str, DatasetAcquireConfig] = {
         default_parser=parse_banking77_snapshot,
         default_parser_id=BANKING77_DEFAULT_PARSER_ID,
         default_parser_version=BANKING77_DEFAULT_PARSER_VERSION,
+    ),
+    ESTELA_DATASET_SLUG: DatasetAcquireConfig(
+        slug=ESTELA_DATASET_SLUG,
+        file_specs=estela_file_specs,
+        source_metadata=estela_source_metadata,
+        default_parser=parse_estela_snapshot,
+        default_parser_id=ESTELA_DEFAULT_PARSER_ID,
+        default_parser_version=ESTELA_DEFAULT_PARSER_VERSION,
     ),
     AUSEM_DATASET_SLUG: DatasetAcquireConfig(
         slug=AUSEM_DATASET_SLUG,

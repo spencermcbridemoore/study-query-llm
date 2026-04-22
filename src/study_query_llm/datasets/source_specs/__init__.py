@@ -19,6 +19,12 @@ from study_query_llm.datasets.source_specs.banking77 import (
     banking77_source_metadata,
     parse_banking77_snapshot,
 )
+from study_query_llm.datasets.source_specs.estela import (
+    ESTELA_DATASET_SLUG,
+    estela_file_specs,
+    estela_source_metadata,
+    parse_estela_snapshot,
+)
 from study_query_llm.datasets.source_specs.registry import (
     ACQUIRE_REGISTRY,
     DatasetAcquireConfig,
@@ -45,6 +51,7 @@ __all__ = [
     "BANKING77_HF_DATASET",
     "BANKING77_HF_REVISION",
     "DatasetAcquireConfig",
+    "ESTELA_DATASET_SLUG",
     "ParserCallable",
     "ParserContext",
     "SEMEVAL2013_SRA_5WAY_SLUG",
@@ -59,7 +66,10 @@ __all__ = [
     "banking77_file_specs",
     "banking77_resolve_url",
     "banking77_source_metadata",
+    "estela_file_specs",
+    "estela_source_metadata",
     "parse_banking77_snapshot",
+    "parse_estela_snapshot",
     "semeval2013_sra_5way_file_specs",
     "semeval2013_sra_5way_source_metadata",
     "sources_uncertainty_file_specs",

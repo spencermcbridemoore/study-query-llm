@@ -18,6 +18,7 @@ Panel-based web application for running LLM inference experiments across multipl
 - **Jetstream: PC → Postgres SSH tunnel** (local `DATABASE_URL` via forward): `deploy/jetstream/LOCAL_DEV_TUNNEL.md`
 - **Clone Jetstream DB into local Docker** (backup local, `pg_dump` Jetstream, restore): `docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`
 - **Coding Rules**: `.cursorrules` - Detailed technical conventions (Cursor-specific)
+- **Git identity guardrail**: `.cursor/rules/git-identity-shell-guardrail.mdc` - Windows cross-shell commit identity checks
 - **Contributing**: `CONTRIBUTING.md` - Development process and guidelines
 - **Standing Orders**: `docs/STANDING_ORDERS.md` - Consistency guidelines
 

@@ -1,0 +1,16 @@
+---
+description: Prevent git author identity failures across shells on Windows
+alwaysApply: true
+---
+
+# Git Identity Guardrail (Windows)
+
+- Prefer running `git commit` in PowerShell on Windows.
+- Before committing, verify identity in the active shell:
+  - `git config --get user.name`
+  - `git config --get user.email`
+- If either value is empty, do not commit until identity is explicit.
+- When committing from bash or a non-default shell, use one-shot identity:
+  - `git -c user.name="..." -c user.email="..." commit ...`
+- Do not modify global git config during automated task flow.
+- If shell identity and expected identity differ, stop and ask the user.

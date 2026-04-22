@@ -38,6 +38,7 @@
 - Avoid committing broken/incomplete code that would break the build or tests
 - Never commit `.env` files or API keys (see `SECURITY.md`)
 - Use descriptive commit messages
+- On Windows commit flows, follow `.cursor/rules/git-identity-shell-guardrail.mdc` to avoid cross-shell git author identity failures
 
 ## Project Structure
 - Core package: `src/study_query_llm/` (framework-agnostic)

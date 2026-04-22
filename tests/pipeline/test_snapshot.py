@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from study_query_llm.datasets.acquisition import FileFetchSpec
 from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
@@ -52,6 +54,45 @@ def _fixture_parser(ctx) -> list[SnapshotRow]:
         SnapshotRow(position=1, source_id="row-1", text="world", label=1, label_name="b"),
         SnapshotRow(position=2, source_id="row-2", text="again", label=1, label_name="b"),
     ]
+
+
+def test_subquery_spec_canonical_dict_omits_category_filter_when_unset() -> None:
+    spec = SubquerySpec()
+    canonical = spec.to_canonical_dict()
+    assert "category_filter" not in canonical
+
+
+def test_subquery_spec_rejects_empty_category_filter() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        SubquerySpec(category_filter={})
+
+
+def test_subquery_spec_rejects_empty_inner_list() -> None:
+    with pytest.raises(ValueError, match="non-empty list"):
+        SubquerySpec(category_filter={"qid": []})
+
+
+def test_subquery_spec_rejects_non_scalar_candidate() -> None:
+    with pytest.raises(ValueError, match="str/int/float/bool/None"):
+        SubquerySpec(category_filter={"qid": [{"nested": 1}]})
+
+
+def test_subquery_spec_canonical_dict_normalizes_category_filter() -> None:
+    spec = SubquerySpec(category_filter={"qid": ["Q2", "Q1", "Q1"], "module": ["LF"]})
+    assert spec.to_canonical_dict()["category_filter"] == {
+        "module": ["LF"],
+        "qid": ["Q1", "Q2"],
+    }
+
+
+def test_subquery_spec_freezes_nested_category_filter() -> None:
+    raw_filter = {"qid": ["Q2", "Q1"]}
+    spec = SubquerySpec(category_filter=raw_filter)
+    raw_filter["qid"].append("Q3")
+
+    assert tuple(spec.category_filter["qid"]) == ("Q1", "Q2")
+    with pytest.raises(TypeError):
+        spec.category_filter["qid"] = ("Q4",)
 
 
 def test_snapshot_writes_parquet_manifest_and_depends_on_link(

@@ -21,6 +21,12 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 | `LOCAL_DATABASE_URL` | Local Docker Postgres endpoint | Clone target/sandbox and local restores |
 | `SOURCE_DATABASE_URL` | Optional explicit dump source | One-off dump workflows (avoids overloading `DATABASE_URL`) |
 
+### Destructive DDL Override Note
+
+- `SQLLM_ALLOW_DESTRUCTIVE_DDL=1` is intended for known throwaway targets only (for example local scratch/test clones).
+- This override does not permit destructive operations against the target identified by `JETSTREAM_DATABASE_URL`.
+- Clear the override after one-off maintenance (`Remove-Item Env:SQLLM_ALLOW_DESTRUCTIVE_DDL` in PowerShell).
+
 ## Canonical DB Workflows
 
 ### 1) Operate Jetstream On VM

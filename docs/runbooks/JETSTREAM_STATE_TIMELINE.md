@@ -10,6 +10,16 @@ This note captures the Jetstream Postgres lifecycle around the Apr 22 2026 v5 cu
 
 Between Apr 22 01:33Z and Apr 23 03:14Z, Jetstream went through a deliberate cutover wipe, a brief 6-dataset rebuild, and an unexplained second drop that left the schema empty of every SQLAlchemy-managed v2 table. Only `group_graph_audit_log` survives — it was created out-of-band on Jetstream and is not part of `BaseV2.metadata`, so `metadata.drop_all()`-style resets do not touch it. The 25 audit-log rows that remain document the brief rebuild but their referenced application rows are gone. **The HEAD `models_v2.py` schema is byte-identical to the schema that ran during the brief rebuild and to the schema captured in every dated dump in `db-backups`**, so any of the prior dumps can be restored without migration shims.
 
+## Wipe-Vector Status (A+B Guardrails)
+
+The previously observed wipe path is now structurally blocked in code:
+
+- `BaseDatabaseConnection.drop_all_tables()`/`recreate_db()` now enforce a destructive-op guard before any DB I/O.
+- SQLite remains allowed by default; non-SQLite requires `SQLLM_ALLOW_DESTRUCTIVE_DDL=1`.
+- If the active target matches `JETSTREAM_DATABASE_URL` (normalized host + port + dbname), destructive operations are denied even with override.
+- `tests/test_db/test_repository_v2.py` no longer reads `DATABASE_URL`; it is pinned to in-memory SQLite to prevent accidental remote/tunneled teardown paths.
+- Guard behavior is regression-tested in `tests/test_db/test_destructive_guard.py` using `.invalid` URLs and explicit branch assertions.
+
 ## Timeline (UTC)
 
 | When | Event | Evidence |

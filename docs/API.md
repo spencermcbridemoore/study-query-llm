@@ -228,6 +228,14 @@ with db.session_scope() as session:
 - `drop_all_tables()` - Drop all tables (WARNING: deletes all data)
 - `recreate_db()` - Drop and recreate all tables
 
+**Destructive-op guardrails (current behavior):**
+- Destructive operations are guarded in `BaseDatabaseConnection` before any DB I/O.
+- SQLite targets are allowed by default.
+- Non-SQLite targets require `SQLLM_ALLOW_DESTRUCTIVE_DDL=1`.
+- If the target matches `JETSTREAM_DATABASE_URL` (normalized host + port + dbname), destructive operations are refused even when override is set.
+- If `JETSTREAM_DATABASE_URL` is set but malformed/non-Postgres, operations fail closed with `RuntimeError` until env is fixed/unset.
+- Guard-raised errors redact URL passwords.
+
 ### InferenceRepository
 
 Repository for database operations on inference runs.

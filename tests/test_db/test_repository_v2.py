@@ -3,7 +3,6 @@ Tests for RawCallRepository (v2 schema).
 """
 
 import pytest
-import os
 from datetime import datetime, timedelta, timezone
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -14,28 +13,13 @@ from study_query_llm.db.models_v2 import RawCall, Group, GroupMember
 def v2_db_connection():
     """
     Fixture for v2 database connection.
-    
-    Tries Postgres from DATABASE_URL env var, falls back to SQLite in-memory
-    for basic tests (pgvector features will be skipped).
+
+    Uses in-memory SQLite only to guarantee local, isolated test execution.
     """
-    v2_db_url = os.environ.get("DATABASE_URL")
-    
-    if v2_db_url and v2_db_url.startswith("postgresql"):
-        # Use Postgres if available
-        try:
-            db = DatabaseConnectionV2(v2_db_url, enable_pgvector=False)
-            db.init_db()
-            yield db
-            db.drop_all_tables()
-        except Exception as e:
-            pytest.skip(f"Postgres not available: {str(e)}")
-    else:
-        # Fall back to SQLite for basic tests
-        # Note: Some Postgres-specific features won't work, but basic CRUD will
-        db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
-        db.init_db()
-        yield db
-        db.drop_all_tables()
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    yield db
+    db.drop_all_tables()
 
 
 @pytest.fixture

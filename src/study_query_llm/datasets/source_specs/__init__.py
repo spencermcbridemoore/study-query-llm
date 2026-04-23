@@ -51,7 +51,9 @@ from study_query_llm.datasets.source_specs.twenty_newsgroups import (
     TWENTY_NEWSGROUPS_DEFAULT_PARSER_ID,
     TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION,
     TWENTY_NEWSGROUPS_6CAT,
+    TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE,
     parse_twenty_newsgroups_snapshot,
+    twenty_newsgroups_6cat_subquery_spec,
     twenty_newsgroups_file_specs,
     twenty_newsgroups_source_metadata,
 )
@@ -74,6 +76,7 @@ __all__ = [
     "TWENTY_NEWSGROUPS_DEFAULT_PARSER_ID",
     "TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION",
     "TWENTY_NEWSGROUPS_6CAT",
+    "TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE",
     "ausem_file_specs",
     "parse_ausem_problem1_snapshot",
     "parse_ausem_problem2_snapshot",
@@ -94,6 +97,7 @@ __all__ = [
     "sources_uncertainty_file_specs",
     "sources_uncertainty_source_metadata",
     "parse_twenty_newsgroups_snapshot",
+    "twenty_newsgroups_6cat_subquery_spec",
     "twenty_newsgroups_file_specs",
     "twenty_newsgroups_source_metadata",
 ]

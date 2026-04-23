@@ -13,6 +13,7 @@ from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 from study_query_llm.datasets.source_specs.twenty_newsgroups import (
     TWENTY_NEWSGROUPS_6CAT,
     TWENTY_NEWSGROUPS_DATASET_SLUG,
+    twenty_newsgroups_6cat_subquery_spec,
 )
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
@@ -81,14 +82,17 @@ def test_twenty_newsgroups_full_parse_and_6cat_snapshot(
     )
     sixcat = snapshot(
         parsed.group_id,
-        subquery_spec=SubquerySpec(
-            label_mode="labeled",
-            category_filter={"newsgroup": list(TWENTY_NEWSGROUPS_6CAT)},
-        ),
+        subquery_spec=twenty_newsgroups_6cat_subquery_spec(),
         db=db,
         artifact_dir=artifact_dir,
     )
-    sixcat_reuse = snapshot(
+    sixcat_reuse_factory = snapshot(
+        parsed.group_id,
+        subquery_spec=twenty_newsgroups_6cat_subquery_spec(),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    sixcat_reuse_manual = snapshot(
         parsed.group_id,
         subquery_spec=SubquerySpec(
             label_mode="labeled",
@@ -100,9 +104,11 @@ def test_twenty_newsgroups_full_parse_and_6cat_snapshot(
 
     assert parsed.group_id == parsed_reuse.group_id
     assert full.group_id == full_reuse.group_id
-    assert sixcat.group_id == sixcat_reuse.group_id
+    assert sixcat.group_id == sixcat_reuse_factory.group_id
+    assert sixcat.group_id == sixcat_reuse_manual.group_id
     assert full_reuse.metadata["reused"] is True
-    assert sixcat_reuse.metadata["reused"] is True
+    assert sixcat_reuse_factory.metadata["reused"] is True
+    assert sixcat_reuse_manual.metadata["reused"] is True
     assert full.metadata["row_count"] == len(all_categories)
     assert sixcat.metadata["row_count"] == len(TWENTY_NEWSGROUPS_6CAT)
     assert sixcat.group_id != full.group_id

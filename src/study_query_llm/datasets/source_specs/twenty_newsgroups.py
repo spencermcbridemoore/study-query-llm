@@ -10,7 +10,7 @@ from study_query_llm.datasets.acquisition import FileFetchSpec
 from study_query_llm.datasets.source_specs.parser_protocol import ParserContext
 
 if TYPE_CHECKING:
-    from study_query_llm.pipeline.types import SnapshotRow
+    from study_query_llm.pipeline.types import SnapshotRow, SubquerySpec
 
 TWENTY_NEWSGROUPS_DATASET_SLUG = "twenty_newsgroups"
 TWENTY_NEWSGROUPS_ARCHIVE_RELATIVE_PATH = "20news-bydate.tar.gz"
@@ -27,12 +27,42 @@ TWENTY_NEWSGROUPS_6CAT: tuple[str, ...] = (
     "talk.politics.misc",
 )
 
+TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE = "labeled"
+
 _MIN_TEXT_LEN = 10
 _MAX_TEXT_LEN = 1000
 _SPLIT_PREFIXES: tuple[tuple[str, str], ...] = (
     ("20news-bydate-train/", "train"),
     ("20news-bydate-test/", "test"),
 )
+
+
+def twenty_newsgroups_6cat_subquery_spec(
+    *,
+    label_mode: str = TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE,
+    sample_n: int | None = None,
+    sample_fraction: float | None = None,
+    sampling_seed: int | None = None,
+) -> "SubquerySpec":
+    """Canonical 6-category snapshot selection over the 20 Newsgroups dataframe.
+
+    Centralizes the literature-convention 6-category subset
+    (:data:`TWENTY_NEWSGROUPS_6CAT`) plus the canonical ``label_mode='labeled'``
+    convention so every caller materializes the same ``dataset_snapshot``
+    group (identical ``spec_hash``) for the unsampled canonical view. Optional
+    sampling kwargs flow straight through to :class:`SubquerySpec`; the
+    underlying spec still requires ``sampling_seed`` whenever ``sample_n`` or
+    ``sample_fraction`` is set.
+    """
+    from study_query_llm.pipeline.types import SubquerySpec
+
+    return SubquerySpec(
+        label_mode=label_mode,
+        category_filter={"newsgroup": list(TWENTY_NEWSGROUPS_6CAT)},
+        sample_n=sample_n,
+        sample_fraction=sample_fraction,
+        sampling_seed=sampling_seed,
+    )
 
 
 def twenty_newsgroups_file_specs() -> List[FileFetchSpec]:

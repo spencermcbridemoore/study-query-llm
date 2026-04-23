@@ -10,9 +10,13 @@ import pytest
 
 from study_query_llm.datasets.source_specs.parser_protocol import ParserContext
 from study_query_llm.datasets.source_specs.twenty_newsgroups import (
+    TWENTY_NEWSGROUPS_6CAT,
+    TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE,
     TWENTY_NEWSGROUPS_ARCHIVE_RELATIVE_PATH,
     parse_twenty_newsgroups_snapshot,
+    twenty_newsgroups_6cat_subquery_spec,
 )
+from study_query_llm.pipeline.types import SubquerySpec
 
 
 def _write_archive(tmp_path: Path, members: dict[str, str]) -> None:
@@ -71,3 +75,46 @@ def test_parse_twenty_newsgroups_snapshot_parses_train_and_test(tmp_path: Path) 
 def test_parse_twenty_newsgroups_snapshot_missing_archive_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="expected file missing"):
         list(parse_twenty_newsgroups_snapshot(_parser_ctx(tmp_path)))
+
+
+def test_twenty_newsgroups_6cat_subquery_spec_defaults_match_canonical_convention() -> None:
+    spec = twenty_newsgroups_6cat_subquery_spec()
+
+    assert isinstance(spec, SubquerySpec)
+    assert spec.label_mode == TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE == "labeled"
+    assert spec.filter_expr is None
+    assert spec.sample_n is None
+    assert spec.sample_fraction is None
+    assert spec.sampling_seed is None
+
+    assert spec.category_filter is not None
+    assert tuple(spec.category_filter.keys()) == ("newsgroup",)
+    assert tuple(spec.category_filter["newsgroup"]) == tuple(sorted(TWENTY_NEWSGROUPS_6CAT))
+
+
+def test_twenty_newsgroups_6cat_subquery_spec_canonical_dict_matches_manual_construction() -> None:
+    factory_dict = twenty_newsgroups_6cat_subquery_spec().to_canonical_dict()
+    manual_dict = SubquerySpec(
+        label_mode="labeled",
+        category_filter={"newsgroup": list(TWENTY_NEWSGROUPS_6CAT)},
+    ).to_canonical_dict()
+
+    assert factory_dict == manual_dict
+
+
+def test_twenty_newsgroups_6cat_subquery_spec_passes_sampling_kwargs_through() -> None:
+    spec = twenty_newsgroups_6cat_subquery_spec(
+        sample_n=600,
+        sampling_seed=42,
+    )
+    canonical = spec.to_canonical_dict()
+    assert canonical["sample_n"] == 600
+    assert canonical["sampling_seed"] == 42
+    assert canonical["sample_fraction"] is None
+    assert canonical["label_mode"] == "labeled"
+
+
+def test_twenty_newsgroups_6cat_subquery_spec_label_mode_override() -> None:
+    spec = twenty_newsgroups_6cat_subquery_spec(label_mode="all")
+    assert spec.label_mode == "all"
+    assert spec.to_canonical_dict()["label_mode"] == "all"

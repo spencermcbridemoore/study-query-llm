@@ -16,7 +16,10 @@ TWENTY_NEWSGROUPS_DATASET_SLUG = "twenty_newsgroups"
 TWENTY_NEWSGROUPS_ARCHIVE_RELATIVE_PATH = "20news-bydate.tar.gz"
 TWENTY_NEWSGROUPS_ARCHIVE_URL = "https://ndownloader.figshare.com/files/5975967"
 TWENTY_NEWSGROUPS_DEFAULT_PARSER_ID = "twenty_newsgroups.default"
-TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION = "v1"
+# v2 (2026-04-22): drop in-parser 10<len<=1000 char filter so the canonical
+# dataframe reflects the full archive; re-apply the literature-convention range
+# at snapshot time via :func:`twenty_newsgroups_research_subquery_spec`.
+TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION = "v2"
 
 TWENTY_NEWSGROUPS_6CAT: tuple[str, ...] = (
     "alt.atheism",
@@ -29,12 +32,60 @@ TWENTY_NEWSGROUPS_6CAT: tuple[str, ...] = (
 
 TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE = "labeled"
 
-_MIN_TEXT_LEN = 10
-_MAX_TEXT_LEN = 1000
+# Literature-convention text-length window for the K-LLMmeans / replication
+# regime. Applied at snapshot time via filter_expr; not enforced by the parser.
+TWENTY_NEWSGROUPS_RESEARCH_MIN_TEXT_LEN = 10
+TWENTY_NEWSGROUPS_RESEARCH_MAX_TEXT_LEN = 1000
+
 _SPLIT_PREFIXES: tuple[tuple[str, str], ...] = (
     ("20news-bydate-train/", "train"),
     ("20news-bydate-test/", "test"),
 )
+
+
+def _research_text_filter_expr(*, min_chars: int, max_chars: int) -> str:
+    """Pandas ``.query()`` expression matching the v1-era length window.
+
+    Evaluated by snapshot's python-engine query against the canonical ``text``
+    column, so no parquet schema change is required.
+    """
+    return f"text.str.len() > {int(min_chars)} and text.str.len() <= {int(max_chars)}"
+
+
+def twenty_newsgroups_research_subquery_spec(
+    *,
+    label_mode: str = "labeled",
+    newsgroups: Iterable[str] | None = None,
+    min_chars: int = TWENTY_NEWSGROUPS_RESEARCH_MIN_TEXT_LEN,
+    max_chars: int = TWENTY_NEWSGROUPS_RESEARCH_MAX_TEXT_LEN,
+    sample_n: int | None = None,
+    sample_fraction: float | None = None,
+    sampling_seed: int | None = None,
+) -> "SubquerySpec":
+    """Snapshot spec reproducing the v1 parser's text-length window.
+
+    With ``newsgroups=None`` and default bounds this materializes the same
+    row-set the v1 parser used to emit (10 < ``len(text)`` <= 1000) across all
+    20 categories. Pass ``newsgroups=TWENTY_NEWSGROUPS_6CAT`` to compose with
+    the canonical 6-category subset in a single ``SubquerySpec`` (identical
+    ``spec_hash`` for identical inputs).
+    """
+    from study_query_llm.pipeline.types import SubquerySpec
+
+    category_filter: Dict[str, Any] | None = None
+    if newsgroups is not None:
+        category_filter = {"newsgroup": list(newsgroups)}
+
+    return SubquerySpec(
+        label_mode=label_mode,
+        filter_expr=_research_text_filter_expr(
+            min_chars=min_chars, max_chars=max_chars
+        ),
+        category_filter=category_filter,
+        sample_n=sample_n,
+        sample_fraction=sample_fraction,
+        sampling_seed=sampling_seed,
+    )
 
 
 def twenty_newsgroups_6cat_subquery_spec(
@@ -53,6 +104,11 @@ def twenty_newsgroups_6cat_subquery_spec(
     sampling kwargs flow straight through to :class:`SubquerySpec`; the
     underlying spec still requires ``sampling_seed`` whenever ``sample_n`` or
     ``sample_fraction`` is set.
+
+    Note: this spec applies *no* text-length filter. To reproduce the v1-era
+    "6cat + 10<len<=1000" research view, use
+    :func:`twenty_newsgroups_research_subquery_spec` with
+    ``newsgroups=TWENTY_NEWSGROUPS_6CAT``.
     """
     from study_query_llm.pipeline.types import SubquerySpec
 
@@ -76,13 +132,19 @@ def twenty_newsgroups_file_specs() -> List[FileFetchSpec]:
 
 
 def twenty_newsgroups_source_metadata() -> Dict[str, Any]:
-    """Acquisition metadata for provenance and content-fingerprint stability."""
+    """Acquisition metadata for provenance and content-fingerprint stability.
+
+    Note: ``content_fingerprint`` is derived only from ``dataset_slug``,
+    ``pinning_identity``, and the sorted ``(relative_path, sha256)`` file
+    pairs (see ``content_fingerprint`` in ``datasets.acquisition``). Top-level
+    keys outside ``pinning_identity`` are informational only and do not affect
+    dataset-group identity.
+    """
     return {
         "kind": "figshare_file",
         "dataset": "20newsgroups-bydate",
         "archive_url": TWENTY_NEWSGROUPS_ARCHIVE_URL,
         "archive_path": TWENTY_NEWSGROUPS_ARCHIVE_RELATIVE_PATH,
-        "text_filter": {"min_len_gt": _MIN_TEXT_LEN, "max_len_le": _MAX_TEXT_LEN},
         "pinning_identity": {
             "archive_url": TWENTY_NEWSGROUPS_ARCHIVE_URL,
             "archive_path": TWENTY_NEWSGROUPS_ARCHIVE_RELATIVE_PATH,
@@ -98,10 +160,13 @@ def _decode_message(payload: bytes) -> str:
 
 
 def _clean_text(raw_text: str) -> str:
-    text = str(raw_text).replace("\x00", "").strip()
-    if len(text) <= _MIN_TEXT_LEN or len(text) > _MAX_TEXT_LEN:
-        return ""
-    return text
+    """Strip null bytes and surrounding whitespace; preserve full body length.
+
+    v2 (2026-04-22): no length filtering. Empty strings are still dropped by
+    the caller. Length-window selection lives in the snapshot layer (see
+    :func:`twenty_newsgroups_research_subquery_spec`).
+    """
+    return str(raw_text).replace("\x00", "").strip()
 
 
 def _parse_member_name(member_name: str) -> tuple[str, str, str] | None:
@@ -144,7 +209,9 @@ def _load_archive_records(
                 continue
             records.append((split, newsgroup, doc_name, member.name, text))
     if not records:
-        raise ValueError("twenty_newsgroups parser produced no rows after text filtering")
+        raise ValueError(
+            "twenty_newsgroups parser produced no rows after cleaning empty bodies"
+        )
     return records
 
 
@@ -174,6 +241,7 @@ def parse_twenty_newsgroups_snapshot(ctx: ParserContext) -> Iterable["SnapshotRo
                     "doc_name": doc_name,
                     "archive_member": member_name,
                     "subset_profile": "all_categories",
+                    "text_len_chars": len(text),
                 },
             )
         )

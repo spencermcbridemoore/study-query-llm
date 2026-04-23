@@ -14,6 +14,7 @@ from study_query_llm.datasets.source_specs.twenty_newsgroups import (
     TWENTY_NEWSGROUPS_6CAT,
     TWENTY_NEWSGROUPS_DATASET_SLUG,
     twenty_newsgroups_6cat_subquery_spec,
+    twenty_newsgroups_research_subquery_spec,
 )
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
@@ -57,6 +58,8 @@ def test_twenty_newsgroups_full_parse_and_6cat_snapshot(
         members[f"{split_prefix}/{category}/{1000 + index}"] = (
             f"{category} sample discussion with enough detail for parser acceptance."
         )
+    # v2 parser keeps the "short" row in the canonical dataframe; the research
+    # snapshot helper is what re-imposes the literature-convention length window.
     members["20news-bydate-test/sci.space/9001"] = "short"
 
     payload = _archive_bytes(members)
@@ -101,6 +104,20 @@ def test_twenty_newsgroups_full_parse_and_6cat_snapshot(
         db=db,
         artifact_dir=artifact_dir,
     )
+    research_all = snapshot(
+        parsed.group_id,
+        subquery_spec=twenty_newsgroups_research_subquery_spec(),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    research_6cat = snapshot(
+        parsed.group_id,
+        subquery_spec=twenty_newsgroups_research_subquery_spec(
+            newsgroups=TWENTY_NEWSGROUPS_6CAT
+        ),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
 
     assert parsed.group_id == parsed_reuse.group_id
     assert full.group_id == full_reuse.group_id
@@ -109,15 +126,29 @@ def test_twenty_newsgroups_full_parse_and_6cat_snapshot(
     assert full_reuse.metadata["reused"] is True
     assert sixcat_reuse_factory.metadata["reused"] is True
     assert sixcat_reuse_manual.metadata["reused"] is True
-    assert full.metadata["row_count"] == len(all_categories)
-    assert sixcat.metadata["row_count"] == len(TWENTY_NEWSGROUPS_6CAT)
+    # Full snapshot includes the extra "short" sci.space row (v2 keeps it),
+    # bringing the per-doc count to len(all_categories) + 1.
+    assert full.metadata["row_count"] == len(all_categories) + 1
+    # 6cat snapshot also keeps the short sci.space row (sci.space ∈ 6cat),
+    # so it surfaces both sci.space docs. v1's length filter would have hidden
+    # the short one; v2 makes it visible until the snapshot decides to drop it.
+    assert sixcat.metadata["row_count"] == len(TWENTY_NEWSGROUPS_6CAT) + 1
     assert sixcat.group_id != full.group_id
+
+    # Research helper drops the short row and isolates per-category fixtures.
+    assert research_all.metadata["row_count"] == len(all_categories)
+    assert research_6cat.metadata["row_count"] == len(TWENTY_NEWSGROUPS_6CAT)
+    assert research_all.group_id != full.group_id
+    assert research_6cat.group_id != sixcat.group_id
 
     table = pq.read_table(parsed.artifact_uris["dataframe.parquet"])
     extras = [json.loads(value) for value in table.column("extra_json").to_pylist()]
     assert {extra["subset_profile"] for extra in extras} == {"all_categories"}
     assert {extra["newsgroup"] for extra in extras} == set(all_categories)
     assert {extra["split"] for extra in extras} == {"train", "test"}
+    # v2 surfaces text_len_chars in extras for downstream introspection.
+    text_lens = {extra["text_len_chars"] for extra in extras}
+    assert len("short") in text_lens
 
     with db.session_scope() as session:
         dataframe_group = session.query(Group).filter(Group.id == parsed.group_id).first()
@@ -125,4 +156,4 @@ def test_twenty_newsgroups_full_parse_and_6cat_snapshot(
         metadata = dict(dataframe_group.metadata_json or {})
         assert metadata["dataset_slug"] == TWENTY_NEWSGROUPS_DATASET_SLUG
         assert metadata["parser_id"] == "twenty_newsgroups.default"
-        assert metadata["parser_version"] == "v1"
+        assert metadata["parser_version"] == "v2"

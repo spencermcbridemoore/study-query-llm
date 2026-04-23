@@ -152,7 +152,7 @@ def test_acquire_registry_twenty_newsgroups() -> None:
     cfg = ACQUIRE_REGISTRY["twenty_newsgroups"]
     assert cfg.default_parser is parse_twenty_newsgroups_snapshot
     assert cfg.default_parser_id == "twenty_newsgroups.default"
-    assert cfg.default_parser_version == "v1"
+    assert cfg.default_parser_version == "v2"
 
     files = cfg.file_specs()
     assert len(files) == 1
@@ -162,5 +162,8 @@ def test_acquire_registry_twenty_newsgroups() -> None:
     meta = cfg.source_metadata()
     assert meta["kind"] == "figshare_file"
     assert meta["dataset"] == "20newsgroups-bydate"
+    # v2 source_metadata no longer carries the legacy `text_filter` block; the
+    # length window now lives at the snapshot layer (research_subquery_spec).
+    assert "text_filter" not in meta
     pinning_identity = meta["pinning_identity"]
     assert pinning_identity["archive_path"] == "20news-bydate.tar.gz"

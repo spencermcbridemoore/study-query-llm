@@ -21,7 +21,12 @@ from study_query_llm.datasets.source_specs.banking77 import (
 )
 from study_query_llm.datasets.source_specs.estela import (
     ESTELA_DATASET_SLUG,
+    ESTELA_DEFAULT_PARSER_ID,
+    ESTELA_DEFAULT_PARSER_VERSION,
+    ESTELA_RESEARCH_MAX_TEXT_LEN,
+    ESTELA_RESEARCH_MIN_TEXT_LEN,
     estela_file_specs,
+    estela_research_subquery_spec,
     estela_source_metadata,
     parse_estela_snapshot,
 )
@@ -52,9 +57,12 @@ from study_query_llm.datasets.source_specs.twenty_newsgroups import (
     TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION,
     TWENTY_NEWSGROUPS_6CAT,
     TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE,
+    TWENTY_NEWSGROUPS_RESEARCH_MAX_TEXT_LEN,
+    TWENTY_NEWSGROUPS_RESEARCH_MIN_TEXT_LEN,
     parse_twenty_newsgroups_snapshot,
     twenty_newsgroups_6cat_subquery_spec,
     twenty_newsgroups_file_specs,
+    twenty_newsgroups_research_subquery_spec,
     twenty_newsgroups_source_metadata,
 )
 
@@ -66,6 +74,10 @@ __all__ = [
     "BANKING77_HF_REVISION",
     "DatasetAcquireConfig",
     "ESTELA_DATASET_SLUG",
+    "ESTELA_DEFAULT_PARSER_ID",
+    "ESTELA_DEFAULT_PARSER_VERSION",
+    "ESTELA_RESEARCH_MAX_TEXT_LEN",
+    "ESTELA_RESEARCH_MIN_TEXT_LEN",
     "ParserCallable",
     "ParserContext",
     "SEMEVAL2013_SRA_5WAY_SLUG",
@@ -77,6 +89,8 @@ __all__ = [
     "TWENTY_NEWSGROUPS_DEFAULT_PARSER_VERSION",
     "TWENTY_NEWSGROUPS_6CAT",
     "TWENTY_NEWSGROUPS_6CAT_DEFAULT_LABEL_MODE",
+    "TWENTY_NEWSGROUPS_RESEARCH_MAX_TEXT_LEN",
+    "TWENTY_NEWSGROUPS_RESEARCH_MIN_TEXT_LEN",
     "ausem_file_specs",
     "parse_ausem_problem1_snapshot",
     "parse_ausem_problem2_snapshot",
@@ -88,6 +102,7 @@ __all__ = [
     "banking77_resolve_url",
     "banking77_source_metadata",
     "estela_file_specs",
+    "estela_research_subquery_spec",
     "estela_source_metadata",
     "parse_banking77_snapshot",
     "parse_estela_snapshot",
@@ -99,5 +114,6 @@ __all__ = [
     "parse_twenty_newsgroups_snapshot",
     "twenty_newsgroups_6cat_subquery_spec",
     "twenty_newsgroups_file_specs",
+    "twenty_newsgroups_research_subquery_spec",
     "twenty_newsgroups_source_metadata",
 ]

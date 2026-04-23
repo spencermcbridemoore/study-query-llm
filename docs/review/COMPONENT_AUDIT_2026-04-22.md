@@ -513,6 +513,15 @@ These need product/architectural decision rather than code fix.
 1. **`twenty_newsgroups` text-length filter** — Is `10 < len(text) <= 1000`
    the intentional benchmark contract? If yes, document it loudly. If no, fix
    and bump `parser_version`.
+   **Resolved 2026-04-22 (Option B):** the literature-convention length window
+   was a comparability proxy, not a quality gate. Both `twenty_newsgroups` and
+   `estela` parsers were bumped to `v2`; the in-parser `10 < len(text) <= 1000`
+   filter was removed; the canonical dataframe now reflects the full archive
+   (parsers still drop only empty bodies). The legacy window is re-imposed at
+   snapshot time via `twenty_newsgroups_research_subquery_spec()` and
+   `estela_research_subquery_spec()` (defaults match the v1-era bounds; both
+   surface `extra.text_len_chars` for downstream introspection). See claims
+   C050 / C051.
 
 2. **Estela pickle trust model** — Is `pickle.load` on
    `raw.githubusercontent` bytes the documented security model for

@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: ops-maintainers  
-Last reviewed: 2026-04-18
+Last reviewed: 2026-04-23
 
 Use this page as the **single procedural entrypoint** for operator workflows.
 
@@ -36,6 +36,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 ### 3) Local Tunnel + Cross-Env Verification
 
 - Tunnel setup: [`deploy/jetstream/LOCAL_DEV_TUNNEL.md`](../../deploy/jetstream/LOCAL_DEV_TUNNEL.md)
+- Jetstream lifecycle context (Apr 22 v5 cutover → dormant; restore options): [`docs/runbooks/JETSTREAM_STATE_TIMELINE.md`](JETSTREAM_STATE_TIMELINE.md)
 - DB inventory probe: `python scripts/probe_postgres_inventory.py`
 - Local-vs-Jetstream inventory + backup manifests: `python scripts/verify_db_backup_inventory.py`
 - Azure `call_artifacts` lane sanity (read-only): `python scripts/verify_call_artifact_blob_lanes.py` (defaults: `DATABASE_URL`, expected container `artifacts-dev`; add `--expected-prefix dev` to require `dev/` blob keys)

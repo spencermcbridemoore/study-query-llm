@@ -16,7 +16,7 @@ from study_query_llm.datasets.acquisition import (
 )
 from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.db.models_v2 import CallArtifact, Group
+from study_query_llm.db.models_v2 import CallArtifact
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.pipeline.runner import StageIdentity, run_stage
 from study_query_llm.pipeline.types import StageResult
@@ -41,16 +41,14 @@ def _resolve_db(
 
 
 def _collect_acquisition_artifact_uris(session, dataset_group_id: int) -> dict[str, str]:
-    artifacts = (
-        session.query(CallArtifact)
-        .order_by(CallArtifact.id.asc())
-        .all()
+    repo = RawCallRepository(session)
+    artifacts = repo.list_group_artifacts(
+        group_id=int(dataset_group_id),
+        artifact_types=[ARTIFACT_TYPE_ACQ_FILE, ARTIFACT_TYPE_ACQ_MANIFEST],
     )
     artifact_uris: dict[str, str] = {}
     for artifact in artifacts:
         metadata = dict(artifact.metadata_json or {})
-        if int(metadata.get("group_id") or -1) != int(dataset_group_id):
-            continue
         if artifact.artifact_type == ARTIFACT_TYPE_ACQ_FILE:
             rel_path = str(metadata.get("relative_path") or "").strip()
             if rel_path:
@@ -65,17 +63,11 @@ def _find_dataset_group_by_fingerprint(
     *,
     fingerprint: str,
 ) -> int | None:
-    dataset_groups = (
-        session.query(Group)
-        .filter(Group.group_type == "dataset")
-        .order_by(Group.id.desc())
-        .all()
+    repo = RawCallRepository(session)
+    return repo.find_group_id_by_metadata(
+        group_type="dataset",
+        metadata_eq={"content_fingerprint": str(fingerprint)},
     )
-    for group in dataset_groups:
-        metadata = dict(group.metadata_json or {})
-        if str(metadata.get("content_fingerprint") or "") == fingerprint:
-            return int(group.id)
-    return None
 
 
 def _call_artifact_uri_by_id(repo: RawCallRepository, artifact_id: int) -> str:

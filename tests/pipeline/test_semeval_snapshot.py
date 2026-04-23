@@ -112,8 +112,17 @@ def test_semeval_snapshot_default_parser(tmp_path: Path, monkeypatch) -> None:
     assert extras[0]["answer_row_count"] == 3
     assert extras[0]["student_answer_count"] == 1
     assert extras[0]["gold_file"] == "trainingGold.txt"
+    assert extras[0]["gold_count"] == 1
+    assert isinstance(extras[0]["gold_count"], int)
+    assert extras[0]["gold_count_raw"] == "1"
     assert extras[1]["student_answer_count"] == 0
+    assert extras[1]["gold_count"] == 2
+    assert isinstance(extras[1]["gold_count"], int)
+    assert extras[1]["gold_count_raw"] == "2"
     assert extras[2]["test_set"] == "unseen-answers"
+    assert extras[2]["gold_count"] == 3
+    assert isinstance(extras[2]["gold_count"], int)
+    assert extras[2]["gold_count_raw"] == "3"
 
     with db.session_scope() as session:
         dataframe_group = session.query(Group).filter(Group.id == parsed.group_id).first()
@@ -121,4 +130,4 @@ def test_semeval_snapshot_default_parser(tmp_path: Path, monkeypatch) -> None:
         metadata = dict(dataframe_group.metadata_json or {})
         assert metadata["dataset_slug"] == SEMEVAL2013_SRA_5WAY_SLUG
         assert metadata["parser_id"] == "semeval2013_sra_5way.default"
-        assert metadata["parser_version"] == "v1"
+        assert metadata["parser_version"] == "v2"

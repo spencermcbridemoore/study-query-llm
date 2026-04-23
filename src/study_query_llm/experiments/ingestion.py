@@ -79,6 +79,7 @@ def ingest_result_to_db(
     n_restarts = metadata.get("n_restarts", 50)
     n_samples = metadata.get("actual_entry_count", 0)
     data_type = metadata.get("data_type", "50runs")
+    algorithm_name = str(metadata.get("algorithm") or "cosine_kllmeans_no_pca")
 
     # Optional snapshot provenance linkage for reproducibility.
     raw_snapshot_ids = metadata.get("dataset_snapshot_ids")
@@ -111,7 +112,7 @@ def ingest_result_to_db(
                 return None
 
             run_metadata = {
-                "algorithm": "cosine_kllmeans_no_pca",
+                "algorithm": algorithm_name,
                 "run_key": run_key,
                 "dataset": dataset,
                 "embedding_engine": engine,
@@ -188,7 +189,7 @@ def ingest_result_to_db(
             method_name = str(run_metadata.get("algorithm") or "clustering_method")
             method_version = str(metadata.get("method_version") or "1.0")
 
-            recipe_for_fingerprint: Optional[Dict[str, Any]] = None
+            canonical_recipe_candidate: Optional[Dict[str, Any]] = None
             if method_name in COMPOSITE_RECIPES:
                 # Composite with a canonical recipe: ensure component rows exist,
                 # ensure the composite carries its recipe, and compute the
@@ -212,7 +213,7 @@ def ingest_result_to_db(
                         },
                     },
                 )
-                recipe_for_fingerprint = build_composite_recipe(method_name)
+                canonical_recipe_candidate = build_composite_recipe(method_name)
             else:
                 method = method_service.get_method(
                     method_name, version=method_version
@@ -236,6 +237,14 @@ def ingest_result_to_db(
                     )
                 else:
                     method_id = int(method.id)
+
+            resolved_method = method_service.get_method(method_name, version=method_version)
+            recipe_for_fingerprint: Optional[Dict[str, Any]] = None
+            if resolved_method is not None and isinstance(resolved_method.recipe_json, dict):
+                if resolved_method.recipe_json:
+                    recipe_for_fingerprint = dict(resolved_method.recipe_json)
+            if recipe_for_fingerprint is None and canonical_recipe_candidate is not None:
+                recipe_for_fingerprint = canonical_recipe_candidate
 
             request_group_id_raw = metadata.get("request_group_id")
             if request_group_id_raw is None:
@@ -265,6 +274,16 @@ def ingest_result_to_db(
                     config_json_for_run["recipe_hash"] = canonical_recipe_hash(
                         recipe_for_fingerprint
                     )
+                execution_metadata: Dict[str, Any] = {
+                    "artifact_id": run_metadata.get("artifact_id"),
+                    "source": str(run_metadata.get("source") or ""),
+                }
+                manifest_hash = run_metadata.get("manifest_hash")
+                if manifest_hash is not None:
+                    execution_metadata["manifest_hash"] = str(manifest_hash)
+                data_regime = run_metadata.get("data_regime")
+                if isinstance(data_regime, dict):
+                    execution_metadata["data_regime"] = dict(data_regime)
                 provenanced_run_service.record_method_execution(
                     request_group_id=request_group_id,
                     run_key=run_key,
@@ -277,10 +296,7 @@ def ingest_result_to_db(
                     ),
                     config_json=config_json_for_run,
                     result_ref=str(run_metadata.get("artifact_uri") or ""),
-                    metadata_json={
-                        "artifact_id": run_metadata.get("artifact_id"),
-                        "source": str(run_metadata.get("source") or ""),
-                    },
+                    metadata_json=execution_metadata,
                     run_status="completed",
                 )
 

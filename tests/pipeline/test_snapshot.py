@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from study_query_llm.datasets.acquisition import FileFetchSpec
@@ -100,6 +101,37 @@ def _fixture_parser_with_extras(ctx) -> list[SnapshotRow]:
     ]
 
 
+def _fixture_parser_with_category_edge_cases(ctx) -> list[SnapshotRow]:
+    assert (ctx.artifact_dir_local / "data" / "train.csv").is_file()
+    assert (ctx.artifact_dir_local / "data" / "test.csv").is_file()
+    return [
+        SnapshotRow(
+            position=0,
+            source_id="edge-0",
+            text="edge-null-int",
+            label=1,
+            label_name="y",
+            extra={"k": None, "n": 1, "gold_count": 5},
+        ),
+        SnapshotRow(
+            position=1,
+            source_id="edge-1",
+            text="edge-missing-float",
+            label=1,
+            label_name="y",
+            extra={"n": 1.0, "gold_count": "5"},
+        ),
+        SnapshotRow(
+            position=2,
+            source_id="edge-2",
+            text="edge-string",
+            label=1,
+            label_name="y",
+            extra={"k": "value", "n": "1", "gold_count": "7"},
+        ),
+    ]
+
+
 def _parsed_group(
     *,
     tmp_path: Path,
@@ -156,6 +188,11 @@ def test_subquery_spec_rejects_empty_inner_list() -> None:
 def test_subquery_spec_rejects_non_scalar_candidate() -> None:
     with pytest.raises(ValueError, match="str/int/float/bool/None"):
         SubquerySpec(category_filter={"qid": [{"nested": 1}]})
+
+
+def test_subquery_spec_rejects_numpy_scalar_candidate() -> None:
+    with pytest.raises(ValueError, match="str/int/float/bool/None"):
+        SubquerySpec(category_filter={"qid": [np.int64(1)]})
 
 
 def test_subquery_spec_canonical_dict_normalizes_category_filter() -> None:
@@ -424,3 +461,88 @@ def test_snapshot_category_filter_handles_empty_post_filter_frame(
     payload = _snapshot_payload(result)
     assert payload["row_count"] == 0
     assert payload["resolved_index"] == []
+
+
+def test_snapshot_category_filter_none_matches_missing_and_null(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_category_edge_cases,
+        parser_id="fixture_dataset.category_edges",
+    )
+
+    result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"k": [None]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    payload = _snapshot_payload(result)
+    assert payload["resolved_index"] == [[0, "edge-0"], [1, "edge-1"]]
+
+
+def test_snapshot_category_filter_distinguishes_int_float_and_str(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_category_edge_cases,
+        parser_id="fixture_dataset.category_edges",
+    )
+
+    int_result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"n": [1]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    float_result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"n": [1.0]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    str_result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"n": ["1"]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    assert _snapshot_payload(int_result)["resolved_index"] == [[0, "edge-0"]]
+    assert _snapshot_payload(float_result)["resolved_index"] == [[1, "edge-1"]]
+    assert _snapshot_payload(str_result)["resolved_index"] == [[2, "edge-2"]]
+
+
+def test_snapshot_category_filter_gold_count_requires_exact_type(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db, parsed_group_id, artifact_dir = _parsed_group(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        parser=_fixture_parser_with_category_edge_cases,
+        parser_id="fixture_dataset.category_edges",
+    )
+
+    int_result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"gold_count": [5]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    str_result = snapshot(
+        parsed_group_id,
+        subquery_spec=SubquerySpec(category_filter={"gold_count": ["5"]}, label_mode="all"),
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    assert _snapshot_payload(int_result)["resolved_index"] == [[0, "edge-0"]]
+    assert _snapshot_payload(str_result)["resolved_index"] == [[1, "edge-1"]]

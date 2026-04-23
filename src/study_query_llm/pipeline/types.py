@@ -59,7 +59,11 @@ class SnapshotRow:
 
 @dataclass(frozen=True)
 class SubquerySpec:
-    """Declarative snapshot selection criteria over a canonical dataframe."""
+    """Declarative snapshot selection criteria over a canonical dataframe.
+
+    `category_filter` is evaluated against top-level keys in parsed `extra_json`
+    with AND-across-keys / IN-within-key semantics and strict typed equality.
+    """
 
     filter_expr: str | None = None
     category_filter: Mapping[str, Sequence[Any]] | None = None

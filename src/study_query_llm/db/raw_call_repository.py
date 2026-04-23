@@ -5,6 +5,7 @@ This repository handles all database interactions for storing and querying
 raw calls in the v2 schema. Uses the Repository pattern to abstract database details.
 """
 
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, List, Dict, Any
@@ -437,6 +438,124 @@ class RawCallRepository:
             return matches[:limit]
 
     # ========== GROUP OPERATIONS ==========
+
+    @staticmethod
+    def _validated_metadata_key(key: str) -> str:
+        candidate = str(key or "").strip()
+        if not candidate or re.fullmatch(r"[A-Za-z0-9_]+", candidate) is None:
+            raise ValueError(f"invalid metadata key for JSON lookup: {key!r}")
+        return candidate
+
+    def list_group_artifacts(
+        self,
+        *,
+        group_id: int,
+        artifact_types: Optional[List[str]] = None,
+        newest_first: bool = False,
+    ) -> List[CallArtifact]:
+        """Return artifacts linked to a specific group_id via metadata_json."""
+        target_group_id = int(group_id)
+        target_group_id_str = str(target_group_id)
+        order_expr = desc(CallArtifact.id) if newest_first else CallArtifact.id.asc()
+
+        base_query = self.session.query(CallArtifact)
+        if artifact_types:
+            base_query = base_query.filter(CallArtifact.artifact_type.in_(artifact_types))
+        query = base_query
+
+        try:
+            dialect = str(self.session.bind.dialect.name or "").lower() if self.session.bind else ""
+            if dialect == "postgresql":
+                query = query.filter(text("metadata_json->>'group_id' = :group_id")).params(
+                    group_id=target_group_id_str
+                )
+            elif dialect == "sqlite":
+                query = query.filter(
+                    text("CAST(json_extract(metadata_json, '$.group_id') AS TEXT) = :group_id")
+                ).params(group_id=target_group_id_str)
+            else:
+                query = query.filter(
+                    or_(
+                        CallArtifact.metadata_json.contains({"group_id": target_group_id}),
+                        CallArtifact.metadata_json.contains({"group_id": target_group_id_str}),
+                    )
+                )
+            return query.order_by(order_expr).all()
+        except Exception as exc:
+            logger.warning(
+                "list_group_artifacts JSON lookup failed, using fallback scan: %s", exc
+            )
+            artifacts = base_query.order_by(order_expr).all()
+            out: List[CallArtifact] = []
+            for artifact in artifacts:
+                metadata = dict(artifact.metadata_json or {})
+                try:
+                    if int(metadata.get("group_id") or -1) == target_group_id:
+                        out.append(artifact)
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+    def find_group_id_by_metadata(
+        self,
+        *,
+        group_type: str,
+        metadata_eq: Dict[str, Any],
+    ) -> Optional[int]:
+        """Find latest group id by exact metadata key/value string matches."""
+        metadata_eq = dict(metadata_eq or {})
+        if not metadata_eq:
+            return None
+
+        normalized: Dict[str, str] = {}
+        for key, value in metadata_eq.items():
+            safe_key = self._validated_metadata_key(key)
+            normalized[safe_key] = str(value)
+
+        base_query = self.session.query(Group).filter(Group.group_type == group_type)
+        query = base_query
+
+        try:
+            dialect = str(self.session.bind.dialect.name or "").lower() if self.session.bind else ""
+            params: Dict[str, str] = {}
+            for idx, (meta_key, expected_value) in enumerate(sorted(normalized.items())):
+                param_name = f"m_{idx}"
+                params[param_name] = expected_value
+                if dialect == "postgresql":
+                    query = query.filter(
+                        text(f"metadata_json->>'{meta_key}' = :{param_name}")
+                    )
+                elif dialect == "sqlite":
+                    query = query.filter(
+                        text(
+                            f"CAST(json_extract(metadata_json, '$.{meta_key}') AS TEXT) = :{param_name}"
+                        )
+                    )
+                else:
+                    query = query.filter(
+                        or_(
+                            Group.metadata_json.contains({meta_key: expected_value}),
+                            Group.metadata_json.contains(
+                                {meta_key: int(expected_value)}
+                            )
+                            if expected_value.isdigit()
+                            else text("1=0"),
+                        )
+                    )
+            if params:
+                query = query.params(**params)
+            row = query.order_by(Group.id.desc()).first()
+            return int(row.id) if row is not None else None
+        except Exception as exc:
+            logger.warning(
+                "find_group_id_by_metadata JSON lookup failed, using fallback scan: %s",
+                exc,
+            )
+            for group in base_query.order_by(Group.id.desc()).all():
+                metadata = dict(group.metadata_json or {})
+                if all(str(metadata.get(key)) == expected for key, expected in normalized.items()):
+                    return int(group.id)
+            return None
 
     def create_group(
         self,

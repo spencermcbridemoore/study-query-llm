@@ -9,11 +9,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from study_query_llm.algorithms.recipes import canonical_recipe_hash
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group, ProvenancedRun
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 from study_query_llm.algorithms.sweep import SweepResult, SweepConfig, run_sweep
+from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.sweep_request_service import SweepRequestService
 
 
@@ -202,6 +204,8 @@ def test_ingest_result_to_db_sets_primary_snapshot_on_provenanced_run(db_connect
         "n_restarts": 1,
         "actual_entry_count": 2,
         "request_group_id": int(request_id),
+        "manifest_hash": "manifest_hash_abc123",
+        "data_regime": {"label_mode": "labeled", "subset": "default"},
         # Deliberately unsorted with duplicates to verify deterministic normalization.
         "dataset_snapshot_ids": [
             int(secondary_snapshot_id),
@@ -234,3 +238,89 @@ def test_ingest_result_to_db_sets_primary_snapshot_on_provenanced_run(db_connect
         assert row is not None
         assert str((row.metadata_json or {}).get("execution_role") or "") == "method_execution"
         assert int(row.input_snapshot_group_id or 0) == int(primary_snapshot_id)
+        assert str((row.metadata_json or {}).get("manifest_hash") or "") == "manifest_hash_abc123"
+        assert (row.metadata_json or {}).get("data_regime") == {
+            "label_mode": "labeled",
+            "subset": "default",
+        }
+        assert (row.fingerprint_json or {}).get("manifest_hash") == "manifest_hash_abc123"
+        assert (row.fingerprint_json or {}).get("data_regime") == {
+            "label_mode": "labeled",
+            "subset": "default",
+        }
+        assert str((row.config_json or {}).get("recipe_hash") or "")
+
+
+def test_ingest_result_to_db_injects_recipe_hash_for_recipe_bearing_method(db_connection):
+    """Any method_definition with recipe_json should inject recipe_hash."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        req_service = SweepRequestService(repo)
+        request_id = req_service.create_request(
+            request_name="recipe_bearing_method_req",
+            algorithm="custom_recipe_method",
+            fixed_config={"k_min": 2, "k_max": 2, "n_restarts": 1},
+            parameter_axes={
+                "datasets": ["dbpedia"],
+                "embedding_engines": ["engine/a"],
+                "summarizers": ["None"],
+            },
+            entry_max=2,
+            sweep_type="clustering",
+            execution_mode="standalone",
+        )
+        method_service = MethodService(repo)
+        custom_recipe = {
+            "recipe_version": "v0",
+            "stages": [
+                {"name": "mean_pool_tokens", "version": "1.0", "role": "pooling", "params": {}},
+                {"name": "custom_cluster", "version": "1.0", "role": "clustering", "params": {}},
+            ],
+            "notes": "custom recipe-bearing method",
+        }
+        method_id = method_service.register_method(
+            name="custom_recipe_method",
+            version="1.0",
+            description="custom recipe-bearing method",
+            recipe_json=custom_recipe,
+        )
+
+    result = SweepResult(
+        pca={},
+        by_k={
+            2: {
+                "labels": [0, 1],
+                "labels_all": [[0, 1]],
+                "objectives": [0.5],
+                "representatives": ["a", "b"],
+            },
+        },
+    )
+    metadata = {
+        "benchmark_source": "dbpedia",
+        "embedding_engine": "engine/a",
+        "summarizer": "None",
+        "n_restarts": 1,
+        "actual_entry_count": 2,
+        "request_group_id": int(request_id),
+        "algorithm": "custom_recipe_method",
+        "method_version": "1.0",
+    }
+    run_key = "custom_recipe_method_test_key"
+    run_id = ingest_result_to_db(result, metadata, np.array([0, 1]), db_connection, run_key)
+    assert run_id is not None
+
+    with db_connection.session_scope() as session:
+        row = (
+            session.query(ProvenancedRun)
+            .filter(
+                ProvenancedRun.request_group_id == int(request_id),
+                ProvenancedRun.run_kind == "execution",
+                ProvenancedRun.run_key == run_key,
+            )
+            .first()
+        )
+        assert row is not None
+        assert int(row.method_definition_id or 0) == int(method_id)
+        assert (row.config_json or {}).get("recipe_hash") == canonical_recipe_hash(custom_recipe)
+        assert (row.fingerprint_json or {}).get("method_name") == "custom_recipe_method"

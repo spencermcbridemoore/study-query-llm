@@ -9,6 +9,11 @@ import numpy as np
 
 from study_query_llm.pipeline.runner import allow_no_run_stage
 
+HDBSCAN_DEFAULT_METRIC = "cosine"
+HDBSCAN_DEFAULT_RANDOM_STATE = 0
+HDBSCAN_DEFAULT_CORE_DIST_N_JOBS = 1
+HDBSCAN_DEFAULT_APPROX_MIN_SPAN_TREE = False
+
 
 def _bool_param(params: Mapping[str, Any], *keys: str, default: bool) -> bool:
     for key in keys:
@@ -129,7 +134,12 @@ def run_hdbscan_analysis(
     if min_cluster_size < 2:
         raise ValueError(f"hdbscan_min_cluster_size must be >= 2, got {min_cluster_size}")
     min_samples = _optional_int_param(params, "hdbscan_min_samples", "min_samples")
-    metric = _str_param(params, "hdbscan_metric", "metric", default="euclidean")
+    metric = _str_param(
+        params,
+        "hdbscan_metric",
+        "metric",
+        default=HDBSCAN_DEFAULT_METRIC,
+    ).lower()
     cluster_selection_method = _str_param(
         params,
         "hdbscan_cluster_selection_method",
@@ -160,6 +170,26 @@ def run_hdbscan_analysis(
         "normalize_embeddings",
         default=False,
     )
+    random_state = _required_int_param(
+        params,
+        "hdbscan_random_state",
+        "random_state",
+        default=HDBSCAN_DEFAULT_RANDOM_STATE,
+    )
+    core_dist_n_jobs = _required_int_param(
+        params,
+        "hdbscan_core_dist_n_jobs",
+        "core_dist_n_jobs",
+        default=HDBSCAN_DEFAULT_CORE_DIST_N_JOBS,
+    )
+    if core_dist_n_jobs == 0:
+        raise ValueError("hdbscan_core_dist_n_jobs must be != 0")
+    approx_min_span_tree = _bool_param(
+        params,
+        "hdbscan_approx_min_span_tree",
+        "approx_min_span_tree",
+        default=HDBSCAN_DEFAULT_APPROX_MIN_SPAN_TREE,
+    )
     matrix_for_fit = _normalize_rows(matrix) if normalize_embeddings else matrix
 
     try:
@@ -178,6 +208,9 @@ def run_hdbscan_analysis(
         cluster_selection_epsilon=cluster_selection_epsilon,
         alpha=alpha,
         allow_single_cluster=allow_single_cluster,
+        random_state=random_state,
+        core_dist_n_jobs=core_dist_n_jobs,
+        approx_min_span_tree=approx_min_span_tree,
     )
     labels = np.asarray(model.fit_predict(matrix_for_fit), dtype=np.int64)
     if labels.shape[0] != matrix_for_fit.shape[0]:
@@ -217,6 +250,9 @@ def run_hdbscan_analysis(
         "hdbscan_alpha": float(alpha),
         "hdbscan_allow_single_cluster": bool(allow_single_cluster),
         "hdbscan_normalize_embeddings": bool(normalize_embeddings),
+        "hdbscan_random_state": int(random_state),
+        "hdbscan_core_dist_n_jobs": int(core_dist_n_jobs),
+        "hdbscan_approx_min_span_tree": bool(approx_min_span_tree),
     }
 
     summary: dict[str, Any] = {

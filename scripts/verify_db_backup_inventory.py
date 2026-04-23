@@ -13,10 +13,12 @@ Manifest JSON files live under `backup_pg_dumps/*.manifest.json` (gitignored dum
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -74,14 +76,21 @@ def _table_counts(url: str, label: str) -> dict[str, int] | None:
         return None
 
 
-def _load_manifests() -> list[dict]:
-    out: list[dict] = []
+def _load_manifests() -> tuple[list[dict[str, Any]], list[str]]:
+    out: list[dict[str, Any]] = []
+    errors: list[str] = []
     if not MANIFEST_DIR.is_dir():
-        return out
+        return out, errors
     for p in sorted(MANIFEST_DIR.glob("*.manifest.json")):
-        with open(p, encoding="utf-8") as f:
-            out.append(json.load(f))
-    return out
+        try:
+            with open(p, encoding="utf-8") as f:
+                manifest = json.load(f)
+            if not isinstance(manifest, dict):
+                raise ValueError("manifest root must be a JSON object")
+            out.append(manifest)
+        except Exception as exc:
+            errors.append(f"{p.name}: {type(exc).__name__}: {exc}")
+    return out, errors
 
 
 def _list_db_backup_blobs(conn_str: str) -> list[tuple[str, int]]:
@@ -92,8 +101,25 @@ def _list_db_backup_blobs(conn_str: str) -> list[tuple[str, int]]:
     return [(b.name, b.size or 0) for b in cc.list_blobs()]
 
 
-def main() -> int:
+def _manifest_blob_name(manifest: dict[str, Any]) -> str:
+    uri = str(manifest.get("blob_uri") or "").strip()
+    return uri.split("/")[-1] if uri else ""
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Verify DB backup inventory consistency.")
+    parser.add_argument(
+        "--strict-azure",
+        action="store_true",
+        help="Treat missing AZURE_STORAGE_CONNECTION_STRING as a verification failure.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     load_dotenv(REPO / ".env")
+    failures: list[str] = []
 
     jet_url = os.environ.get("JETSTREAM_DATABASE_URL") or ""
     loc_url = os.environ.get("LOCAL_DATABASE_URL") or ""
@@ -106,9 +132,17 @@ def main() -> int:
 
     jet = _table_counts(jet_url, "Jetstream (JETSTREAM_DATABASE_URL)")
     loc = _table_counts(loc_url, "Local (LOCAL_DATABASE_URL)")
+    if jet_url and jet is None:
+        failures.append("Jetstream table counts could not be loaded.")
+    if loc_url and loc is None:
+        failures.append("Local table counts could not be loaded.")
 
     print("\n=== Repo manifests (backup_pg_dumps/*.manifest.json) ===")
-    manifests = _load_manifests()
+    manifests, manifest_errors = _load_manifests()
+    if manifest_errors:
+        for err in manifest_errors:
+            print(f"  MALFORMED manifest: {err}")
+        failures.extend([f"Malformed manifest: {e}" for e in manifest_errors])
     if not manifests:
         print("  (no manifest files)")
     for m in manifests:
@@ -117,12 +151,17 @@ def main() -> int:
         tc = m.get("table_counts") or {}
         print(f"  {bid}  source={src}")
         print(f"    table_counts: {tc}")
+        if not isinstance(tc, dict):
+            failures.append(
+                f"Malformed manifest {bid!r}: table_counts must be a JSON object."
+            )
 
     if jet and loc:
         same = jet == loc
         print("\n=== Jetstream vs Local row counts ===")
         print("  Exact match:", same)
         if not same:
+            failures.append("Jetstream vs Local row counts mismatch.")
             keys = sorted(set(jet) | set(loc))
             for k in keys:
                 if jet.get(k) != loc.get(k):
@@ -132,29 +171,47 @@ def main() -> int:
     print("\n=== Azure container 'db-backups' (same account as artifacts) ===")
     if not conn:
         print("  AZURE_STORAGE_CONNECTION_STRING not set — skip blob listing")
-        return 0
-    try:
-        blobs = _list_db_backup_blobs(conn)
-    except Exception as e:
-        print(f"  FAIL: {type(e).__name__}: {e}")
-        return 0
+        if args.strict_azure:
+            failures.append(
+                "AZURE_STORAGE_CONNECTION_STRING missing while --strict-azure is set."
+            )
+    else:
+        try:
+            blobs = _list_db_backup_blobs(conn)
+        except Exception as e:
+            print(f"  FAIL: {type(e).__name__}: {e}")
+            failures.append(f"Azure blob listing failed: {type(e).__name__}: {e}")
+        else:
+            blob_names = {b[0] for b in blobs}
+            print(f"  Blobs in container: {len(blobs)}")
+            for name, size in sorted(blobs, key=lambda x: x[0]):
+                print(f"    {name}  {size} bytes")
 
-    blob_names = {b[0] for b in blobs}
-    print(f"  Blobs in container: {len(blobs)}")
-    for name, size in sorted(blobs, key=lambda x: x[0]):
-        print(f"    {name}  {size} bytes")
+            print("\n=== Manifest vs blob presence ===")
+            missing_blobs: list[str] = []
+            for m in manifests:
+                fname = _manifest_blob_name(m)
+                if fname and fname in blob_names:
+                    print(f"  OK manifest {m.get('backup_id')} -> blob {fname} exists")
+                elif fname:
+                    print(f"  MISSING on blob: {fname} (manifest {m.get('backup_id')})")
+                    missing_blobs.append(fname)
+            if missing_blobs:
+                failures.append(
+                    f"Manifest/blob mismatch: {len(missing_blobs)} manifest blob(s) missing."
+                )
 
-    print("\n=== Manifest vs blob presence ===")
-    for m in manifests:
-        uri = m.get("blob_uri") or ""
-        fname = uri.split("/")[-1] if uri else ""
-        if fname and fname in blob_names:
-            print(f"  OK manifest {m.get('backup_id')} -> blob {fname} exists")
-        elif fname:
-            print(f"  MISSING on blob: {fname} (manifest {m.get('backup_id')})")
+    if failures:
+        print("\n=== Verification result ===")
+        print("  FAIL")
+        for item in failures:
+            print(f"  - {item}")
+        return 1
 
+    print("\n=== Verification result ===")
+    print("  PASS")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

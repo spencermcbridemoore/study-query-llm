@@ -133,7 +133,7 @@ def test_acquire_registry_semeval2013_sra_5way():
     cfg = ACQUIRE_REGISTRY["semeval2013_sra_5way"]
     assert cfg.default_parser is parse_semeval2013_sra_5way_snapshot
     assert cfg.default_parser_id == "semeval2013_sra_5way.default"
-    assert cfg.default_parser_version == "v1"
+    assert cfg.default_parser_version == "v2"
     files = cfg.file_specs()
     assert len(files) == 7
     paths = sorted(f.relative_path for f in files)

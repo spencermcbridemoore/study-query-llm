@@ -26,6 +26,7 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 - `analyze` takes dual lineage inputs: `snapshot_group_id` and `embedding_batch_group_id`.
 - Snapshot sampling is deterministic-only: `sample_n`/`sample_fraction` require `sampling_seed`.
 - Analysis fingerprinting includes explicit representation identity and `input_snapshot_group_id`.
+- HDBSCAN deterministic-defaults policy: `hdbscan_metric=cosine`, `hdbscan_random_state=0`, `hdbscan_core_dist_n_jobs=1`, `hdbscan_approx_min_span_tree=false` unless explicitly overridden.
 
 ## Stage Contracts
 
@@ -52,7 +53,13 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 - **Output artifacts:** `dataset_subquery_spec` (`subquery_spec.json`)
 - **Idempotency key:** `(source_dataframe_group_id, spec_hash, resolved_index_hash)`
 - **Determinism rule:** reject unseeded sampling (`sampling_seed` required whenever sampling is requested)
-- **Category filter:** `SubquerySpec.category_filter` selects rows by membership against keys nested in `extra_json`; semantics are AND across keys and IN within each key list, with strict typed equality (no coercion). Rows missing a requested key are excluded. Empty outer dictionaries and empty inner lists are rejected at spec construction.
+- **Category filter contract (`SubquerySpec.category_filter`):**
+  - Matches against top-level keys in parsed `extra_json` (not JSONPath-style `extra.<key>` paths).
+  - Semantics are AND across keys and IN within each key list.
+  - Matching uses strict typed equality after `json.loads` (no coercion): `1` != `1.0` != `"1"`, and `True` != `1`.
+  - Allowed candidate value types are `str`, `int`, `float`, `bool`, and `null` (`None`).
+  - Missing-key vs `null` caveat: matching uses `parsed.get(key)`, so filtering on `null` currently matches both explicit `null` values and rows where the key is absent.
+  - Empty outer dictionaries and empty inner lists are rejected at `SubquerySpec` construction.
 - **Key metadata:** `source_dataframe_group_id`, `spec_hash`, `resolved_index_hash`, `row_count`
 
 ### Stage 4: `embed`

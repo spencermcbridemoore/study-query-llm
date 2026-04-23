@@ -26,7 +26,7 @@ GITHUB_REPO = "Student-Response-Analysis"
 # Tip of master at integration time (reproducible mirror).
 PINNED_GIT_REF = "1d6d30b265e6038fd6f6395d4cfd6686aef4b97f"
 SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_ID = "semeval2013_sra_5way.default"
-SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_VERSION = "v1"
+SEMEVAL2013_SRA_5WAY_DEFAULT_PARSER_VERSION = "v2"
 
 _PREFIX = "semevalFormatProcessing-5way"
 _GOLD_FILES: tuple[str, ...] = (
@@ -158,6 +158,21 @@ def _iter_gold_rows(base_dir: Path) -> Iterable[dict[str, Any]]:
             }
 
 
+def _parse_gold_count(*, answer_id: str, gold_file: str, raw_count: str) -> int:
+    value = str(raw_count).strip()
+    if value == "":
+        raise ValueError(
+            f"semeval parser id={answer_id!r} in {gold_file!r} has empty count value"
+        )
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"semeval parser id={answer_id!r} in {gold_file!r} has non-integer "
+            f"gold count {value!r}"
+        ) from exc
+
+
 def parse_semeval2013_sra_5way_snapshot(ctx: ParserContext) -> Iterable["SnapshotRow"]:
     from study_query_llm.pipeline.types import SnapshotRow
 
@@ -191,6 +206,11 @@ def parse_semeval2013_sra_5way_snapshot(ctx: ParserContext) -> Iterable["Snapsho
         answer_entry = answer_lookup[answer_id]
         text = _resolve_answer_text(answer_entry, answer_id=answer_id)
         count_raw = str(gold["count"])
+        gold_count = _parse_gold_count(
+            answer_id=answer_id,
+            gold_file=str(gold["gold_file"]),
+            raw_count=count_raw,
+        )
         rows.append(
             SnapshotRow(
                 position=len(rows),
@@ -203,7 +223,8 @@ def parse_semeval2013_sra_5way_snapshot(ctx: ParserContext) -> Iterable["Snapsho
                     "module": module,
                     "test_set": test_set or None,
                     "gold_file": str(gold["gold_file"]),
-                    "gold_count": int(count_raw) if count_raw.isdigit() else count_raw,
+                    "gold_count": gold_count,
+                    "gold_count_raw": count_raw,
                     "question": str(answer_entry.get("question") or ""),
                     "reference_answer": str(answer_entry.get("reference_answer") or ""),
                     "answer_row_count": int(answer_entry.get("row_count") or 0),

@@ -21,7 +21,11 @@ MCQ_METHOD_VERSION = "1.0"
 
 
 def mcq_run_key_exists_in_db(db: DatabaseConnectionV2, run_key: str) -> bool:
-    """True if an mcq_run group already exists for this run_key (idempotency)."""
+    """Compatibility helper for historical scripts.
+
+    Active request-driven workers should use claim-or-skip via `SweepRunClaim`
+    ownership and treat this pre-check as legacy compatibility only.
+    """
     with db.session_scope() as session:
         existing = (
             session.query(Group)

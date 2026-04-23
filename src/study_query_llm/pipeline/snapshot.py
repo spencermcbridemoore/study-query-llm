@@ -38,12 +38,13 @@ def _resolve_db(
 
 
 def _collect_snapshot_artifact_uris(session, snapshot_group_id: int) -> dict[str, str]:
-    artifacts = session.query(CallArtifact).order_by(CallArtifact.id.asc()).all()
+    repo = RawCallRepository(session)
+    artifacts = repo.list_group_artifacts(
+        group_id=int(snapshot_group_id),
+        artifact_types=[ARTIFACT_TYPE_SUBQUERY_SPEC],
+    )
     artifact_uris: dict[str, str] = {}
     for artifact in artifacts:
-        metadata = dict(artifact.metadata_json or {})
-        if int(metadata.get("group_id") or -1) != int(snapshot_group_id):
-            continue
         if artifact.artifact_type == ARTIFACT_TYPE_SUBQUERY_SPEC:
             artifact_uris["subquery_spec.json"] = str(artifact.uri)
     return artifact_uris
@@ -137,22 +138,15 @@ def _find_existing_snapshot_group(
     spec_hash: str,
     resolved_index_hash: str,
 ) -> int | None:
-    snapshot_groups = (
-        session.query(Group)
-        .filter(Group.group_type == "dataset_snapshot")
-        .order_by(Group.id.desc())
-        .all()
+    repo = RawCallRepository(session)
+    return repo.find_group_id_by_metadata(
+        group_type="dataset_snapshot",
+        metadata_eq={
+            "source_dataframe_group_id": int(dataframe_group_id),
+            "spec_hash": str(spec_hash),
+            "resolved_index_hash": str(resolved_index_hash),
+        },
     )
-    for group in snapshot_groups:
-        metadata = dict(group.metadata_json or {})
-        if int(metadata.get("source_dataframe_group_id") or -1) != int(dataframe_group_id):
-            continue
-        if str(metadata.get("spec_hash") or "") != spec_hash:
-            continue
-        if str(metadata.get("resolved_index_hash") or "") != resolved_index_hash:
-            continue
-        return int(group.id)
-    return None
 
 
 def _call_artifact_uri_by_id(repo: RawCallRepository, artifact_id: int) -> str:

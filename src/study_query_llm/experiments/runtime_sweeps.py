@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from sqlalchemy.exc import IntegrityError
 
 from study_query_llm.algorithms import SweepConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
@@ -74,6 +75,14 @@ def _now_utc():
     return datetime.now(timezone.utc)
 
 
+def _coerce_utc(ts: Optional[datetime]) -> Optional[datetime]:
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
 def _claim_run_target(
     db: DatabaseConnectionV2,
     request_id: int,
@@ -105,16 +114,31 @@ def _claim_run_target(
                 heartbeat_at=now,
             )
             session.add(claim)
-            session.flush()
-            return True
+            try:
+                session.flush()
+                return True
+            except IntegrityError:
+                # Another worker created the same claim row concurrently.
+                session.rollback()
+                claim = (
+                    session.query(SweepRunClaim)
+                    .filter(
+                        SweepRunClaim.request_group_id == request_id,
+                        SweepRunClaim.run_key == run_key,
+                    )
+                    .first()
+                )
+                if claim is None:
+                    return False
 
         if claim.claim_status == "completed":
             return False
 
+        lease_expires_at = _coerce_utc(claim.lease_expires_at)
         if (
             claim.claim_status == "claimed"
-            and claim.lease_expires_at is not None
-            and claim.lease_expires_at > now
+            and lease_expires_at is not None
+            and lease_expires_at > now
             and claim.claimed_by != worker_id
         ):
             return False
@@ -448,10 +472,6 @@ async def main_bigrun_300_sweep(
             f"_{engine_safe}_{sum_safe}_"
         )
 
-        if not force and run_key_exists_in_db(db, run_key):
-            print(f"  [{run_count}/{total_to_run}] {summarizer_name} (SKIP – run_key in DB)")
-            continue
-
         if request_id:
             claimed = _claim_run_target(
                 db=db,
@@ -466,6 +486,10 @@ async def main_bigrun_300_sweep(
                     f"{summarizer_name} (SKIP – claimed by another worker or already completed)"
                 )
                 continue
+        elif not force and run_key_exists_in_db(db, run_key):
+            # Non-request/local execution path keeps compatibility pre-check.
+            print(f"  [{run_count}/{total_to_run}] {summarizer_name} (SKIP – run_key in DB)")
+            continue
 
         print(
             f"\n  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} / {summarizer_name}"

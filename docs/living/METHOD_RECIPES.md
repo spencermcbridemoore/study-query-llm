@@ -85,9 +85,11 @@ Canonical definitions live in
 
 - `RECIPE_VERSION = "v0"`
 - `CLUSTERING_COMPONENT_METHODS` — component specs for
-  `mean_pool_tokens`, `pca_svd_project`, `kmeanspp_init`, `k_llmmeans`.
+  `mean_pool_tokens`, `pca_svd_project`, `kmeanspp_init`, `k_llmmeans`,
+  `umap_project`.
 - `COSINE_KLLMEANS_NO_PCA_RECIPE` — the canonical recipe for that
-  composite.
+  composite (3 ordered stages: `mean_pool_tokens` -> `kmeanspp_init` ->
+  `k_llmmeans`).
 - `COMPOSITE_RECIPES` — name → recipe registry.
 - `build_composite_recipe(name)` — returns a deep copy.
 - `register_clustering_components(method_service)` — idempotent component
@@ -128,7 +130,7 @@ python scripts/register_clustering_methods.py
 
 From then on, `ingest_result_to_db` for composite methods will:
 
-- Ensure the 4 component methods exist (idempotent no-ops after first run).
+- Ensure the 5 registered component methods exist (idempotent no-ops after first run).
 - Ensure the composite row exists with `recipe_json` populated (attaching
   in place when a prior row lacked the recipe).
 - Inject `recipe_hash` into the run's `config_json` before recording the

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+from sqlalchemy.exc import IntegrityError
 
 from datasets import load_dataset
 
@@ -24,8 +25,7 @@ from study_query_llm.analysis.mcq_analyze_request import run_mcq_analyses_for_re
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import SweepRunClaim
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
-from study_query_llm.experiments.mcq_run_persistence import mcq_run_key_exists_in_db
+from study_query_llm.experiments.ingestion import ingest_result_to_db
 from study_query_llm.experiments.sweep_mcq_standalone import execute_mcq_standalone_run
 from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_CLUSTERING, SWEEP_TYPE_MCQ
 from study_query_llm.experiments.sweep_io import get_output_dir, serialize_sweep_result
@@ -184,6 +184,14 @@ def _now_utc():
     return datetime.now(timezone.utc)
 
 
+def _coerce_utc(ts: Optional[datetime]) -> Optional[datetime]:
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
 def _claim_run_target(request_id: int, run_key: str, worker_id: str, lease_seconds: int) -> bool:
     now = _now_utc()
     lease_expires = now + timedelta(seconds=lease_seconds)
@@ -207,14 +215,29 @@ def _claim_run_target(request_id: int, run_key: str, worker_id: str, lease_secon
                 heartbeat_at=now,
             )
             session.add(claim)
-            session.flush()
-            return True
+            try:
+                session.flush()
+                return True
+            except IntegrityError:
+                # Another worker created this claim row first.
+                session.rollback()
+                claim = (
+                    session.query(SweepRunClaim)
+                    .filter(
+                        SweepRunClaim.request_group_id == request_id,
+                        SweepRunClaim.run_key == run_key,
+                    )
+                    .first()
+                )
+                if claim is None:
+                    return False
         if claim.claim_status == "completed":
             return False
+        lease_expires_at = _coerce_utc(claim.lease_expires_at)
         if (
             claim.claim_status == "claimed"
-            and claim.lease_expires_at is not None
-            and claim.lease_expires_at > now
+            and lease_expires_at is not None
+            and lease_expires_at > now
             and claim.claimed_by != worker_id
         ):
             return False
@@ -872,11 +895,6 @@ def _run_mcq_standalone_worker_loop(
             if max_runs is not None and done >= max_runs:
                 break
 
-            if (not force) and mcq_run_key_exists_in_db(db, run_key):
-                print(f"[{worker_id}] {run_key} SKIP (mcq_run in DB)")
-                processed += 1
-                continue
-
             if not _claim_run_target(
                 request_id=request_id,
                 run_key=run_key,
@@ -1066,11 +1084,6 @@ def _run_clustering_standalone_worker_loop(
 
                 dataset_name = str(target.get("dataset") or "")
                 summarizer_key = target.get("summarizer", "None")
-
-                if (not force) and run_key_exists_in_db(db, run_key):
-                    print(f"[{worker_id}] {run_key} SKIP (run_key in DB)")
-                    processed += 1
-                    continue
 
                 if not _claim_run_target(
                     request_id=request_id,

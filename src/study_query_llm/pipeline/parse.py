@@ -44,12 +44,14 @@ def _resolve_db(
 
 
 def _collect_acquisition_artifact_uris(session, dataset_group_id: int) -> dict[str, str]:
-    artifacts = session.query(CallArtifact).order_by(CallArtifact.id.asc()).all()
+    repo = RawCallRepository(session)
+    artifacts = repo.list_group_artifacts(
+        group_id=int(dataset_group_id),
+        artifact_types=[ARTIFACT_TYPE_ACQ_FILE, ARTIFACT_TYPE_ACQ_MANIFEST],
+    )
     artifact_uris: dict[str, str] = {}
     for artifact in artifacts:
         metadata = dict(artifact.metadata_json or {})
-        if int(metadata.get("group_id") or -1) != int(dataset_group_id):
-            continue
         if artifact.artifact_type == ARTIFACT_TYPE_ACQ_FILE:
             rel_path = str(metadata.get("relative_path") or "").strip()
             if rel_path:
@@ -60,12 +62,14 @@ def _collect_acquisition_artifact_uris(session, dataset_group_id: int) -> dict[s
 
 
 def _collect_dataframe_artifact_uris(session, dataframe_group_id: int) -> dict[str, str]:
-    artifacts = session.query(CallArtifact).order_by(CallArtifact.id.asc()).all()
+    repo = RawCallRepository(session)
+    artifacts = repo.list_group_artifacts(
+        group_id=int(dataframe_group_id),
+        artifact_types=[ARTIFACT_TYPE_CANONICAL_PARQUET, ARTIFACT_TYPE_DATAFRAME_MANIFEST],
+    )
     artifact_uris: dict[str, str] = {}
     for artifact in artifacts:
         metadata = dict(artifact.metadata_json or {})
-        if int(metadata.get("group_id") or -1) != int(dataframe_group_id):
-            continue
         if artifact.artifact_type == ARTIFACT_TYPE_CANONICAL_PARQUET:
             artifact_uris["dataframe.parquet"] = str(artifact.uri)
         elif artifact.artifact_type == ARTIFACT_TYPE_DATAFRAME_MANIFEST:
@@ -174,24 +178,16 @@ def _find_existing_dataframe_group(
     parser_version: str,
     dataframe_hash: str,
 ) -> int | None:
-    dataframe_groups = (
-        session.query(Group)
-        .filter(Group.group_type == "dataset_dataframe")
-        .order_by(Group.id.desc())
-        .all()
+    repo = RawCallRepository(session)
+    return repo.find_group_id_by_metadata(
+        group_type="dataset_dataframe",
+        metadata_eq={
+            "source_dataset_group_id": int(dataset_group_id),
+            "parser_id": str(parser_id),
+            "parser_version": str(parser_version),
+            "dataframe_hash": str(dataframe_hash),
+        },
     )
-    for group in dataframe_groups:
-        metadata = dict(group.metadata_json or {})
-        if int(metadata.get("source_dataset_group_id") or -1) != int(dataset_group_id):
-            continue
-        if str(metadata.get("parser_id") or "") != parser_id:
-            continue
-        if str(metadata.get("parser_version") or "") != parser_version:
-            continue
-        if str(metadata.get("dataframe_hash") or "") != dataframe_hash:
-            continue
-        return int(group.id)
-    return None
 
 
 def _call_artifact_uri_by_id(repo: RawCallRepository, artifact_id: int) -> str:
@@ -206,11 +202,13 @@ def _call_artifact_uri_by_id(repo: RawCallRepository, artifact_id: int) -> str:
 @allow_no_run_stage
 def find_dataframe_parquet_uri(session, dataframe_group_id: int) -> str:
     """Return canonical dataframe parquet URI for a dataframe group."""
-    artifacts = session.query(CallArtifact).order_by(CallArtifact.id.desc()).all()
+    repo = RawCallRepository(session)
+    artifacts = repo.list_group_artifacts(
+        group_id=int(dataframe_group_id),
+        artifact_types=[ARTIFACT_TYPE_CANONICAL_PARQUET],
+        newest_first=True,
+    )
     for artifact in artifacts:
-        metadata = dict(artifact.metadata_json or {})
-        if int(metadata.get("group_id") or -1) != int(dataframe_group_id):
-            continue
         if artifact.artifact_type == ARTIFACT_TYPE_CANONICAL_PARQUET:
             return str(artifact.uri)
     raise ValueError(

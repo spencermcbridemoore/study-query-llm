@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -322,5 +324,115 @@ def test_analyze_hdbscan_runner_rejects_non_full_representation(
                 "embedding_deployment": "test-embedding-model",
                 "hdbscan_min_cluster_size": 2,
                 "hdbscan_min_samples": 1,
+            },
+        )
+
+
+def test_hdbscan_runner_uses_deterministic_defaults_and_echoes_parameters(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeHDBSCAN:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = dict(kwargs)
+
+        def fit_predict(self, matrix):
+            rows = int(np.asarray(matrix).shape[0])
+            self.probabilities_ = np.ones(rows, dtype=np.float64)
+            self.outlier_scores_ = np.zeros(rows, dtype=np.float64)
+            return np.asarray([0, 0, -1], dtype=np.int64)
+
+    monkeypatch.setitem(sys.modules, "hdbscan", types.SimpleNamespace(HDBSCAN=_FakeHDBSCAN))
+
+    result = run_hdbscan_analysis(
+        method_name="phase1_hdbscan_fixture",
+        input_group_id=123,
+        input_group_type="embedding_batch",
+        input_group_metadata={"representation": "full"},
+        embeddings=np.asarray([[1.0, 0.0], [0.8, 0.2], [0.0, 1.0]], dtype=np.float64),
+        texts=["a", "b", "c"],
+        parameters={"hdbscan_min_cluster_size": 2},
+    )
+
+    kwargs = dict(captured.get("kwargs") or {})
+    assert kwargs["metric"] == "cosine"
+    assert kwargs["random_state"] == 0
+    assert kwargs["core_dist_n_jobs"] == 1
+    assert kwargs["approx_min_span_tree"] is False
+
+    used = (
+        result["structured_results"]["hdbscan_summary"]["parameters"]  # type: ignore[index]
+    )
+    assert used["hdbscan_metric"] == "cosine"
+    assert used["hdbscan_random_state"] == 0
+    assert used["hdbscan_core_dist_n_jobs"] == 1
+    assert used["hdbscan_approx_min_span_tree"] is False
+
+
+def test_hdbscan_runner_allows_explicit_policy_overrides(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeHDBSCAN:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = dict(kwargs)
+
+        def fit_predict(self, matrix):
+            rows = int(np.asarray(matrix).shape[0])
+            self.probabilities_ = np.ones(rows, dtype=np.float64)
+            self.outlier_scores_ = np.zeros(rows, dtype=np.float64)
+            return np.asarray([0, 1, -1], dtype=np.int64)
+
+    monkeypatch.setitem(sys.modules, "hdbscan", types.SimpleNamespace(HDBSCAN=_FakeHDBSCAN))
+
+    result = run_hdbscan_analysis(
+        method_name="phase1_hdbscan_fixture",
+        input_group_id=124,
+        input_group_type="embedding_batch",
+        input_group_metadata={"representation": "full"},
+        embeddings=np.asarray([[1.0, 0.0], [0.8, 0.2], [0.0, 1.0]], dtype=np.float64),
+        texts=["a", "b", "c"],
+        parameters={
+            "hdbscan_min_cluster_size": 2,
+            "hdbscan_metric": "euclidean",
+            "hdbscan_random_state": 7,
+            "hdbscan_core_dist_n_jobs": 2,
+            "hdbscan_approx_min_span_tree": True,
+        },
+    )
+
+    kwargs = dict(captured.get("kwargs") or {})
+    assert kwargs["metric"] == "euclidean"
+    assert kwargs["random_state"] == 7
+    assert kwargs["core_dist_n_jobs"] == 2
+    assert kwargs["approx_min_span_tree"] is True
+
+    used = (
+        result["structured_results"]["hdbscan_summary"]["parameters"]  # type: ignore[index]
+    )
+    assert used["hdbscan_metric"] == "euclidean"
+    assert used["hdbscan_random_state"] == 7
+    assert used["hdbscan_core_dist_n_jobs"] == 2
+    assert used["hdbscan_approx_min_span_tree"] is True
+
+
+def test_hdbscan_runner_rejects_zero_core_dist_jobs(monkeypatch) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "hdbscan",
+        types.SimpleNamespace(HDBSCAN=object),
+    )
+
+    with pytest.raises(ValueError, match="core_dist_n_jobs"):
+        run_hdbscan_analysis(
+            method_name="phase1_hdbscan_fixture",
+            input_group_id=125,
+            input_group_type="embedding_batch",
+            input_group_metadata={"representation": "full"},
+            embeddings=np.asarray([[1.0, 0.0], [0.8, 0.2], [0.0, 1.0]], dtype=np.float64),
+            texts=["a", "b", "c"],
+            parameters={
+                "hdbscan_min_cluster_size": 2,
+                "hdbscan_core_dist_n_jobs": 0,
             },
         )

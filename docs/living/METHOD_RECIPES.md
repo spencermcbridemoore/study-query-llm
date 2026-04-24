@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-14
+Last reviewed: 2026-04-24
 
 ## Purpose
 
@@ -26,9 +26,9 @@ This document is the v0 spec.
 
 - **Descriptive, not executable.** This phase does not introduce a runtime
   recipe executor. `run_sweep` continues to run the pipeline monolithically.
-- **Clustering family only (for now).** The only composite recipe currently
-  registered is `cosine_kllmeans_no_pca`. Adding more composites is
-  additive.
+- **Clustering family only (for now).** Registered clustering composites are
+  `cosine_kllmeans_no_pca`, `hdbscan`, `kmeans+silhouette+kneedle`, and
+  `gmm+bic+argmin`. Adding more composites is additive.
 - **No fingerprint tuple shape change.** The recipe hash enters the
   canonical run fingerprint via `config_json["recipe_hash"]`, which
   `canonical_run_fingerprint` already hashes (minus scheduling-only keys).
@@ -87,9 +87,12 @@ Canonical definitions live in
 - `CLUSTERING_COMPONENT_METHODS` — component specs for
   `mean_pool_tokens`, `pca_svd_project`, `kmeanspp_init`, `k_llmmeans`,
   `umap_project`.
-- `COSINE_KLLMEANS_NO_PCA_RECIPE` — the canonical recipe for that
-  composite (3 ordered stages: `mean_pool_tokens` -> `kmeanspp_init` ->
-  `k_llmmeans`).
+- Canonical clustering composite recipes:
+  - `COSINE_KLLMEANS_NO_PCA_RECIPE` (3 ordered stages:
+    `mean_pool_tokens` -> `kmeanspp_init` -> `k_llmmeans`)
+  - `HDBSCAN_V1_RECIPE`
+  - `KMEANS_SILHOUETTE_KNEEDLE_RECIPE`
+  - `GMM_BIC_ARGMIN_RECIPE`
 - `COMPOSITE_RECIPES` — name → recipe registry.
 - `build_composite_recipe(name)` — returns a deep copy.
 - `register_clustering_components(method_service)` — idempotent component
@@ -135,6 +138,11 @@ From then on, `ingest_result_to_db` for composite methods will:
   in place when a prior row lacked the recipe).
 - Inject `recipe_hash` into the run's `config_json` before recording the
   `provenanced_runs` row.
+
+Stage-5 `analyze` also enforces recipe presence for v1 clustering composite
+methods (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`) and
+persists matching `recipe_hash`/`pipeline_effective_hash` in analysis
+execution config.
 
 ## Adding a new composite
 

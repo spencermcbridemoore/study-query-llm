@@ -1,0 +1,99 @@
+# Module Metrics
+Total modules: 140
+Total edges:   421
+
+## Top 25 by FAN-IN (most depended-upon)
+     35  study_query_llm.utils.logging_config
+     30  study_query_llm.db.raw_call_repository
+     28  study_query_llm.db.connection_v2
+     27  study_query_llm.db.models_v2
+     14  study_query_llm.pipeline.types
+     10  study_query_llm.services.provenance_service
+      9  study_query_llm.services.sweep_request_service
+      9  study_query_llm.datasets.acquisition
+      9  study_query_llm.datasets.source_specs.parser_protocol
+      9  study_query_llm.services.artifact_service
+      9  study_query_llm.pipeline.runner
+      7  study_query_llm.services.method_service
+      7  study_query_llm.config
+      7  study_query_llm.providers.base_embedding
+      6  study_query_llm.services.provenanced_run_service
+      6  study_query_llm.providers.factory
+      6  study_query_llm.services.embeddings.constants
+      5  study_query_llm.execution.protocol
+      5  study_query_llm.services._shared
+      5  study_query_llm.providers.base
+      4  study_query_llm.algorithms.recipes
+      4  study_query_llm.experiments.sweep_request_types
+      4  study_query_llm.utils.text_utils
+      4  study_query_llm.services.embeddings
+      4  study_query_llm.pipeline.parse
+
+## Top 25 by FAN-OUT (most depending-on-others)
+     21  study_query_llm.experiments.sweep_worker_main
+     14  study_query_llm.experiments.runtime_sweeps
+     13  study_query_llm.pipeline.analyze
+     12  study_query_llm.services.embeddings.service
+     10  study_query_llm.experiments.ingestion
+     10  study_query_llm.services
+      9  study_query_llm.pipeline.embed
+      9  study_query_llm.services.embeddings.helpers
+      8  study_query_llm.datasets.source_specs
+      8  study_query_llm.datasets.source_specs.registry
+      8  study_query_llm.pipeline.parse
+      7  study_query_llm.algorithms
+      7  study_query_llm.analysis.mcq_analyze_request
+      7  study_query_llm.experiments.mcq_run_persistence
+      7  study_query_llm.pipeline
+      7  study_query_llm.pipeline.acquire
+      7  study_query_llm.pipeline.clustering
+      7  study_query_llm.pipeline.snapshot
+      7  study_query_llm.providers
+      7  study_query_llm.providers.factory
+      7  study_query_llm.services.embeddings.persistence
+      7  study_query_llm.services.jobs.runtime_supervisors
+      7  study_query_llm.services.sweep_query_service
+      7  study_query_llm.services.sweep_request_service
+      6  study_query_llm.db
+
+## Top 25 by LINE COUNT
+   1701  study_query_llm.db.raw_call_repository
+   1354  study_query_llm.experiments.sweep_worker_main
+   1187  study_query_llm.services.sweep_request_service
+   1072  study_query_llm.pipeline.analyze
+   1039  study_query_llm.services.artifact_service
+    904  study_query_llm.db.models_v2
+    769  study_query_llm.services.embeddings.service
+    761  study_query_llm.domain.representation_hierarchy
+    740  study_query_llm.services.provenance_service
+    717  study_query_llm.experiments.runtime_sweeps
+    675  study_query_llm.services.sweep_query_service
+    623  study_query_llm.services.inference_service
+    611  study_query_llm.algorithms.clustering
+    544  study_query_llm.services.jobs.runtime_supervisors
+    500  study_query_llm.services.summarization_service
+    477  study_query_llm.providers.factory
+    462  study_query_llm.services.provenanced_run_service
+    435  study_query_llm.experiments.mcq_answer_position_probe
+    423  study_query_llm.providers.managers.aci_tei
+    401  study_query_llm.algorithms.recipes
+    391  study_query_llm.experiments.sweep_request_types
+    378  study_query_llm.providers.azure_provider
+    375  study_query_llm.pipeline.parse
+    357  study_query_llm.experiments.ingestion
+    350  study_query_llm.pipeline.snapshot
+
+## God-Module Candidates (fan-in >= 15 AND lines >= 600)
+  fan_in=  30  lines= 1701  study_query_llm.db.raw_call_repository
+  fan_in=  27  lines=  904  study_query_llm.db.models_v2
+
+## Hubs (fan-in >= 25)
+  fan_in=  35  lines=   83  study_query_llm.utils.logging_config
+  fan_in=  30  lines= 1701  study_query_llm.db.raw_call_repository
+  fan_in=  28  lines=   61  study_query_llm.db.connection_v2
+  fan_in=  27  lines=  904  study_query_llm.db.models_v2
+
+## Orphans (fan-in == 0, fan-out == 0) — possibly dead modules
+  study_query_llm.analysis  (lines=1)
+  study_query_llm.cli  (lines=1)
+

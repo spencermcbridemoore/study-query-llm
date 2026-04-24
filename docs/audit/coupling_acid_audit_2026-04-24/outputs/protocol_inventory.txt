@@ -1,0 +1,67 @@
+# Protocol / ABC Inventory
+Protocols: 7   ABCs: 2
+
+## Protocols (with @runtime_checkable annotation noted)
+- ExecutionBackend  [runtime_checkable]  -- src/study_query_llm/execution/protocol.py:60
+       submit
+       poll
+       cancel
+       logs
+    implementers (subclassing): 0  (likely structural / duck-typed)
+
+- SweepTypeAdapter  [structural]  -- src/study_query_llm/experiments/sweep_request_types.py:69
+       default_algorithm
+       build_targets
+       analysis_definitions
+    implementers (subclassing): 0  (likely structural / duck-typed)
+
+- ModelManager  [runtime_checkable]  -- src/study_query_llm/providers/managers/protocol.py:28
+       start
+       stop
+       ping
+       __enter__
+       __exit__
+    implementers (subclassing): 0  (likely structural / duck-typed)
+
+- JobRunner  [structural]  -- src/study_query_llm/services/jobs/job_runners.py:41
+       run
+    implementers (subclassing): 0  (likely structural / duck-typed)
+
+- SupervisorMode  [structural]  -- src/study_query_llm/services/supervisor_mode.py:60
+       engine_work_remaining
+       before_progress_poll
+    implementers (subclassing): 0  (likely structural / duck-typed)
+
+- WorkerOrchestrator  [structural]  -- src/study_query_llm/services/worker_orchestrator.py:8
+       run
+    implementers (subclassing): 0  (likely structural / duck-typed)
+
+- StorageBackend  [runtime_checkable]  -- src/study_query_llm/storage/protocol.py:14
+       write
+       read
+       read_from_uri
+       exists
+       exists_from_uri
+       delete
+       get_uri
+    implementers (subclassing): 0  (likely structural / duck-typed)
+
+## ABCs
+- BaseLLMProvider  -- src/study_query_llm/providers/base.py:102
+     * complete
+     * get_provider_name
+    implementers (subclassing): 2
+        - AzureOpenAIProvider  -- src/study_query_llm/providers/azure_provider.py
+        - OpenAICompatibleChatProvider  -- src/study_query_llm/providers/openai_compatible_chat_provider.py
+
+- BaseEmbeddingProvider  -- src/study_query_llm/providers/base_embedding.py:27
+     * create_embeddings
+     * get_provider_name
+     * close
+       validate_model
+       __aenter__
+       __aexit__
+    implementers (subclassing): 2
+        - AzureEmbeddingProvider  -- src/study_query_llm/providers/azure_embedding_provider.py
+        - OpenAICompatibleEmbeddingProvider  -- src/study_query_llm/providers/openai_compatible_embedding_provider.py
+

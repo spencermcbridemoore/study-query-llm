@@ -47,9 +47,14 @@ of local-filesystem URIs in Jetstream's canonical artifact tables.
    no URIs (`live_count_output.txt:8-55`).
 4. **No "flush" mechanism exists.** The user's intuition is correct: there is
    no batched-promotion path that takes local-DB writes and applies them to
-   Jetstream later. The only sanctioned local→Jetstream promotion is
-   `scripts/restore_jetstream_db.py` (full dump-replace of the target),
-   which is a wholesale replace, not a merge (subagent 4 §A).
+   Jetstream later. The only sanctioned local→Jetstream promotion is the
+   manual two-step `pg_dump` → transfer dump file to Jetstream VM →
+   `deploy/jetstream/restore_pg_dump_to_compose_db.sh` (a wholesale replace
+   of the target compose DB, not a merge). Subagent 4 §A originally cited
+   `scripts/restore_jetstream_db.py` and `scripts/dump_jetstream_db.py` for
+   this path; both names are wrong (the files do not exist as of
+   commit 8e95253). The actual scripts/workflow is documented in §9 and
+   §12.
 5. **Contradiction with assistant context block:** the live transcript context
    block claimed `_assert_uri_backend_compatible` lives in
    `src/study_query_llm/services/artifact_service.py`. That is **incorrect**.
@@ -398,19 +403,41 @@ finding 5.)
 
 ### F8. There is no Local→Jetstream "promote" path
 
-Subagent 4 §A, §D:
+Subagent 4 §A, §D (with corrections from Codex audit on commit 8e95253 — see
+§12):
 
 The directional inventory shows:
-- Online→Local is well-defended (`sync_from_online.py`,
-  `sync_jetstream_to_local_via_dump_restore.py`, `dump_jetstream_db.py`).
-- The only Local→Online is `restore_jetstream_db.py`, which is a
-  **dump-replace**, not a merge.
+- Online→Local is well-defended:
+  - `scripts/sync_from_online.py` — incremental application-level sync from
+    canonical (Jetstream) to local Postgres.
+  - `scripts/dump_postgres_for_jetstream_migration.py --from-jetstream` —
+    `pg_dump` of canonical to a local `.dump` file (used for backup or for
+    seeding a fresh local clone).
+  - `scripts/restore_pg_dump_to_local_docker.py` — restores a `.dump` file
+    into the local Docker Postgres.
+  - `scripts/upload_jetstream_pg_dump_to_blob.py` — uploads a `.dump` file
+    to Azure blob `db-backups` for offsite retention.
+- The only Local→Online path is the **manual two-step**: operator generates
+  a `.dump` (e.g. `pg_dump` against the local DB or any target), transfers
+  it to the Jetstream VM, and runs
+  `deploy/jetstream/restore_pg_dump_to_compose_db.sh` (or the related
+  `deploy/jetstream/jetstream_pgvector_restore.sh`) to replace the canonical
+  compose DB. This is a **dump-replace**, not a merge.
 - There is no script that takes incremental local writes and applies them to
   Jetstream.
 
+> Subagent 4's original report named two scripts that do not exist in this
+> repo (`scripts/restore_jetstream_db.py` and `scripts/dump_jetstream_db.py`).
+> The Codex audit caught the discrepancy; the corrected script set above
+> reflects the actual filesystem at commit 8e95253. See §12 for full
+> provenance.
+
 This empirically confirms the user's intuition: there is no batched "flush"
 mechanic. If a developer accidentally writes to a local DB while believing
-they were writing to Jetstream, the work is **stranded**.
+they were writing to Jetstream, the work is **stranded** — the only recovery
+is a manual `pg_dump` of the local DB, manual transfer to the Jetstream VM,
+and a destructive restore (which would also clobber any concurrent canonical
+writes).
 
 ### F9. Tests do not assert their own lane
 
@@ -458,10 +485,29 @@ declared intent and resolved lane can be detected and refused.
 ## 6. Implementation plan (folded-in Step 5)
 
 This plan is structured to be incrementally landable. Each phase produces a
-useful safety improvement on its own and unblocks the next phase. Phase
-ordering is chosen so that Phase 1 alone would have prevented every one of the
-11 polluted rows in §3, and Phase 2 catches them after the fact even if Phase
-1 is bypassed.
+useful safety improvement on its own and unblocks the next phase. The
+defense-in-depth ordering matters:
+
+- **Phase 1 (chokepoint + banner)** prevents the 11-row class of defect at
+  the **connection layer** for any code path that constructs a
+  `BaseDatabaseConnection`. Had Phase 1 existed when the bank77_contrast run
+  fired, the operator would have seen a "lane: LOCAL_POSTGRES, intent:
+  CANONICAL" mismatch and the constructor would have refused.
+- **Phase 2 (ArtifactService coupling)** catches the same class of defect at
+  the **artifact-service layer** for any path that uses `ArtifactService`
+  but somehow bypasses Phase 1 (e.g., a future caller that builds its own
+  connection wrapper).
+- **Phase 3 (Postgres `CHECK` constraint)** catches the same class of defect
+  at the **database layer** for any path that bypasses both Phase 1 and
+  Phase 2 — for example, the eight direct `create_engine(...)` sites in
+  subagent 1 §D (which appear across §6.10 §A, §B, §D, §E), or any future
+  raw-SQL inserter. This is why Phase 3 is in MVP (§6.9): until every site
+  in §6.10 has been migrated to flow through the chokepoint, direct-engine
+  writers remain a real bypass surface.
+
+The three layers cover the defect at three independent altitudes; any one
+of them in isolation closes the user's stated concern, but shipping all
+three (Phases 1 + 2 + 3) leaves no single-point-of-failure escape.
 
 ### 6.0 Naming convention: role vs identity
 
@@ -482,6 +528,18 @@ conflated in the codebase:
 unset it falls back to `JETSTREAM_DATABASE_URL` (logging a deprecation notice
 once per process). Ops scripts may continue to read either name during the
 back-compat window. After one release cycle, the fallback is removed.
+
+**Conflict rule (added per Codex audit):** if **both** `CANONICAL_DATABASE_URL`
+and `JETSTREAM_DATABASE_URL` are set and they resolve to **different**
+host/port/dbname triples (using the existing `same_db_target` helper from
+`scripts/db_target_guardrails.py:40-70`), `resolve_lane(...)` raises
+`CanonicalIdentityConflict` (new exception) at first call. Rationale: during
+the alias window, two env vars naming the canonical lane is a footgun — an
+operator who exports both and gets them wrong would have writes silently
+routed to whichever the library happens to read first. The conflict rule
+removes that ambiguity by failing closed instead of guessing. The exception
+message names both URLs (with passwords masked) and tells the operator to
+unset whichever one is wrong.
 
 **Why split them:**
 - The destructive-DDL guard at `_base_connection.py:147-172` is currently the
@@ -578,16 +636,28 @@ this when running interactively):
 ```
 ================================================================
   STUDY-QUERY-LLM — DB SESSION
-  lane:           JETSTREAM        (matches JETSTREAM_DATABASE_URL)
+  lane:           CANONICAL        (identity: Jetstream)
+  source_var:     CANONICAL_DATABASE_URL
   intent:         CANONICAL
   artifact_back:  azure_blob       (container=artifacts-prod)
   destructive:    BLOCKED unless SQLLM_ALLOW_DESTRUCTIVE_DDL=1
 ================================================================
 ```
 
-For `LOCAL_POSTGRES` / `SQLITE_*` lanes the banner clearly says "this work
-will NOT propagate to Jetstream." That single sentence addresses the user's
-core concern.
+The `lane:` row prints the **role** name (`Lane.CANONICAL`); the
+parenthesised identity (`Jetstream`) and the explicit `source_var:` row
+together name the current incumbent and the env var that resolved to it
+(per §6.0). When the lane is `Lane.LOCAL_POSTGRES` or `Lane.SQLITE_*` the
+identity reads `local clone` / `sqlite file` / `sqlite memory` and the
+banner adds an extra line:
+
+```
+  WARNING:        this work will NOT propagate to the canonical DB
+```
+
+That single sentence addresses the user's core concern: it is impossible to
+do canonical-intent work without seeing it labelled CANONICAL, and equally
+impossible to do local work and not see the warning.
 
 ### 6.4 Couple `ArtifactService` to the chokepoint
 
@@ -702,14 +772,27 @@ Per subagent 6 §C:
 
 ### 6.9 Phasing & rollback
 
-> **Minimum-viable shipment (MVP).** Phase 0 + Phase 1 (a/b/c) + §7
-> remediation are the only items strictly required to close the architectural
-> defect. Phase 0 introduces the modules; Phase 1 wires the chokepoint and
-> banner so **every future write is gated by an explicit `WriteIntent`**;
-> §7 cleans up the existing 11 polluted rows. Phases 2–7 deepen the
-> protections (artifact-backend coupling, DB constraint, sentinel index, CI,
-> tests, docs) and can be calendar-sequenced over weeks without losing the
-> primary safety property. If you only ship one bundle, ship MVP.
+> **Minimum-viable shipment (MVP) — revised per Codex audit.** Phase 0 +
+> Phase 1 (a/b/c) + Phase 3 + §7 remediation = the only items strictly
+> required to close the architectural defect. Phase 0 introduces the modules;
+> Phase 1 wires the chokepoint and banner so **every future write through the
+> chokepoint is gated by an explicit `WriteIntent`**; Phase 3 adds a Postgres
+> `CHECK ... NOT VALID` constraint that catches the **direct-engine bypass
+> sites** (subagent 1 §D enumerates eight such sites that do not flow through
+> `BaseDatabaseConnection`); §7 cleans up the existing 11 polluted rows.
+> Phases 2 and 4–7 deepen the protections (artifact-backend coupling, validate
+> the constraint, sentinel index, CI, tests, docs) and can be
+> calendar-sequenced over weeks without losing the primary safety property.
+>
+> The Codex audit's specific objection: shipping MVP **without** Phase 3
+> leaves a gap until the static-check CI in Phase 6 lands and every bypass
+> site in §6.10 is migrated — during that window, a misbehaving direct-engine
+> caller can still pollute `call_artifacts.uri` with non-blob strings. Phase 3
+> closes that gap at the database level with a `NOT VALID` constraint that
+> only checks new inserts (so it is safe to add against a polluted table) and
+> can be flipped to `VALIDATE CONSTRAINT` after §7 remediation completes.
+>
+> If you only ship one bundle, ship MVP = **0 + 1 + 3 + §7** in that order.
 
 | Phase | What ships | Risk |
 |------|-----------|------|
@@ -718,7 +801,7 @@ Per subagent 6 §C:
 | 1b | Gate `assert_intent_matches_lane` on `SQLLM_WRITE_INTENT` being set. Operators opt in. | Low — no breakage. |
 | 1c | Make `SQLLM_WRITE_INTENT` required for non-sqlite URLs. | Medium — operators must update env. Ship after 2 weeks of opt-in soak. |
 | 2 | Wire `ArtifactService(write_intent=...)`. CANONICAL forces `azure_blob`. | Medium — could break a worker with misconfigured azure creds. Mitigation: phase 1 banners surface this earlier. |
-| 3 | Add Postgres `CHECK ... NOT VALID` on `call_artifacts.uri` on the canonical lane (currently Jetstream). | Low — new inserts only. |
+| 3 | Add Postgres `CHECK ... NOT VALID` on `call_artifacts.uri` on the canonical lane (currently Jetstream). **In MVP** so direct-engine bypass writers (subagent 1 §D) are caught at the DB layer until they migrate. | Low — new inserts only; existing rows untouched until phase 4. |
 | 4 | Run §7 remediation; then `VALIDATE CONSTRAINT`. | Medium — coordinate with anyone holding open transactions. |
 | 5 | Promote sentinel index for `raw_calls`. | Low. |
 | 6 | CI jobs (§6.6) + test fixture changes (§6.7). | Low. |
@@ -726,45 +809,163 @@ Per subagent 6 §C:
 
 Rollback for any phase: revert the migration (constraints are individually
 named) or set the new kwargs back to permissive defaults; the underlying
-schema is unchanged.
+schema is unchanged. For Phase 3 specifically, rollback is
+`ALTER TABLE call_artifacts DROP CONSTRAINT call_artifacts_uri_must_be_blob;`
+which is a metadata-only operation.
 
 ### 6.10 Migration checklist for in-tree call sites
 
-Generated from subagent 2 §A and subagent 1 §D. These are the concrete edits
-that propagate `write_intent` through the codebase. Each is a one-line change
-plus an import.
+Every in-tree `DatabaseConnectionV2(...)` constructor and every direct
+`create_engine(...)` site listed below must declare a `WriteIntent` after the
+chokepoint lands (§6.2). The list is **complete as of commit 8e95253** but
+not permanently exhaustive — repository drift will add new sites. To
+re-derive the current set at implementation time:
 
-- `panel_app/helpers.py:30-38` — pass `write_intent=WriteIntent.CANONICAL`
-  (panel intends to read/write Jetstream).
-- `services/jobs/runtime_supervisors.py:199-201,360-368` — supervisors target
-  `DATABASE_URL` directly; pass `write_intent` from `SQLLM_WRITE_INTENT`.
-- `services/jobs/runtime_workers.py:61-69` — same pattern.
-- `experiments/sweep_worker_main.py:53,1326-1331` — same.
-- `pipeline/{acquire,parse,embed,snapshot,analyze}.py` (entry points that take
-  `database_url`) — accept `write_intent` arg, default `CANONICAL`.
-- `scripts/ingest_sweep_to_db.py:487-488` — pass `write_intent=CANONICAL`,
-  remove fallback to `config.database.connection_string` in favor of
-  explicit `CANONICAL_DATABASE_URL` (back-compat: falls through to
-  `JETSTREAM_DATABASE_URL` if the role-named var is unset, per §6.0).
-- `scripts/sync_from_online.py:290-295` — local engine constructed via
-  `DatabaseConnectionV2(local_url, write_intent=READ_MIRROR)`.
-- `scripts/purge_dataset_acquisition.py:161-162` — `write_intent=CANONICAL`
-  (intent is to mutate Jetstream, after explicit confirmation).
-- `scripts/restore_jetstream_db.py` — already explicit; add `write_intent=
-  CANONICAL` for clarity.
-- `scripts/verify_db_backup_inventory.py:55` — read-only; `write_intent=
-  READ_MIRROR` for the local engine, `CANONICAL` (read-only) for Jetstream.
-- `scripts/check_active_workers.py:83-84` — `write_intent=READ_MIRROR` (it is
-  diagnostic).
-- `scripts/probe_postgres_inventory.py:61` — `READ_MIRROR`.
-- `scripts/sanity_check_database_url.py:60` — `READ_MIRROR`.
-- `scripts/upload_jetstream_pg_dump_to_blob.py:50` — `READ_MIRROR` (it reads
-  Jetstream over the tunnel for upload).
-- All `src/study_query_llm/db/migrations/*.py` — most do destructive DDL; pass
-  `write_intent` from `SQLLM_WRITE_INTENT` and require operators to set it
-  explicitly.
+```bash
+rg "DatabaseConnectionV2\(" --type py
+rg "create_engine\(" --type py
+```
 
-The set above is exhaustive against subagents 1 §D and 2 §A.
+The original draft of this section claimed exhaustiveness and was based on
+subagent 2 §A; the Codex audit found additional sites that subagent 2 missed
+and one cited script (`scripts/restore_jetstream_db.py`) that does not exist.
+Both defects are corrected below — see §12 for the full provenance note.
+
+`scripts/history/**/*.py` and `notebooks/**/*.ipynb` are excluded by policy:
+history scripts are frozen archives per `.cursorrules` "living-docs-only" rule
+(if any of them are revived for active use they must be migrated before
+re-running); notebooks construct connections at cell-evaluation time and
+cannot be statically gated by import-time CI. The recommendation for
+notebooks is to expose three thin helpers (`get_canonical_db()`,
+`get_local_db()`, `get_sandbox_db()`) that internally set intent — tracked
+separately from MVP.
+
+#### A. Canonical writers (declare `WriteIntent.CANONICAL`)
+
+These sites either write to or perform DDL on the canonical lane.
+
+- `panel_app/helpers.py:38` — Panel UI intends to read/write the canonical
+  DB.
+- `src/study_query_llm/services/jobs/runtime_supervisors.py:41,367` and
+  `src/study_query_llm/services/jobs/runtime_workers.py:68` — supervisors
+  and workers consume `DATABASE_URL` directly; declare from
+  `SQLLM_WRITE_INTENT`.
+- `src/study_query_llm/experiments/sweep_worker_main.py:612,1331` — same
+  pattern.
+- `src/study_query_llm/experiments/runtime_sweeps.py:305` — sweep runtime
+  driver.
+- `src/study_query_llm/pipeline/{acquire,parse,embed,snapshot,analyze}.py`
+  (`acquire.py:38`, `parse.py:41`, `embed.py:40`, `snapshot.py:35`,
+  `analyze.py:88`) — pipeline stage entry points; accept `write_intent` arg,
+  default `CANONICAL`.
+- `src/study_query_llm/analysis/mcq_analyze_request.py:315` — analysis
+  driver writes provenance + analysis results.
+- `scripts/ingest_sweep_to_db.py:487` — pass `CANONICAL`; remove fallback to
+  `config.database.connection_string` in favour of explicit
+  `CANONICAL_DATABASE_URL` (back-compat per §6.0).
+- `scripts/ingest_mcq_probe_json_to_sweep_db.py:145` — pass `CANONICAL`;
+  resolve from `CANONICAL_DATABASE_URL` first, fall back to `DATABASE_URL`
+  then `NEON_DATABASE_URL` (per subagent 1 §B).
+- `scripts/register_clustering_methods.py:71`,
+  `scripts/register_text_classification_methods.py:72` — register methods on
+  the canonical lane.
+- `scripts/run_bank77_pipeline.py:336`,
+  `scripts/run_pca_kllmeans_sweep.py:108`,
+  `scripts/run_pca_kllmeans_sweep_full.py:291` — pipeline drivers; declare
+  `CANONICAL`.
+- `scripts/backfill_run_fingerprints.py:43`,
+  `scripts/validate_and_backfill_run_snapshots.py:111` — backfill writers.
+- `scripts/purge_dataset_acquisition.py:161` (`create_engine`) — destructive
+  on canonical after explicit confirmation; the existing
+  `--allow-remote-target` / loopback gate stays, plus declare `CANONICAL`.
+- `scripts/backup_mcq_db_to_json.py:255` (`create_engine`) — reads canonical
+  for backup; effectively read-only against canonical (see §10 Q8 — current
+  intent vocabulary cannot express this cleanly).
+
+#### B. Read-mirror / diagnostic (declare `WriteIntent.READ_MIRROR`)
+
+These sites only operate on a local mirror.
+
+- `scripts/sync_from_online.py:295` — local engine target. (Note: the
+  online engine constructed at `:290` is read-only against canonical — see
+  §10 Q8.)
+- `scripts/init_local_db.py:51` — initialises the local mirror only.
+- `scripts/check_active_workers.py:83` (`create_engine`),
+  `scripts/probe_postgres_inventory.py:61` (`create_engine`),
+  `scripts/sanity_check_database_url.py:60` (`create_engine`) — diagnostics
+  intended for either lane; default `READ_MIRROR` and require explicit
+  override to point at canonical.
+- `scripts/audit_mcq_method_definitions.py:138`,
+  `scripts/audit_last_partial_sweep.py:166`,
+  `scripts/check_run_groups.py:28`,
+  `scripts/check_orchestration_jobs.py:45`,
+  `scripts/check_sweep_requests.py:79`,
+  `scripts/reconcile_last_partial_sweep.py:106`,
+  `scripts/export_mcq_sweep_option_counts_db.py:464` — read-only audit /
+  reconciliation scripts.
+
+#### C. Sandbox / ephemeral (declare `WriteIntent.SANDBOX`)
+
+- `scripts/snapshot_inventory.py:313` — uses ephemeral `sqlite:///{tmpdir}`
+  by construction.
+- `scripts/create_bank77_contrast_snapshots.py:330` — has implicit local
+  SQLite fallback under `artifact_dir`; this fallback should be removed and
+  the script forced to declare intent explicitly.
+
+#### D. Dual-target (declare per construction)
+
+Scripts that construct multiple connections; each connection declares its
+own intent.
+
+- `scripts/archive_defective_data.py:189-190` —
+  `online_db = DatabaseConnectionV2(online_url, write_intent=CANONICAL)` +
+  `local_db = DatabaseConnectionV2(local_url, write_intent=READ_MIRROR)`.
+- `scripts/verify_db_backup_inventory.py:55` (`create_engine`) — iterates
+  over a list that may contain both canonical and local URLs; each engine
+  declares intent at construction (see §10 Q8 for the canonical-read case).
+
+#### E. Promotion / backup tooling (effectively read-only against canonical)
+
+These are operator scripts whose write target is **outside** the database
+(blob, dump file). They read canonical and produce an artifact for offline
+review or restore. Declared intent depends on §10 Q8 resolution; the
+conservative default is `CANONICAL` with a session-level `read_only=True`
+flag once that flag exists.
+
+- `scripts/upload_jetstream_pg_dump_to_blob.py:50` (`create_engine`) — reads
+  canonical for table-count manifest; writes to Azure blob.
+- `scripts/verify_call_artifact_blob_lanes.py:130` (`create_engine`) —
+  direct-engine bypass already flagged in subagent 1 §D; reads canonical to
+  verify URI shape. The `verify_no_local_uris_on_canonical.py` promotion
+  in §6.6 should subsume it.
+
+#### F. Migrations (`src/study_query_llm/db/migrations/*.py`)
+
+All nine migration scripts consume `DATABASE_URL` and perform DDL on the
+canonical lane:
+
+- `add_provenanced_runs_table.py:34`
+- `add_method_analysis_tables.py:38`
+- `add_recipe_json_column.py:91`
+- `add_sweep_request_indexes.py:42`
+- `add_sweep_worker_safety.py:89`
+- `add_fingerprint_columns.py:57`
+- `add_group_links.py:37`
+- `normalize_provenanced_run_kind_execution.py:38`
+- `drop_embedding_vectors.py:52` (destructive)
+
+Pattern: declare `WriteIntent` from `SQLLM_WRITE_INTENT` and require
+operators to set it explicitly. The destructive ones
+(`drop_embedding_vectors.py`, `normalize_provenanced_run_kind_execution.py`)
+should additionally require `SQLLM_ALLOW_DESTRUCTIVE_DDL=1` (already
+enforced by the existing guard at `_base_connection.py:147-172`).
+
+#### G. The chokepoint itself
+
+- `src/study_query_llm/db/_base_connection.py:107` — `create_engine` call
+  inside `BaseDatabaseConnection.__init__`. **This is the only direct
+  `create_engine` site that is allowed in library code after MVP**; the CI
+  lint job in §6.6 enforces this by allow-listing exactly this file:line.
 
 ---
 
@@ -896,9 +1097,16 @@ Justification:
    work, they declare `WriteIntent.READ_MIRROR` or `SANDBOX`; the system never
    confuses that with canonical work, and there is nothing to flush.
 3. **The legitimate use cases for "local first, promote later" are already
-   served** by `dump_jetstream_db.py` → human review → `restore_jetstream_db.py`.
-   That is a coarse-grained promotion path, not a fine-grained one, but it
-   matches the actual workflow described in `docs/runbooks/README.md`.
+   served** by the manual two-step:
+   `pg_dump` (or `scripts/dump_postgres_for_jetstream_migration.py`)
+   → human review of the dump → transfer the `.dump` file to the Jetstream
+   VM → run `deploy/jetstream/restore_pg_dump_to_compose_db.sh` (which calls
+   the related `deploy/jetstream/jetstream_pgvector_restore.sh` for the
+   pgvector-aware restore). That is a coarse-grained, dump-replace promotion
+   path, not a fine-grained merge, but it matches the actual workflow
+   described in `docs/runbooks/README.md`. (The earlier draft of this
+   section cited `dump_jetstream_db.py` and `restore_jetstream_db.py`; both
+   names are wrong — see §12.)
 
 If, after Phase 6, operators discover a real workflow that requires
 incremental promotion, that becomes a follow-on RFC. It is not blocking this
@@ -917,6 +1125,7 @@ audit.
 | Q5 | Is the bank77_contrast snapshot lineage retrievable end-to-end? | Confirmed via `live_count_output.txt:24-34` — the `groups` rows referencing artifact ids 21–31 exist in Jetstream (subagent 2 §A confirms `groups` writes are routine). The remediation script can rebuild blob artifacts deterministically because `groups`/`group_links` are intact. |
 | Q6 | Do the same 11 artifacts exist in the local-clone DB? | Likely yes (the local clone was hydrated from Jetstream, which contained them). The local clone is unaffected by the §6.5 constraint because it is added only when `Lane.CANONICAL`. |
 | Q7 | Could the same defect have produced legacy `inference_runs` rows in v1 schema? | No. v1's `InferenceRun` has no artifact URI columns (subagent 3 §D, "Legacy `models.py`"). |
+| Q8 | The current `WriteIntent` vocabulary (`CANONICAL` / `READ_MIRROR` / `SANDBOX`) cannot cleanly express "this script reads the canonical lane to produce an external artifact (blob upload, dump file, audit report) and never writes to it." Examples: `scripts/upload_jetstream_pg_dump_to_blob.py:50`, `scripts/backup_mcq_db_to_json.py:255`, the online engine in `scripts/sync_from_online.py:290`, the canonical engine in `scripts/verify_db_backup_inventory.py:55`, and the §6.6 verifier scripts themselves. Today, declaring `READ_MIRROR` against a canonical URL would (correctly) raise `LaneIntentMismatch` per §6.1. | Out of MVP. Two options for a follow-on: **(a)** add a fourth intent `CANONICAL_READ_ONLY` whose `_ALLOWED_LANES_BY_INTENT` is `{Lane.CANONICAL}` and which sets `engine = create_engine(url, isolation_level="AUTOCOMMIT", execution_options={"postgresql_readonly": True})`, or **(b)** keep three intents and add a `read_only: bool = False` kwarg to `BaseDatabaseConnection.__init__` that flips the same Postgres session flags and that the chokepoint requires when `intent=CANONICAL` and the caller is in the §6.6 allow-list of "canonical readers." Recommendation: **(b)** — fewer enum values to plumb through CI, and the read-only flag is independently useful for accidental-write protection. Either way, the MVP plan is unaffected: until Q8 lands, the affected scripts in §6.10 §B and §6.10 §E should stay declared as `CANONICAL` with operator discipline (no writes), exactly as they behave today. |
 
 ---
 
@@ -934,7 +1143,7 @@ ensures no claim is unsupported.
 | C4 — Artifact backend ignores DB target | F5 | subagent 3 §B, §G; `artifact_service.py:86-145` |
 | C5 — URI columns unconstrained | F6 | subagent 3 §D |
 | C6 — Only validator is sweep-only | F7 | subagent 3 §E; `scripts/ingest_sweep_to_db.py:312-329, 355` |
-| C7 — No Local→Jetstream promote path | F8, §9 | subagent 4 §A, §B, §D |
+| C7 — No Local→Jetstream promote path | F8, §9 | subagent 4 §A, §B, §D (script names corrected against `scripts/dump_postgres_for_jetstream_migration.py`, `scripts/restore_pg_dump_to_local_docker.py`, `scripts/upload_jetstream_pg_dump_to_blob.py`, `deploy/jetstream/restore_pg_dump_to_compose_db.sh`, `deploy/jetstream/jetstream_pgvector_restore.sh` — see §12) |
 | C8 — Tests don't assert lane | F9 | subagent 5 §A, §E |
 | C9 — Doc/code drift | F10 | subagent 6 §B |
 | L1 — 11 of 31 polluted rows | §0, §3 | `live_count_output.txt:8-9` |
@@ -949,7 +1158,7 @@ ensures no claim is unsupported.
 | P6 — CI enforcement | §6.6 | based on subagent 1 §D + L1 |
 | P7 — Test isolation hardening | §6.7 | subagent 5 §E |
 | P8 — Doc updates | §6.8 | subagent 6 §C |
-| P9 — Migration checklist | §6.10 | subagent 1 §D + subagent 2 §A |
+| P9 — Migration checklist | §6.10 | subagent 1 §D + subagent 2 §A + Codex audit additions: re-derived via `rg "DatabaseConnectionV2\("` and `rg "create_engine\("` against commit 8e95253; subagent 2 §A's "exhaustive" claim was incorrect (missed at least 16 sites in `scripts/`, the `pipeline/snapshot.py` constructor, and `analysis/mcq_analyze_request.py`). Stale citation `scripts/restore_jetstream_db.py` removed. See §12. |
 | R1 — 11-row remediation | §7 | live_count_output.txt:24-34 |
 | R2 — Failure handling for missing files | §7 | subagent 2 §A `data_quality_service` row + general repo patterns |
 
@@ -988,6 +1197,42 @@ remediation.
 `scripts/ingest_mcq_probe_json_to_sweep_db.py:139-141` (subagent 1 §B) but
 no live data was probed there. If Neon is in active use it should be added to
 `Lane` and audited separately.
+
+**Limitation (subagent 4 stale citations).** Subagent 4's report (and
+therefore the original drafts of §0 finding 4, §5 F8, and §9) referenced two
+script names that do not exist in this repo:
+`scripts/restore_jetstream_db.py` and `scripts/dump_jetstream_db.py`. The
+Codex audit on commit 8e95253 caught the discrepancy. The actual scripts
+that implement the canonical-side dump/restore workflow are:
+
+- `scripts/dump_postgres_for_jetstream_migration.py` — `pg_dump` against any
+  source DB (Jetstream or local) into a `.dump` file. Read-only against the
+  source.
+- `scripts/restore_pg_dump_to_local_docker.py` — restores a `.dump` file
+  into the local Docker Postgres.
+- `scripts/upload_jetstream_pg_dump_to_blob.py` — pushes a `.dump` file to
+  Azure blob `db-backups` for offsite retention.
+- `deploy/jetstream/restore_pg_dump_to_compose_db.sh` — restores a `.dump`
+  file into the Jetstream VM compose DB (run on the Jetstream VM, not
+  locally). Destructive on canonical.
+- `deploy/jetstream/jetstream_pgvector_restore.sh` — sibling restore script
+  with pgvector-aware handling.
+
+§0 finding 4, §5 F8, §6.10, §9, and §11 row C7 were rewritten to use these
+corrected script names. The structural conclusions (no incremental flush
+mechanic; only coarse-grained dump-replace promotion exists) are unchanged
+— only the file paths were wrong.
+
+**Limitation (P9 / migration checklist completeness).** The original §6.10
+draft claimed to be "exhaustive against subagents 1 §D and 2 §A" but the
+Codex audit on commit 8e95253 found at least 16 in-tree
+`DatabaseConnectionV2(...)` constructor sites that subagent 2 §A had missed
+(notably under `scripts/` and the `pipeline/*.py` stage entry points).
+§6.10 was rewritten to: (a) drop the "exhaustive" claim, (b) include the
+missing sites grouped by intent, and (c) provide a re-derivation command
+(`rg "DatabaseConnectionV2\("` + `rg "create_engine\("`) so the list can be
+regenerated as the repo drifts. The migration plan is still actionable; the
+defect was in the documentation's confidence framing, not in the design.
 
 ---
 

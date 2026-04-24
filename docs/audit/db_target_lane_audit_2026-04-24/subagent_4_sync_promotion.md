@@ -6,6 +6,32 @@ Method: readonly explore subagent.
 
 ---
 
+> **ERRATA (added during Codex audit on commit 8e95253).** This raw report
+> references three script names that **do not exist in the repo at the time
+> of the audit**:
+>
+> - `scripts/restore_jetstream_db.py`
+> - `scripts/dump_jetstream_db.py`
+> - `scripts/sync_jetstream_to_local_via_dump_restore.py`
+>
+> The structural conclusions in this report (no incremental flush mechanic;
+> Online→Local is well-defended; Local→Online is only a manual dump-replace)
+> are **correct**, but the citations should be read as referring to the
+> following actual scripts at commit 8e95253:
+>
+> | Subagent 4 cited (wrong) | Actual repo path |
+> |---------------------------|-------------------|
+> | `scripts/restore_jetstream_db.py` | `deploy/jetstream/restore_pg_dump_to_compose_db.sh` (run on Jetstream VM) and `deploy/jetstream/jetstream_pgvector_restore.sh` |
+> | `scripts/dump_jetstream_db.py` | `scripts/dump_postgres_for_jetstream_migration.py` (with `--from-jetstream`) |
+> | `scripts/sync_jetstream_to_local_via_dump_restore.py` | `scripts/restore_pg_dump_to_local_docker.py` (paired with the dump script above) |
+>
+> The synthesis document (`AUDIT.md` §0 finding 4, §5 F8, §6.10, §9, §11
+> row C7, §12) has been updated to use the corrected names. This raw report
+> is preserved as-is for archival fidelity; do not propagate the wrong
+> script names from this file into new work.
+
+---
+
 ## A. Inventory of cross-database tools (script-by-script)
 
 ### Online → Local (read-only on Jetstream)

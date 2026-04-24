@@ -3,24 +3,35 @@
 ## Project Context
 Panel-based web application for running LLM inference experiments across multiple providers (Azure OpenAI, OpenAI, Hyperbolic) with PostgreSQL database and analytics.
 
-## Current Work Status
-- **Active Work**: Analysis/Experimentation workflows in `notebooks/` (including archived notebook variants)
-- **Development Status (current)**: See `docs/living/CURRENT_STATE.md`
-- **Historical roadmap context**: `docs/IMPLEMENTATION_PLAN.md` (phased chronology)
+## Source of Truth (binding)
 
-## Key Documentation
-- **Docs Navigation**: `docs/README.md` - living/runbook/history/deprecated routing
+The single source of truth for which docs an agent may consult is
+`.cursor/rules/living-docs-only.mdc` (always-on). It enumerates the **living
+set**, maps each living doc to the code surface it governs, and lists the
+**restricted set** (history/deprecated/plans) that must not be opened without
+explicit user instruction. Do not duplicate or override that table here.
+
+## Current Work Status
+- **Active Work**: Analysis/Experimentation workflows in `notebooks/`
+- **Development Status (current)**: See `docs/living/CURRENT_STATE.md`
+
+## Key Documentation (living-only quick links)
+- **Docs Navigation**: `docs/README.md` - living/runbook/history/deprecated taxonomy
 - **Current Status**: `docs/living/CURRENT_STATE.md`
 - **Current Architecture**: `docs/living/ARCHITECTURE_CURRENT.md`
+- **Current API Surface**: `docs/living/API_CURRENT.md`
 - **Canonical Data Pipeline**: `docs/DATA_PIPELINE.md`
 - **Five-stage pipeline contract**: `acquire -> parse -> snapshot -> embed -> analyze` (full-matrix embed; non-full representations derived in analyze)
-- **Historical Architecture**: `docs/ARCHITECTURE.md`
-- **Jetstream: PC → Postgres SSH tunnel** (local `DATABASE_URL` via forward): `deploy/jetstream/LOCAL_DEV_TUNNEL.md`
-- **Clone Jetstream DB into local Docker** (backup local, `pg_dump` Jetstream, restore): `docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`
-- **Coding Rules**: `.cursorrules` - Detailed technical conventions (Cursor-specific)
-- **Git identity guardrail**: `.cursor/rules/git-identity-shell-guardrail.mdc` - Windows cross-shell commit identity checks
-- **Contributing**: `CONTRIBUTING.md` - Development process and guidelines
-- **Standing Orders**: `docs/STANDING_ORDERS.md` - Consistency guidelines
+- **Scheduling/provenance boundary**: `docs/living/SCHEDULING_PROVENANCE_BOUNDARY.md`
+- **Method recipes**: `docs/living/METHOD_RECIPES.md`
+- **DB ops entrypoint**: `docs/runbooks/README.md`
+- **Jetstream PC -> Postgres SSH tunnel**: `deploy/jetstream/LOCAL_DEV_TUNNEL.md`
+- **Clone Jetstream DB into local Docker**: `docs/LOCAL_DB_CLONE_FROM_JETSTREAM.md`
+- **Coding Rules**: `.cursorrules` - technical conventions (no source-of-truth duplication)
+- **Living-docs gate**: `.cursor/rules/living-docs-only.mdc` - binding doc<->code map and restricted set
+- **Git identity guardrail**: `.cursor/rules/git-identity-shell-guardrail.mdc`
+- **Contributing**: `CONTRIBUTING.md`
+- **Standing Orders**: `docs/STANDING_ORDERS.md`
 
 ## Local development
 - **`.venv`:** `python -m venv .venv`, activate, then `pip install -e ".[dev]"`.

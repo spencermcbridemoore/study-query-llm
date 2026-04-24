@@ -1,14 +1,23 @@
 # Study Query LLM - AI Assistant Rules
 
-## Source of Truth
-- **Implementation Status**: Always check `docs/living/CURRENT_STATE.md` for current behavior/capability status
-- **Architecture Decisions**: Refer to `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns and layer responsibilities
-- **Historical Roadmap**: `docs/IMPLEMENTATION_PLAN.md` is historical phased context
-- **Parity Evidence**: Use `docs/review/DOC_PARITY_LEDGER.md` for doc-claim verification status
+## Source of Truth (binding)
+
+The single source of truth for which docs an agent may consult is
+`.cursor/rules/living-docs-only.mdc` (always-on). It enumerates the **living
+set**, maps each living doc to the code surface it governs, and lists the
+**restricted set** (history/deprecated/plans) that must not be opened without
+explicit user instruction. Do not duplicate or override that table here.
+
+Quick pointers:
+- Implementation status: `docs/living/CURRENT_STATE.md`
+- Current architecture: `docs/living/ARCHITECTURE_CURRENT.md`
+- Current API surface: `docs/living/API_CURRENT.md`
+- Pipeline contract: `docs/DATA_PIPELINE.md`
+- Parity evidence: `docs/review/DOC_PARITY_LEDGER.md`
 
 ## Code Style & Conventions
 - Use `encoding='utf-8'` in all Python file operations (open, read_text, write_text) for Windows compatibility
-- Follow bottom-up, incremental development approach (historical philosophy in `docs/IMPLEMENTATION_PLAN.md`)
+- Follow bottom-up, incremental development approach
 - Each component must be testable in isolation
 - Use async/await for all I/O operations (LLM API calls, database operations)
 - Services receive dependencies via constructor injection (no global state)
@@ -54,8 +63,8 @@
 - Documentation: `docs/` - All project documentation
 
 ## Database Schema
-- **v1 schema**: Legacy schema (see Phase 3 in `docs/IMPLEMENTATION_PLAN.md`)
-- **v2 schema**: Current immutable schema (see Phase 7.1 in `docs/IMPLEMENTATION_PLAN.md`)
+- **v1 schema**: Legacy schema (compatibility only)
+- **v2 schema**: Current immutable schema (see `docs/living/ARCHITECTURE_CURRENT.md` and `docs/living/CURRENT_STATE.md`)
 - Always use v2 schema (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`) for new features
 - v2 schema includes: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `EmbeddingVector`, `GroupLink`
 
@@ -64,7 +73,7 @@
 2. Verify architecture alignment with `docs/living/ARCHITECTURE_CURRENT.md`
 3. Check if similar functionality already exists
 4. Ensure tests exist or plan to add them
-5. Consider impact on both living docs and historical context docs
+5. Update only living docs (see `.cursor/rules/living-docs-only.mdc`); do not edit history/deprecated/plans without explicit user instruction
 
 ## Key Design Patterns
 - **Provider Layer**: Abstract base class `BaseLLMProvider` with standardized `ProviderResponse`
@@ -82,4 +91,4 @@
 ## Algorithm Development
 - Core algorithms in `src/study_query_llm/algorithms/` with minimal dependencies (numpy/scipy only)
 - Notebooks/scripts can use algorithms but algorithms should not depend on DB/LLM layers
-- Use provenance service for tracking algorithm runs (see Phase 7.8 in `docs/IMPLEMENTATION_PLAN.md`)
+- Use provenance service for tracking algorithm runs (see `docs/living/SCHEDULING_PROVENANCE_BOUNDARY.md`)

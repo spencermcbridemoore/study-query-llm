@@ -2,29 +2,36 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-18
+Last reviewed: 2026-04-24
 
 This document establishes consistent practices for all development work on this project, ensuring that multiple developers (human or AI) maintain consistency in planning, implementation, and documentation.
 
 ## Planning Consistency
 
 ### Primary Source of Truth
+
+The binding doc-to-code map and the restricted-reading list (history,
+deprecated, plans, experiments) live in `.cursor/rules/living-docs-only.mdc`
+(always-on). That rule is authoritative; the bullets below are a quick
+reference, not a replacement.
+
 - **`docs/living/CURRENT_STATE.md`** is authoritative for "what currently exists/works."
 - **`docs/living/ARCHITECTURE_CURRENT.md`** is authoritative for current architecture.
 - **`docs/DATA_PIPELINE.md`** is authoritative for the five-stage data pipeline contract.
-- **`docs/IMPLEMENTATION_PLAN.md`** and **`docs/ARCHITECTURE.md`** are historical/roadmap context unless explicitly updated as current.
+- **`docs/living/API_CURRENT.md`** is authoritative for the current public API surface.
 - **`docs/review/DOC_PARITY_LEDGER.md`** is the evidence ledger for doc-to-code parity claims.
+- **`docs/IMPLEMENTATION_PLAN.md`** and **`docs/ARCHITECTURE.md`** are historical context only and must not be opened to drive current implementation work without explicit user instruction (see the restricted set in `.cursor/rules/living-docs-only.mdc`).
 
 ### Before Starting Work
 1. **Always check `docs/living/CURRENT_STATE.md`** for current capabilities
-2. Verify your work aligns with the documented phases
+2. Verify your work aligns with the living docs that govern the affected code surface (see binding table in `.cursor/rules/living-docs-only.mdc`)
 3. Check if similar functionality already exists
 4. Review `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns
 
 ### After Completing Work
 1. **Immediately update living docs** that changed (`CURRENT_STATE`, current architecture/API, runbooks as needed)
 2. Update `docs/review/DOC_PARITY_LEDGER.md` when significant claims change
-3. Update historical docs only when preserving chronology/context
+3. Do **not** edit historical or deprecated docs unless the user explicitly requests it
 4. Ensure tests are written and passing
 
 ### Plan File Management (Cursor-specific)
@@ -36,7 +43,7 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 ## Code Consistency
 
 ### Development Approach
-- **Bottom-up, incremental development** (see IMPLEMENTATION_PLAN.md philosophy)
+- **Bottom-up, incremental development**
 - Each component must be **testable in isolation**
 - Components are **independent of layers above them**
 - Natural dependency order (no circular dependencies)
@@ -68,11 +75,10 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 4. Update `docs/living/ARCHITECTURE_CURRENT.md` if design changed
 
 **When adding new features:**
-1. Check if it fits existing phases or needs new phase
-2. Document in `docs/living/CURRENT_STATE.md` and route from `docs/README.md`
-3. Update `docs/living/ARCHITECTURE_CURRENT.md` if architectural change
-4. Update `README.md` features list when user-facing behavior changes
-5. Update `docs/living/API_CURRENT.md` if public API changed
+1. Document in `docs/living/CURRENT_STATE.md` and route from `docs/README.md`
+2. Update `docs/living/ARCHITECTURE_CURRENT.md` if architectural change
+3. Update `README.md` features list when user-facing behavior changes
+4. Update `docs/living/API_CURRENT.md` if public API changed
 
 **When changing architecture:**
 1. Update `docs/living/ARCHITECTURE_CURRENT.md` with new patterns/decisions
@@ -80,15 +86,20 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 3. Update code docstrings to reflect changes
 4. Update `README.md`/`docs/README.md` routing if user-facing doc entrypoints changed
 
-### Documentation Files
+### Documentation Files (living + repo-root only)
+
+For the binding doc-to-code map and the restricted list (history, deprecated, plans, experiments), see `.cursor/rules/living-docs-only.mdc`.
+
 - **`docs/README.md`**: Documentation routing and taxonomy
 - **`docs/living/CURRENT_STATE.md`**: Authoritative current capabilities
 - **`docs/living/ARCHITECTURE_CURRENT.md`**: Current architecture reference
 - **`docs/DATA_PIPELINE.md`**: Canonical five-stage pipeline contract and operator acceptance checks
 - **`docs/living/API_CURRENT.md`**: Current API quick reference
+- **`docs/living/SCHEDULING_PROVENANCE_BOUNDARY.md`**: Job-vs-stage decision rule
+- **`docs/living/METHOD_RECIPES.md`**: Composite method recipe spec
+- **`docs/living/PLOT_CONVENTIONS.md`**: Active plot/figure conventions
 - **`docs/USER_GUIDE.md`**: End-user guide (v2-first)
-- **`docs/IMPLEMENTATION_PLAN.md`**: Historical phased roadmap
-- **`docs/ARCHITECTURE.md`**: Historical architecture narrative
+- **`docs/runbooks/README.md`**: Operator workflow + DB URL contract entrypoint
 - **`README.md`**: Project overview and quickstart
 - **`SECURITY.md`**: Security guidelines
 - **`CONTRIBUTING.md`**: Contributor guidelines
@@ -110,8 +121,8 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 ## Database Schema Consistency
 
 ### Schema Versions
-- **v1 schema**: Legacy schema (Phase 3) - `models.py`, `connection.py`, `inference_repository.py`
-- **v2 schema**: Current immutable schema (Phase 7.1) - `models_v2.py`, `connection_v2.py`, `raw_call_repository.py`
+- **v1 schema**: Legacy schema (compatibility only) - `models.py`, `connection.py`, `inference_repository.py`
+- **v2 schema**: Current immutable schema - `models_v2.py`, `connection_v2.py`, `raw_call_repository.py` (see `docs/living/ARCHITECTURE_CURRENT.md`)
 
 ### Schema Usage Rules
 - **Always use v2 schema for new features**
@@ -188,7 +199,7 @@ Rules:
 ### Algorithm Usage
 - Notebooks/scripts can use algorithms
 - Algorithms should be testable in isolation
-- Use provenance service for tracking runs (Phase 7.8)
+- Use provenance service for tracking runs (see `docs/living/SCHEDULING_PROVENANCE_BOUNDARY.md`)
 
 ## Project Structure Consistency
 

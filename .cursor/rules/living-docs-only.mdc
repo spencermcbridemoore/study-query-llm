@@ -1,0 +1,82 @@
+---
+description: Bind code work to a fixed set of living docs; forbid implicit research into history/deprecated/plans
+alwaysApply: true
+---
+
+# Living-Docs-Only Source-of-Truth Gate
+
+This rule binds the code-as-implemented to a fixed set of **living documents**.
+It is the single source of truth for which docs an agent may consult by default,
+and supersedes any other doc-routing guidance in `.cursorrules`, `AGENTS.md`,
+or `docs/STANDING_ORDERS.md` if those drift.
+
+## Living Set (binding to code)
+
+The authoritative enumeration lives in `docs/README.md` under the **Living**
+heading. Each living doc binds to the code surface it governs:
+
+| Living document | Owned code surface |
+|---|---|
+| `docs/living/CURRENT_STATE.md` | Capability/status mirror across everything below; cite when describing "what currently works" |
+| `docs/living/ARCHITECTURE_CURRENT.md` | `src/study_query_llm/` layer responsibilities, `panel_app/` |
+| `docs/living/API_CURRENT.md` | `src/study_query_llm/services/`, `providers/`, `db/raw_call_repository.py`, `cli` |
+| `docs/DATA_PIPELINE.md` | `src/study_query_llm/pipeline/` (`acquire`/`parse`/`snapshot`/`embed`/`analyze`, `runner.py`) and stage idempotency contracts |
+| `docs/living/SCHEDULING_PROVENANCE_BOUNDARY.md` | `src/study_query_llm/services/jobs/`, `services/provenanced_run_service.py`, `services/provenance_service.py` |
+| `docs/living/METHOD_RECIPES.md` | `src/study_query_llm/algorithms/recipes.py`, `algorithms/canonical_configs.py`, clustering composites |
+| `docs/living/PLOT_CONVENTIONS.md` | Plot/figure generation in scripts and notebooks |
+| `docs/USER_GUIDE.md` | `panel_app/`, end-user `python -m study_query_llm.cli` flows |
+| `docs/STANDING_ORDERS.md` | Project-wide dev process (cross-cutting; no single code path) |
+| `docs/DESIGN_FLAWS.md` | Cross-cutting flaw register (advisory) |
+| `docs/runbooks/README.md` | `scripts/`, `deploy/jetstream/`, env-var contracts (`DATABASE_URL`, `JETSTREAM_DATABASE_URL`, `LOCAL_DATABASE_URL`, `SOURCE_DATABASE_URL`) |
+
+Parity evidence layer (not a primary source itself):
+`docs/review/DOC_PARITY_LEDGER.md`.
+
+## Default Allowed Reading (no permission needed)
+
+- Anything under `docs/living/` and `docs/runbooks/`
+- `docs/README.md`, `docs/STANDING_ORDERS.md`, `docs/DATA_PIPELINE.md`,
+  `docs/DESIGN_FLAWS.md`, `docs/USER_GUIDE.md`
+- `docs/review/DOC_PARITY_LEDGER.md`
+- Repo-root: `README.md`, `AGENTS.md`, `.cursorrules`, `CONTRIBUTING.md`, `SECURITY.md`
+- All code: `src/`, `tests/`, `panel_app/`, `scripts/`, `deploy/`, `notebooks/`
+
+## Restricted Reading (requires explicit user instruction)
+
+Do **not** open these to inform current implementation work unless the user
+explicitly asks for historical, migration, or deprecated context. The
+"History" and "Deprecated" sections of `docs/README.md` are authoritative for
+membership. Confirmed restricted paths today:
+
+- `docs/history/**`
+- `docs/deprecated/**`
+- `docs/plans/**` (archived planning framework)
+- `docs/experiments/**`
+- `docs/IMPLEMENTATION_PLAN.md` (historical phased roadmap)
+- `docs/ARCHITECTURE.md` (legacy v1 architecture)
+- `docs/API.md` (deprecated; replaced by `docs/living/API_CURRENT.md`)
+- `docs/MIGRATION_GUIDE.md` (deprecated)
+- `docs/PHASE1_5_VERIFICATION.md`
+- `docs/PLOT_ORGANIZATION.md`
+
+## Rules
+
+1. **Bind first.** For any code-affecting task, read the living doc(s) that
+   govern the affected code surface (see table) before implementing.
+2. **No implicit history/deprecated/plans research.** When a living doc is
+   silent or insufficient, **stop and ask the user** whether to consult
+   restricted material. Do not preemptively open it. Do not summarize from
+   it without permission.
+3. **Cite the binding.** When a change touches a code surface in the table,
+   name the living doc you relied on and update it (plus
+   `docs/review/DOC_PARITY_LEDGER.md` when claims change). The update
+   checklist lives in `docs/STANDING_ORDERS.md` § "Documentation Sync Process".
+4. **No silent promotion.** Do not treat any path outside the table as
+   authoritative. To add a doc to the living set, edit `docs/README.md`
+   "Living" first, then update this table.
+5. **Restricted-set exception.** If the user's request is itself about
+   history, migration, or deprecation (for example, "what changed since v1?"
+   or "why was X removed?"), the restricted set is in scope for that task only.
+6. **Code-first verification.** When living docs and code disagree, treat
+   the code as ground truth, flag the drift to the user, and propose a living-doc
+   update rather than rewriting code to match stale docs.

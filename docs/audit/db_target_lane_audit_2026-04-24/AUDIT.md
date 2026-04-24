@@ -541,6 +541,31 @@ removes that ambiguity by failing closed instead of guessing. The exception
 message names both URLs (with passwords masked) and tells the operator to
 unset whichever one is wrong.
 
+**Conflict-rule caveat (added per Codex audit pass 2): the comparison is
+literal.** `same_db_target` parses each URL and compares the resulting
+`(host, port, dbname)` triple as opaque strings; it does **not** resolve
+aliases. In particular, the two URLs
+
+- `postgresql://…@127.0.0.1:5434/study_query_jetstream?sslmode=prefer`
+  (an SSH-tunneled URL pointing at a local-loopback port that forwards
+  to canonical Jetstream — exactly what `scripts/start_jetstream_postgres_tunnel.py` produces and what §3 used to run the live count), **and**
+- `postgresql://…@<jetstream-public-host>:5432/study_query_jetstream`
+  (the direct public URL),
+
+will compare as **different** even though they target the same physical
+database. Likewise, two DNS aliases for the same host
+(`db.internal` vs `db-primary.internal`) compare as different. The conflict
+rule will **false-fail** in those cases. Operator guidance during the
+back-compat window: set **only one** of `CANONICAL_DATABASE_URL` and
+`JETSTREAM_DATABASE_URL` (preferably `CANONICAL_DATABASE_URL`) and let
+the other remain unset; if both must be set transiently (e.g. during a
+shell-history migration), make sure they are byte-for-byte identical.
+A future enhancement could resolve loopback / hostname aliases via DNS
++ `pg_hba`/`pg_stat_activity` cross-check, but that is out of MVP scope
+because the operator-discipline workaround is cheap and the misfire
+mode (loud `CanonicalIdentityConflict` at startup) is fail-closed and
+recoverable.
+
 **Why split them:**
 - The destructive-DDL guard at `_base_connection.py:147-172` is currently the
   *only* place the proper noun "Jetstream" leaks into library code. Splitting
@@ -726,11 +751,19 @@ without blocking writes mid-migration.
 Two new CI jobs:
 
 1. **Static check — connection-construction policy.** Lint that every
-   non-test, non-script construction of `DatabaseConnectionV2` /
-   `BaseDatabaseConnection` passes `write_intent=`. Implemented as a
-   ruff/flake8 plugin, or as a targeted regex-based pytest under
-   `tests/static/test_db_connection_intent.py`. Subagent 1 §D's enumeration of
-   bypass sites (`scripts/purge_dataset_acquisition.py:161-162`,
+   construction of `DatabaseConnectionV2` / `BaseDatabaseConnection` and
+   every direct `create_engine(...)` call in the **runtime tree** (per
+   §6.10's "Scope of this checklist" — `src/`, `panel_app/`, `scripts/`
+   (excluding `scripts/history/`), `experiments/`, `deploy/`) passes
+   `write_intent=`. Implemented as a ruff/flake8 plugin, or as a targeted
+   regex-based pytest under `tests/static/test_db_connection_intent.py`.
+   The `_base_connection.py:107` `create_engine` call is the chokepoint
+   itself and is the **only** allow-listed direct `create_engine` site
+   inside the runtime tree (per §6.10 §G); all other allow-listed paths
+   live outside the runtime tree (`tests/**` covered by §6.7 fixture,
+   `docs/audit/**` audit probes, `scripts/history/**` frozen archives,
+   `notebooks/**` covered separately, untracked scratch). Subagent 1 §D's
+   enumeration of bypass sites (`scripts/purge_dataset_acquisition.py:161-162`,
    `scripts/check_active_workers.py:83-84`, etc.) is the authoritative list of
    call sites that must be migrated.
 2. **Live check — canonical-lane URI shape.** Promote `live_count.py` (this
@@ -772,27 +805,61 @@ Per subagent 6 §C:
 
 ### 6.9 Phasing & rollback
 
-> **Minimum-viable shipment (MVP) — revised per Codex audit.** Phase 0 +
-> Phase 1 (a/b/c) + Phase 3 + §7 remediation = the only items strictly
-> required to close the architectural defect. Phase 0 introduces the modules;
-> Phase 1 wires the chokepoint and banner so **every future write through the
-> chokepoint is gated by an explicit `WriteIntent`**; Phase 3 adds a Postgres
-> `CHECK ... NOT VALID` constraint that catches the **direct-engine bypass
-> sites** (subagent 1 §D enumerates eight such sites that do not flow through
-> `BaseDatabaseConnection`); §7 cleans up the existing 11 polluted rows.
-> Phases 2 and 4–7 deepen the protections (artifact-backend coupling, validate
-> the constraint, sentinel index, CI, tests, docs) and can be
-> calendar-sequenced over weeks without losing the primary safety property.
+> **Minimum-viable shipment (MVP) — scoped per Codex audit pass 2.**
+> Phase 0 + Phase 1 (a/b/c) + Phase 3 + §7 remediation = the only items
+> strictly required to close the **observed** pollution defect (the 11
+> stranded `call_artifacts` rows in §3 and any future writes through the
+> same code path). The MVP claim is deliberately **scoped to the
+> `call_artifacts.uri` surface and its `raw_calls.response_json[uri]`
+> mirror**; broader URI-column coverage is post-MVP.
 >
-> The Codex audit's specific objection: shipping MVP **without** Phase 3
-> leaves a gap until the static-check CI in Phase 6 lands and every bypass
-> site in §6.10 is migrated — during that window, a misbehaving direct-engine
-> caller can still pollute `call_artifacts.uri` with non-blob strings. Phase 3
-> closes that gap at the database level with a `NOT VALID` constraint that
-> only checks new inserts (so it is safe to add against a polluted table) and
-> can be flipped to `VALIDATE CONSTRAINT` after §7 remediation completes.
+> What MVP closes, by surface:
 >
-> If you only ship one bundle, ship MVP = **0 + 1 + 3 + §7** in that order.
+> - **`call_artifacts.uri` (primary surface — all 11 polluted rows live
+>   here):** Phase 1 gates the connection layer (chokepoint refuses
+>   canonical-lane sessions without `WriteIntent.CANONICAL`) and Phase 3
+>   adds a Postgres `CHECK` at the database layer. Defect class closed at
+>   two altitudes.
+> - **`raw_calls.response_json[uri]` (mirror of `call_artifacts`):**
+>   covered **transitively** for writes that flow through `ArtifactService`.
+>   The placeholder `raw_call` insert at `services/artifact_service.py:432-440`
+>   and the paired `call_artifacts` insert at `:452-464` share a single
+>   `repository.session`; `RawCallRepository.insert_raw_call` only
+>   `flush()`es, never commits (`db/raw_call_repository.py:96-118`). A
+>   Phase 3 `CHECK` failure on the call_artifacts insert therefore rolls
+>   back the paired raw_calls placeholder in the same transaction. Coverage
+>   gap: a hypothetical future direct-engine writer that wrote
+>   `raw_calls.response_json[uri]` **without** a paired `call_artifacts`
+>   row would not be caught by Phase 3. No such caller exists today
+>   (subagent 2 §A's writer inventory has no direct `raw_calls` insert
+>   outside `ArtifactService` / `RawCallRepository`); Phase 5's sentinel
+>   index covers the case post-hoc.
+> - **Other artifact-bearing JSON columns**
+>   (`groups.metadata_json[artifact_uri]`, `analysis_results.result_json[uris]`,
+>   `provenanced_runs.result_ref`, `orchestration_jobs.result_ref`): MVP
+>   adds **no DB-layer enforcement** on these columns. Coverage in MVP is
+>   Phase 1 only — the chokepoint blocks any session whose declared
+>   `WriteIntent` does not match the resolved lane. §3.3 confirms these
+>   columns currently hold **zero** URIs in the canonical DB, so the
+>   residual risk is narrow: a future first-write that simultaneously
+>   (a) bypasses the chokepoint (one of the eight direct `create_engine`
+>   sites in subagent 1 §D, or a brand-new such site) **and** (b) targets
+>   one of these JSON paths. Phase 5 (sentinel index) catches the
+>   `raw_calls` analogue post-hoc; extending similar sentinels (or JSON
+>   `CHECK`/trigger constraints) to the other four columns is tracked as
+>   a follow-on RFC, not MVP.
+>
+> Phases 2 and 4–7 deepen the protections (artifact-backend coupling at
+> the service layer, `VALIDATE CONSTRAINT`, sentinel indexes, CI, test
+> hardening, docs) and can be calendar-sequenced over weeks without
+> losing the primary MVP safety property.
+>
+> If you only ship one bundle, ship MVP = **0 + 1 + 3 + §7** in that order
+> and document in the rollout note that (i) JSON-column protections beyond
+> `call_artifacts.uri` and its same-transaction `raw_calls` mirror are
+> Phase 5+ work, and (ii) the §6.10 chokepoint migration is the
+> long-pole on collapsing the direct-engine bypass surface that Phase 3
+> currently insures against.
 
 | Phase | What ships | Risk |
 |------|-----------|------|
@@ -815,15 +882,35 @@ which is a metadata-only operation.
 
 ### 6.10 Migration checklist for in-tree call sites
 
-Every in-tree `DatabaseConnectionV2(...)` constructor and every direct
-`create_engine(...)` site listed below must declare a `WriteIntent` after the
-chokepoint lands (§6.2). The list is **complete as of commit 8e95253** but
-not permanently exhaustive — repository drift will add new sites. To
-re-derive the current set at implementation time:
+#### Scope of this checklist
+
+Every **runtime-surface** in-tree `DatabaseConnectionV2(...)` constructor
+and every direct `create_engine(...)` site listed below must declare a
+`WriteIntent` after the chokepoint lands (§6.2). The list is **complete
+for runtime surfaces as of commit 8e95253** — but only for the runtime
+surfaces. To re-derive the current set at implementation time, scope the
+search to the runtime tree explicitly:
 
 ```bash
-rg "DatabaseConnectionV2\(" --type py
-rg "create_engine\(" --type py
+rg "DatabaseConnectionV2\(" \
+  -g 'src/**/*.py' \
+  -g 'panel_app/**/*.py' \
+  -g 'scripts/**/*.py' \
+  -g 'experiments/**/*.py' \
+  -g 'deploy/**/*.py' \
+  -g '!scripts/history/**' \
+  -g '!**/tests/**' \
+  -g '!docs/audit/**'
+
+rg "create_engine\(" \
+  -g 'src/**/*.py' \
+  -g 'panel_app/**/*.py' \
+  -g 'scripts/**/*.py' \
+  -g 'experiments/**/*.py' \
+  -g 'deploy/**/*.py' \
+  -g '!scripts/history/**' \
+  -g '!**/tests/**' \
+  -g '!docs/audit/**'
 ```
 
 The original draft of this section claimed exhaustiveness and was based on
@@ -831,14 +918,29 @@ subagent 2 §A; the Codex audit found additional sites that subagent 2 missed
 and one cited script (`scripts/restore_jetstream_db.py`) that does not exist.
 Both defects are corrected below — see §12 for the full provenance note.
 
-`scripts/history/**/*.py` and `notebooks/**/*.ipynb` are excluded by policy:
-history scripts are frozen archives per `.cursorrules` "living-docs-only" rule
-(if any of them are revived for active use they must be migrated before
-re-running); notebooks construct connections at cell-evaluation time and
-cannot be statically gated by import-time CI. The recommendation for
-notebooks is to expose three thin helpers (`get_canonical_db()`,
-`get_local_db()`, `get_sandbox_db()`) that internally set intent — tracked
-separately from MVP.
+**Explicitly out-of-scope** (these may use `DatabaseConnectionV2` /
+`create_engine` but must **not** be migrated by the chokepoint sweep, and
+the §6.6 CI lint must allow-list them):
+
+- `docs/audit/**` — read-only audit-doc probes. `docs/audit/db_target_lane_audit_2026-04-24/live_count.py:410` is the canonical example: it
+  intentionally uses raw `create_engine(...)` because the whole point of
+  the script is to bypass the chokepoint and probe the live DB without
+  any application-side machinery loaded. Migrating these to the
+  chokepoint would defeat their purpose.
+- `tests/**` — covered separately by §6.7 (a pytest fixture forces
+  `WriteIntent.SANDBOX` and a hard assertion that the resolved lane is
+  not `Lane.CANONICAL`).
+- `scripts/history/**/*.py` — frozen archives per `.cursorrules`
+  "living-docs-only" rule. If any of them are revived for active use
+  they must be migrated **before** re-running; running them as-is from
+  history is forbidden.
+- `notebooks/**/*.ipynb` — construct connections at cell-evaluation time
+  and cannot be statically gated by import-time CI. The recommendation
+  for notebooks is to expose three thin helpers (`get_canonical_db()`,
+  `get_local_db()`, `get_sandbox_db()`) that internally set intent —
+  tracked separately from MVP.
+- Local untracked scratch (e.g. `scratch/`, `local/`, anything outside
+  the runtime tree above) — out of scope by definition.
 
 #### A. Canonical writers (declare `WriteIntent.CANONICAL`)
 
@@ -929,8 +1031,11 @@ own intent.
 These are operator scripts whose write target is **outside** the database
 (blob, dump file). They read canonical and produce an artifact for offline
 review or restore. Declared intent depends on §10 Q8 resolution; the
-conservative default is `CANONICAL` with a session-level `read_only=True`
-flag once that flag exists.
+recommended follow-on (per pass-2 audit) is the new
+`WriteIntent.CANONICAL_READ_ONLY` enum value (option (a) in §10 Q8).
+Until that lands they should declare `WriteIntent.CANONICAL` with a code
+comment marking them as read-only canonical readers, and operator
+discipline must enforce the no-write contract.
 
 - `scripts/upload_jetstream_pg_dump_to_blob.py:50` (`create_engine`) — reads
   canonical for table-count manifest; writes to Azure blob.
@@ -1052,26 +1157,41 @@ working with our Jetstream database or a local database is unacceptable."*
 
 The proposed design eliminates ambiguity at every layer:
 
-| Layer | Today | After plan |
-|-------|-------|------------|
-| Connection construction | accepts any URL silently | refuses to construct without explicit `WriteIntent`; mismatch raises |
-| Banner | none | mandatory stderr banner naming lane + intent + artifact backend |
-| Artifact backend | independent of DB target | CANONICAL forces `azure_blob`; SDK errors fail closed |
-| Schema | no constraint on `uri` | canonical-lane `CHECK` rejects non-blob URIs |
-| CI | no live check | scheduled `verify_no_local_uris_on_canonical` job fails on any local path |
-| Tests | `setdefault` can be overridden by shell env | hard override + assertion that lane is non-`Lane.CANONICAL` |
-| Docs | aspirational | reference the actual `WriteIntent` mechanism |
+| Layer | Today | After full plan | In MVP? |
+|-------|-------|-----------------|---------|
+| Connection construction | accepts any URL silently | refuses to construct without explicit `WriteIntent`; mismatch raises | **Yes (Phase 1)** |
+| Banner | none | mandatory stderr banner naming lane + intent + artifact backend | **Yes (Phase 1)** |
+| Artifact backend | independent of DB target | CANONICAL forces `azure_blob`; SDK errors fail closed | No (Phase 2) |
+| Schema — `call_artifacts.uri` | no constraint | canonical-lane `CHECK` rejects non-blob URIs | **Yes (Phase 3)** |
+| Schema — `raw_calls.response_json[uri]` | no constraint | covered transitively via shared txn for ArtifactService writes; sentinel index for direct-engine writers | **Partial: txn-rollback in MVP; sentinel in Phase 5** |
+| Schema — other JSON URI columns (`groups.metadata_json`, `analysis_results.result_json`, `provenanced_runs.result_ref`, `orchestration_jobs.result_ref`) | no constraint | follow-on JSON `CHECK` / sentinel indexes per RFC | No (post-MVP) |
+| CI | no live check | scheduled `verify_no_local_uris_on_canonical` job fails on any local path | No (Phase 6) |
+| Tests | `setdefault` can be overridden by shell env | hard override + assertion that lane is non-`Lane.CANONICAL` | No (Phase 6) |
+| Docs | aspirational | reference the actual `WriteIntent` mechanism | No (Phase 7) |
 
 There is **no expectation of operator discipline** anywhere in the chain. An
-operator who tries to do the wrong thing gets:
+operator who tries to do the wrong thing gets, under the **full plan**:
 1. A loud banner saying what lane they're on, **before** any write.
 2. A type error on `WriteIntent` if they forgot to declare intent.
 3. A backend error if their declared CANONICAL intent doesn't get azure.
-4. A database constraint error if the wrong URI shape gets through.
+4. A database constraint error if the wrong URI shape gets through
+   (`call_artifacts.uri` always; other URI columns once the follow-on RFC
+   ships).
 5. A CI failure if any of the above are bypassed.
 
 That is the "no ambiguity" property the user asked for, encoded in five
 independently-failing safety layers.
+
+**MVP caveat (per §6.9).** The MVP shipment provides layers 1, 2, and 4
+for the `call_artifacts.uri` surface (with the `raw_calls.response_json[uri]`
+mirror covered transitively for `ArtifactService` writes via shared
+transaction). Layers 3 (artifact-backend coupling) and 5 (CI) plus the
+JSON-column extension of layer 4 are post-MVP work. Operationally, this
+means MVP closes the **observed defect** (the 11 stranded rows in §3 and
+any future writes through the same path) but leaves a narrow window in
+which a future direct-engine writer that targets a non-`call_artifacts`
+URI column could still pollute the canonical DB. §6.9 details why this
+scoping is acceptable given §3.3 (those columns are currently empty).
 
 ---
 
@@ -1100,13 +1220,23 @@ Justification:
    served** by the manual two-step:
    `pg_dump` (or `scripts/dump_postgres_for_jetstream_migration.py`)
    → human review of the dump → transfer the `.dump` file to the Jetstream
-   VM → run `deploy/jetstream/restore_pg_dump_to_compose_db.sh` (which calls
-   the related `deploy/jetstream/jetstream_pgvector_restore.sh` for the
-   pgvector-aware restore). That is a coarse-grained, dump-replace promotion
-   path, not a fine-grained merge, but it matches the actual workflow
-   described in `docs/runbooks/README.md`. (The earlier draft of this
-   section cited `dump_jetstream_db.py` and `restore_jetstream_db.py`; both
-   names are wrong — see §12.)
+   VM → restore on canonical via **either** of two operator-facing
+   scripts:
+   - `deploy/jetstream/jetstream_pgvector_restore.sh` (the high-level
+     wrapper — wipes the Postgres volume, starts the pgvector-enabled db,
+     **invokes `deploy/jetstream/restore_pg_dump_to_compose_db.sh`** at
+     line 80 to load the dump, verifies the `vector` extension, then
+     starts the app); **or**
+   - `deploy/jetstream/restore_pg_dump_to_compose_db.sh` directly (the
+     low-level restore step that the wrapper invokes — used when the
+     compose stack is already up and only the data needs to be replaced).
+   That is a coarse-grained, dump-replace promotion path, not a
+   fine-grained merge, but it matches the actual workflow described in
+   `docs/runbooks/README.md`. (The earlier draft of this section cited
+   `dump_jetstream_db.py` and `restore_jetstream_db.py`; both names are
+   wrong — see §12. The earlier draft of this section also had the
+   wrapper/wrappee call direction inverted — Codex audit pass 2 caught it
+   and the corrected direction is shown above.)
 
 If, after Phase 6, operators discover a real workflow that requires
 incremental promotion, that becomes a follow-on RFC. It is not blocking this
@@ -1125,7 +1255,7 @@ audit.
 | Q5 | Is the bank77_contrast snapshot lineage retrievable end-to-end? | Confirmed via `live_count_output.txt:24-34` — the `groups` rows referencing artifact ids 21–31 exist in Jetstream (subagent 2 §A confirms `groups` writes are routine). The remediation script can rebuild blob artifacts deterministically because `groups`/`group_links` are intact. |
 | Q6 | Do the same 11 artifacts exist in the local-clone DB? | Likely yes (the local clone was hydrated from Jetstream, which contained them). The local clone is unaffected by the §6.5 constraint because it is added only when `Lane.CANONICAL`. |
 | Q7 | Could the same defect have produced legacy `inference_runs` rows in v1 schema? | No. v1's `InferenceRun` has no artifact URI columns (subagent 3 §D, "Legacy `models.py`"). |
-| Q8 | The current `WriteIntent` vocabulary (`CANONICAL` / `READ_MIRROR` / `SANDBOX`) cannot cleanly express "this script reads the canonical lane to produce an external artifact (blob upload, dump file, audit report) and never writes to it." Examples: `scripts/upload_jetstream_pg_dump_to_blob.py:50`, `scripts/backup_mcq_db_to_json.py:255`, the online engine in `scripts/sync_from_online.py:290`, the canonical engine in `scripts/verify_db_backup_inventory.py:55`, and the §6.6 verifier scripts themselves. Today, declaring `READ_MIRROR` against a canonical URL would (correctly) raise `LaneIntentMismatch` per §6.1. | Out of MVP. Two options for a follow-on: **(a)** add a fourth intent `CANONICAL_READ_ONLY` whose `_ALLOWED_LANES_BY_INTENT` is `{Lane.CANONICAL}` and which sets `engine = create_engine(url, isolation_level="AUTOCOMMIT", execution_options={"postgresql_readonly": True})`, or **(b)** keep three intents and add a `read_only: bool = False` kwarg to `BaseDatabaseConnection.__init__` that flips the same Postgres session flags and that the chokepoint requires when `intent=CANONICAL` and the caller is in the §6.6 allow-list of "canonical readers." Recommendation: **(b)** — fewer enum values to plumb through CI, and the read-only flag is independently useful for accidental-write protection. Either way, the MVP plan is unaffected: until Q8 lands, the affected scripts in §6.10 §B and §6.10 §E should stay declared as `CANONICAL` with operator discipline (no writes), exactly as they behave today. |
+| Q8 | The current `WriteIntent` vocabulary (`CANONICAL` / `READ_MIRROR` / `SANDBOX`) cannot cleanly express "this script reads the canonical lane to produce an external artifact (blob upload, dump file, audit report) and never writes to it." Examples: `scripts/upload_jetstream_pg_dump_to_blob.py:50`, `scripts/backup_mcq_db_to_json.py:255`, the online engine in `scripts/sync_from_online.py:290`, the canonical engine in `scripts/verify_db_backup_inventory.py:55`, and the §6.6 verifier scripts themselves. Today, declaring `READ_MIRROR` against a canonical URL would (correctly) raise `LaneIntentMismatch` per §6.1. | Out of MVP. Two options for a follow-on: **(a)** add a fourth intent `CANONICAL_READ_ONLY` whose `_ALLOWED_LANES_BY_INTENT` is `{Lane.CANONICAL}` and which sets `engine = create_engine(url, isolation_level="AUTOCOMMIT", execution_options={"postgresql_readonly": True})`, or **(b)** keep three intents and add a `read_only: bool = False` kwarg to `BaseDatabaseConnection.__init__` that flips the same Postgres session flags and that the chokepoint requires when `intent=CANONICAL` and the caller is in the §6.6 allow-list of "canonical readers." **Recommendation (revised per Codex audit pass 2): (a)** — `CANONICAL_READ_ONLY` is a single first-class enum value that the §6.6 CI lint can match exactly (`grep WriteIntent.CANONICAL_READ_ONLY` is a one-line policy check). Option (b) creates a 3×2 intent×read-only matrix in which only certain combinations are valid (`READ_MIRROR + read_only=True` is meaningless, `SANDBOX + read_only=True` is meaningless, `CANONICAL + read_only=False` is the existing canonical writer), and the chokepoint would have to enforce a more complex rule of the form "if intent=CANONICAL and caller is in `CANONICAL_READERS_ALLOWLIST`, then read_only must be True" — strictly more surface area than option (a). Option (a) also keeps `WriteIntent` as the single concept that callers reason about, mirroring the role/identity discipline of §6.0. Either way, the MVP plan is unaffected: until Q8 lands, the affected scripts in §6.10 §B and §6.10 §E should stay declared as `CANONICAL` with operator discipline (no writes), exactly as they behave today. |
 
 ---
 
@@ -1158,7 +1288,7 @@ ensures no claim is unsupported.
 | P6 — CI enforcement | §6.6 | based on subagent 1 §D + L1 |
 | P7 — Test isolation hardening | §6.7 | subagent 5 §E |
 | P8 — Doc updates | §6.8 | subagent 6 §C |
-| P9 — Migration checklist | §6.10 | subagent 1 §D + subagent 2 §A + Codex audit additions: re-derived via `rg "DatabaseConnectionV2\("` and `rg "create_engine\("` against commit 8e95253; subagent 2 §A's "exhaustive" claim was incorrect (missed at least 16 sites in `scripts/`, the `pipeline/snapshot.py` constructor, and `analysis/mcq_analyze_request.py`). Stale citation `scripts/restore_jetstream_db.py` removed. See §12. |
+| P9 — Migration checklist | §6.10 | subagent 1 §D + subagent 2 §A + Codex audit additions: re-derived via runtime-scoped `rg "DatabaseConnectionV2\("` and `rg "create_engine\("` (scope flags shown in §6.10 — `-g 'src/**/*.py' -g 'panel_app/**/*.py' -g 'scripts/**/*.py' -g 'experiments/**/*.py' -g 'deploy/**/*.py' -g '!scripts/history/**' -g '!**/tests/**' -g '!docs/audit/**'`) against commit 8e95253; subagent 2 §A's "exhaustive" claim was incorrect (missed at least 16 sites in `scripts/`, the `pipeline/snapshot.py` constructor, and `analysis/mcq_analyze_request.py`). Stale citation `scripts/restore_jetstream_db.py` removed. The `docs/audit/**` exclusion in the re-derivation prevents `docs/audit/db_target_lane_audit_2026-04-24/live_count.py:410` from showing up as a false positive. See §12. |
 | R1 — 11-row remediation | §7 | live_count_output.txt:24-34 |
 | R2 — Failure handling for missing files | §7 | subagent 2 §A `data_quality_service` row + general repo patterns |
 
@@ -1212,27 +1342,54 @@ that implement the canonical-side dump/restore workflow are:
   into the local Docker Postgres.
 - `scripts/upload_jetstream_pg_dump_to_blob.py` — pushes a `.dump` file to
   Azure blob `db-backups` for offsite retention.
-- `deploy/jetstream/restore_pg_dump_to_compose_db.sh` — restores a `.dump`
-  file into the Jetstream VM compose DB (run on the Jetstream VM, not
-  locally). Destructive on canonical.
-- `deploy/jetstream/jetstream_pgvector_restore.sh` — sibling restore script
-  with pgvector-aware handling.
+- `deploy/jetstream/restore_pg_dump_to_compose_db.sh` — low-level restore
+  step: restores a `.dump` file into the Jetstream VM compose DB (run on
+  the Jetstream VM, not locally). Destructive on canonical. Can be
+  invoked directly when the compose stack is already up.
+- `deploy/jetstream/jetstream_pgvector_restore.sh` — high-level wrapper
+  for a fresh restore on the Jetstream VM. Stops the compose stack,
+  removes the Postgres volume, starts the pgvector-enabled db,
+  **invokes `restore_pg_dump_to_compose_db.sh`** (line 80) to load the
+  dump, verifies the `vector` extension, then starts the app. This is
+  the operator-facing entry point for full restores.
 
 §0 finding 4, §5 F8, §6.10, §9, and §11 row C7 were rewritten to use these
 corrected script names. The structural conclusions (no incremental flush
 mechanic; only coarse-grained dump-replace promotion exists) are unchanged
 — only the file paths were wrong.
 
+**Codex audit pass 2 follow-up.** The first pass-1 fix introduced a
+secondary defect in §9: it described `restore_pg_dump_to_compose_db.sh`
+as calling `jetstream_pgvector_restore.sh`, which is the inverse of the
+actual call direction shown in `jetstream_pgvector_restore.sh:66,80`. §9
+was rewritten in pass 2 to reflect the correct wrapper-invokes-restore
+direction, and the pass-2 §12 entry above documents both scripts'
+relationship explicitly so the inversion is harder to reintroduce.
+
 **Limitation (P9 / migration checklist completeness).** The original §6.10
 draft claimed to be "exhaustive against subagents 1 §D and 2 §A" but the
 Codex audit on commit 8e95253 found at least 16 in-tree
 `DatabaseConnectionV2(...)` constructor sites that subagent 2 §A had missed
 (notably under `scripts/` and the `pipeline/*.py` stage entry points).
-§6.10 was rewritten to: (a) drop the "exhaustive" claim, (b) include the
-missing sites grouped by intent, and (c) provide a re-derivation command
-(`rg "DatabaseConnectionV2\("` + `rg "create_engine\("`) so the list can be
-regenerated as the repo drifts. The migration plan is still actionable; the
-defect was in the documentation's confidence framing, not in the design.
+§6.10 was rewritten in pass 1 to: (a) drop the "exhaustive" claim,
+(b) include the missing sites grouped by intent, and (c) provide a
+re-derivation command (`rg "DatabaseConnectionV2\("` +
+`rg "create_engine\("`) so the list can be regenerated as the repo drifts.
+The migration plan is still actionable; the defect was in the documentation's
+confidence framing, not in the design.
+
+**Pass 2 follow-up (Codex audit pass 2).** The pass-1 re-derivation `rg`
+commands were unscoped (`--type py` over the whole repo), which would
+have surfaced false positives such as
+`docs/audit/db_target_lane_audit_2026-04-24/live_count.py:410` — an
+audit-doc probe that intentionally bypasses the chokepoint to read the
+live DB. §6.10 was rewritten in pass 2 to (a) restrict the scope of the
+checklist to "runtime surfaces" only, (b) attach `-g` glob filters to
+the re-derivation commands so they search only the runtime tree, and
+(c) add an explicit out-of-scope list (`docs/audit/**`, `tests/**`,
+`scripts/history/**`, `notebooks/**`, untracked scratch directories)
+with the rationale for each exclusion. The §6.6 CI lint inherits the
+same scope: only runtime surfaces are checked for chokepoint compliance.
 
 ---
 

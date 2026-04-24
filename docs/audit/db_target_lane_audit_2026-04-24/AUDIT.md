@@ -60,17 +60,20 @@ of local-filesystem URIs in Jetstream's canonical artifact tables.
 6. **Recommended fix (synthesised across subagent findings):** introduce a
    `WriteIntent` enum (`CANONICAL`, `READ_MIRROR`, `SANDBOX`) and a single
    mandatory chokepoint inside `BaseDatabaseConnection.__init__` that:
-   - resolves `connection_string` against `JETSTREAM_DATABASE_URL` /
-     `LOCAL_DATABASE_URL` to determine the actual lane;
+   - resolves `connection_string` against `CANONICAL_DATABASE_URL` /
+     `LOCAL_DATABASE_URL` to determine the actual lane (`CANONICAL_DATABASE_URL`
+     defaults to `JETSTREAM_DATABASE_URL` for one-release back-compat — see
+     §6.0 on role-vs-identity naming);
    - asserts the caller's declared `WriteIntent` matches the actual lane;
    - prints a verbose preflight banner;
    - for `CANONICAL` writes, asserts that the `ArtifactService` resolves to a
      blob backend.
    In parallel, add a Postgres `CHECK` constraint on `call_artifacts.uri` that
-   only allows `https://*.blob.core.windows.net/*` URIs in Jetstream (so the
-   wrong code path can fail at the database, not silently corrupt the source
-   of truth). The full plan is in §6 below; remediation of the 11 polluted
-   rows is in §7.
+   only allows `https://*.blob.core.windows.net/*` URIs on the canonical lane
+   (currently Jetstream) so the wrong code path can fail at the database, not
+   silently corrupt the source of truth. The full plan is in §6 below; the
+   minimum-viable shipment is highlighted at §6.9; remediation of the 11
+   polluted rows is in §7.
 
 ---
 
@@ -460,19 +463,62 @@ ordering is chosen so that Phase 1 alone would have prevented every one of the
 11 polluted rows in §3, and Phase 2 catches them after the fact even if Phase
 1 is bypassed.
 
+### 6.0 Naming convention: role vs identity
+
+Throughout §6 the plan deliberately separates two concepts that are currently
+conflated in the codebase:
+
+- **Role** (what library code reasons about): the runtime concept "this DB is
+  the canonical source of truth." Expressed by the env var
+  `CANONICAL_DATABASE_URL`, the enum value `Lane.CANONICAL`, and the
+  `WriteIntent.CANONICAL` constant. Vendor-agnostic.
+- **Identity** (what humans/ops know): the proper-noun name of the current
+  incumbent that fills the canonical role. Today that is **Jetstream**.
+  Identity surfaces in the env var `JETSTREAM_DATABASE_URL` (kept for
+  back-compat), runbooks, the SSH-tunnel script, the `connect_jetstream` CLI,
+  and ops-facing dump/restore tooling.
+
+**Resolution rule:** library code reads `CANONICAL_DATABASE_URL` first; if
+unset it falls back to `JETSTREAM_DATABASE_URL` (logging a deprecation notice
+once per process). Ops scripts may continue to read either name during the
+back-compat window. After one release cycle, the fallback is removed.
+
+**Why split them:**
+- The destructive-DDL guard at `_base_connection.py:147-172` is currently the
+  *only* place the proper noun "Jetstream" leaks into library code. Splitting
+  role from identity makes that block portable to any future SoT vendor with
+  zero code changes.
+- It also makes the eventual case "we run two regions, both
+  canonical-eligible" expressible without renaming anything.
+- It matches the `WriteIntent` symmetry: `WriteIntent.CANONICAL` ↔
+  `Lane.CANONICAL` ↔ `CANONICAL_DATABASE_URL`. The mental model is one word.
+
+For the remainder of §6, "the canonical lane" means `Lane.CANONICAL` (today:
+Jetstream); "the local lane" means `Lane.LOCAL_POSTGRES` / `Lane.SQLITE_*`.
+Where a citation references the existing `JETSTREAM_DATABASE_URL` env var or
+"Jetstream" by name, that is intentional — it documents the current incumbent
+identity, not the role.
+
 ### 6.1 Design — `WriteIntent` and `LaneResolver`
 
 Two new modules under `src/study_query_llm/db/`:
 
 - `lane.py`
-  - `class Lane(StrEnum): JETSTREAM, LOCAL_POSTGRES, SQLITE_FILE, SQLITE_MEMORY, UNKNOWN`
+  - `class Lane(StrEnum): CANONICAL, LOCAL_POSTGRES, SQLITE_FILE, SQLITE_MEMORY, UNKNOWN`
+    - `CANONICAL` is the role-named value; whichever vendor URL fills the
+      role today (Jetstream) maps to `Lane.CANONICAL`. See §6.0.
   - `def resolve_lane(connection_string: str) -> Lane`
-    - Compares URL host/port/dbname against `JETSTREAM_DATABASE_URL` and
-      `LOCAL_DATABASE_URL` using the existing helpers in
+    - Reads the role-named env var first:
+      `os.environ.get("CANONICAL_DATABASE_URL") or
+       os.environ.get("JETSTREAM_DATABASE_URL")`.
+      Logs a deprecation notice once per process if it had to fall back to
+      `JETSTREAM_DATABASE_URL`.
+    - Compares URL host/port/dbname against the resolved canonical URL and
+      against `LOCAL_DATABASE_URL` using the existing helpers in
       `scripts/db_target_guardrails.py:40-70` (`parse_postgres_target`,
       `is_loopback_target`, `same_db_target`) — promote those helpers into
       `src/study_query_llm/db/` so library code may use them.
-    - Returns `JETSTREAM` only if URL matches `JETSTREAM_DATABASE_URL`.
+    - Returns `CANONICAL` only if URL matches the resolved canonical URL.
     - Returns `LOCAL_POSTGRES` if URL is loopback Postgres or matches
       `LOCAL_DATABASE_URL`.
     - Returns `SQLITE_FILE` / `SQLITE_MEMORY` for sqlite URLs.
@@ -480,7 +526,7 @@ Two new modules under `src/study_query_llm/db/`:
       as failure unless explicitly opted into).
 - `write_intent.py`
   - `class WriteIntent(StrEnum): CANONICAL, READ_MIRROR, SANDBOX`
-  - `_ALLOWED_LANES_BY_INTENT = { CANONICAL: {Lane.JETSTREAM},
+  - `_ALLOWED_LANES_BY_INTENT = { CANONICAL: {Lane.CANONICAL},
     READ_MIRROR: {Lane.LOCAL_POSTGRES, Lane.SQLITE_FILE},
     SANDBOX: {Lane.SQLITE_MEMORY, Lane.SQLITE_FILE, Lane.LOCAL_POSTGRES} }`
   - `def assert_intent_matches_lane(intent: WriteIntent, lane: Lane) -> None`
@@ -568,9 +614,10 @@ etc., subagent 3 §C), threaded edits will be needed; these are listed in
 
 ### 6.5 Database-level constraint on `call_artifacts.uri`
 
-Add a Postgres `CHECK` constraint that fires only on Jetstream (the local
-clone may legitimately hold local paths if it was hydrated by
-`sync_from_online.py` for a not-yet-promoted set of fields):
+Add a Postgres `CHECK` constraint that fires only on the canonical lane
+(currently Jetstream). The local clone may legitimately hold local paths if
+it was hydrated by `sync_from_online.py` for a not-yet-promoted set of
+fields:
 
 ```sql
 ALTER TABLE call_artifacts
@@ -586,9 +633,9 @@ failing existing rows; new inserts will still be checked. Once §7 remediation
 is complete, run `ALTER TABLE call_artifacts VALIDATE CONSTRAINT
 call_artifacts_uri_must_be_blob;` to lock it in.
 
-This constraint is **only** added to Jetstream, by gating the migration with
-`Lane.JETSTREAM`. The local clone schema may keep the constraint absent so
-mirror operations remain unchanged.
+This constraint is **only** added to the canonical lane, by gating the
+migration with `Lane.CANONICAL`. The local-clone schema may keep the
+constraint absent so mirror operations remain unchanged.
 
 A parallel `CHECK` on `raw_calls.response_json` is more invasive (needs JSON
 extraction); the recommended pattern is a partial index:
@@ -616,10 +663,11 @@ Two new CI jobs:
    bypass sites (`scripts/purge_dataset_acquisition.py:161-162`,
    `scripts/check_active_workers.py:83-84`, etc.) is the authoritative list of
    call sites that must be migrated.
-2. **Live check — Jetstream URI shape.** Promote `live_count.py` (this folder)
-   into `scripts/verify_no_local_uris_in_jetstream.py`, run it as a scheduled
-   CI step against Jetstream, and fail the run if any `class=local_path` rows
-   appear in `call_artifacts.uri`.
+2. **Live check — canonical-lane URI shape.** Promote `live_count.py` (this
+   folder) into `scripts/verify_no_local_uris_on_canonical.py` (back-compat
+   alias `verify_no_local_uris_in_jetstream.py` for one release), run it as
+   a scheduled CI step against the canonical lane (currently Jetstream), and
+   fail the run if any `class=local_path` rows appear in `call_artifacts.uri`.
 
 ### 6.7 Test isolation hardening
 
@@ -632,7 +680,7 @@ Subagent 5 §E recommendations:
 - Add a session-scoped fixture that constructs all `DatabaseConnectionV2`
   instances with `write_intent=WriteIntent.SANDBOX`.
 - Add a hard assertion in `tests/conftest.py` that `resolve_lane(...)` for
-  the resolved URL is **not** `Lane.JETSTREAM`. This is the test-only
+  the resolved URL is **not** `Lane.CANONICAL`. This is the test-only
   equivalent of the constructor's `assert_intent_matches_lane`.
 
 ### 6.8 Documentation updates
@@ -645,12 +693,23 @@ Per subagent 6 §C:
   artifact-backend ↔ DB-target consistency.
 - `docs/design/clustering_pipeline_provenance.md` — explicitly assert that
   canonical `uri` columns must be HTTPS blob URLs.
-- `.env.example` — promote `JETSTREAM_DATABASE_URL`, `LOCAL_DATABASE_URL`,
-  `SQLLM_WRITE_INTENT` to required entries with comments.
+- `.env.example` — promote `CANONICAL_DATABASE_URL`, `LOCAL_DATABASE_URL`,
+  `SQLLM_WRITE_INTENT` to required entries with comments. Document
+  `JETSTREAM_DATABASE_URL` as the deprecated identity-named alias retained
+  for one release of back-compat (per §6.0).
 - `AGENTS.md` — codify the rule "no agent action may write canonical data
   unless the preflight banner is observed."
 
 ### 6.9 Phasing & rollback
+
+> **Minimum-viable shipment (MVP).** Phase 0 + Phase 1 (a/b/c) + §7
+> remediation are the only items strictly required to close the architectural
+> defect. Phase 0 introduces the modules; Phase 1 wires the chokepoint and
+> banner so **every future write is gated by an explicit `WriteIntent`**;
+> §7 cleans up the existing 11 polluted rows. Phases 2–7 deepen the
+> protections (artifact-backend coupling, DB constraint, sentinel index, CI,
+> tests, docs) and can be calendar-sequenced over weeks without losing the
+> primary safety property. If you only ship one bundle, ship MVP.
 
 | Phase | What ships | Risk |
 |------|-----------|------|
@@ -659,7 +718,7 @@ Per subagent 6 §C:
 | 1b | Gate `assert_intent_matches_lane` on `SQLLM_WRITE_INTENT` being set. Operators opt in. | Low — no breakage. |
 | 1c | Make `SQLLM_WRITE_INTENT` required for non-sqlite URLs. | Medium — operators must update env. Ship after 2 weeks of opt-in soak. |
 | 2 | Wire `ArtifactService(write_intent=...)`. CANONICAL forces `azure_blob`. | Medium — could break a worker with misconfigured azure creds. Mitigation: phase 1 banners surface this earlier. |
-| 3 | Add Postgres `CHECK ... NOT VALID` on `call_artifacts.uri` in Jetstream. | Low — new inserts only. |
+| 3 | Add Postgres `CHECK ... NOT VALID` on `call_artifacts.uri` on the canonical lane (currently Jetstream). | Low — new inserts only. |
 | 4 | Run §7 remediation; then `VALIDATE CONSTRAINT`. | Medium — coordinate with anyone holding open transactions. |
 | 5 | Promote sentinel index for `raw_calls`. | Low. |
 | 6 | CI jobs (§6.6) + test fixture changes (§6.7). | Low. |
@@ -685,7 +744,8 @@ plus an import.
   `database_url`) — accept `write_intent` arg, default `CANONICAL`.
 - `scripts/ingest_sweep_to_db.py:487-488` — pass `write_intent=CANONICAL`,
   remove fallback to `config.database.connection_string` in favor of
-  explicit `JETSTREAM_DATABASE_URL`.
+  explicit `CANONICAL_DATABASE_URL` (back-compat: falls through to
+  `JETSTREAM_DATABASE_URL` if the role-named var is unset, per §6.0).
 - `scripts/sync_from_online.py:290-295` — local engine constructed via
   `DatabaseConnectionV2(local_url, write_intent=READ_MIRROR)`.
 - `scripts/purge_dataset_acquisition.py:161-162` — `write_intent=CANONICAL`
@@ -796,9 +856,9 @@ The proposed design eliminates ambiguity at every layer:
 | Connection construction | accepts any URL silently | refuses to construct without explicit `WriteIntent`; mismatch raises |
 | Banner | none | mandatory stderr banner naming lane + intent + artifact backend |
 | Artifact backend | independent of DB target | CANONICAL forces `azure_blob`; SDK errors fail closed |
-| Schema | no constraint on `uri` | Jetstream `CHECK` rejects non-blob URIs |
-| CI | no live check | scheduled `verify_no_local_uris_in_jetstream` job fails on any local path |
-| Tests | `setdefault` can be overridden by shell env | hard override + assertion that lane is non-Jetstream |
+| Schema | no constraint on `uri` | canonical-lane `CHECK` rejects non-blob URIs |
+| CI | no live check | scheduled `verify_no_local_uris_on_canonical` job fails on any local path |
+| Tests | `setdefault` can be overridden by shell env | hard override + assertion that lane is non-`Lane.CANONICAL` |
 | Docs | aspirational | reference the actual `WriteIntent` mechanism |
 
 There is **no expectation of operator discipline** anywhere in the chain. An
@@ -855,7 +915,7 @@ audit.
 | Q3 | The `audit_log` column for remediation — schema migration or side-table? | Side-table (`call_artifacts_remediation_log`). Avoids touching the canonical schema for one-time use. |
 | Q4 | The `NOT VALID` constraint phase: any race where a slow pipeline writes a local URI between the constraint add and the remediation script? | Schedule remediation within 24h of constraint add; revoke `INSERT` from non-Jetstream-credentialed roles during remediation. |
 | Q5 | Is the bank77_contrast snapshot lineage retrievable end-to-end? | Confirmed via `live_count_output.txt:24-34` — the `groups` rows referencing artifact ids 21–31 exist in Jetstream (subagent 2 §A confirms `groups` writes are routine). The remediation script can rebuild blob artifacts deterministically because `groups`/`group_links` are intact. |
-| Q6 | Do the same 11 artifacts exist in the local-clone DB? | Likely yes (the local clone was hydrated from Jetstream, which contained them). The local clone is unaffected by the §6.5 constraint because it is added only when `Lane.JETSTREAM`. |
+| Q6 | Do the same 11 artifacts exist in the local-clone DB? | Likely yes (the local clone was hydrated from Jetstream, which contained them). The local clone is unaffected by the §6.5 constraint because it is added only when `Lane.CANONICAL`. |
 | Q7 | Could the same defect have produced legacy `inference_runs` rows in v1 schema? | No. v1's `InferenceRun` has no artifact URI columns (subagent 3 §D, "Legacy `models.py`"). |
 
 ---

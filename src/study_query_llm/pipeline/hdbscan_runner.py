@@ -200,19 +200,31 @@ def run_hdbscan_analysis(
             "Install it via pip or conda before using --analysis-strategy hdbscan."
         ) from exc
 
-    model = hdbscan.HDBSCAN(
-        min_cluster_size=min_cluster_size,
-        min_samples=min_samples,
-        metric=metric,
-        cluster_selection_method=cluster_selection_method,
-        cluster_selection_epsilon=cluster_selection_epsilon,
-        alpha=alpha,
-        allow_single_cluster=allow_single_cluster,
-        random_state=random_state,
-        core_dist_n_jobs=core_dist_n_jobs,
-        approx_min_span_tree=approx_min_span_tree,
-    )
-    labels = np.asarray(model.fit_predict(matrix_for_fit), dtype=np.int64)
+    model_kwargs: dict[str, Any] = {
+        "min_cluster_size": min_cluster_size,
+        "min_samples": min_samples,
+        "metric": metric,
+        "cluster_selection_method": cluster_selection_method,
+        "cluster_selection_epsilon": cluster_selection_epsilon,
+        "alpha": alpha,
+        "allow_single_cluster": allow_single_cluster,
+        "random_state": random_state,
+        "core_dist_n_jobs": core_dist_n_jobs,
+        "approx_min_span_tree": approx_min_span_tree,
+    }
+    model = hdbscan.HDBSCAN(**model_kwargs)
+    random_state_applied = True
+    try:
+        labels = np.asarray(model.fit_predict(matrix_for_fit), dtype=np.int64)
+    except TypeError as exc:
+        # Some hdbscan/sklearn combinations accept random_state at init but fail
+        # downstream when tree backends receive unknown kwargs.
+        if "random_state" not in str(exc):
+            raise
+        model_kwargs.pop("random_state", None)
+        model = hdbscan.HDBSCAN(**model_kwargs)
+        labels = np.asarray(model.fit_predict(matrix_for_fit), dtype=np.int64)
+        random_state_applied = False
     if labels.shape[0] != matrix_for_fit.shape[0]:
         raise RuntimeError(
             "HDBSCAN returned label count mismatch: "
@@ -251,11 +263,13 @@ def run_hdbscan_analysis(
         "hdbscan_allow_single_cluster": bool(allow_single_cluster),
         "hdbscan_normalize_embeddings": bool(normalize_embeddings),
         "hdbscan_random_state": int(random_state),
+        "hdbscan_random_state_applied": bool(random_state_applied),
         "hdbscan_core_dist_n_jobs": int(core_dist_n_jobs),
         "hdbscan_approx_min_span_tree": bool(approx_min_span_tree),
     }
 
     summary: dict[str, Any] = {
+        "operation_type": "cluster_pipeline",
         "method_name": str(method_name),
         "input_group_id": int(input_group_id),
         "input_group_type": str(input_group_type),
@@ -274,6 +288,7 @@ def run_hdbscan_analysis(
         "parameters": used_parameters,
     }
     labels_payload: dict[str, Any] = {
+        "operation_type": "cluster_pipeline",
         "cluster_labels": labels.tolist(),
         "noise_label": -1,
         "cluster_ids": cluster_ids,

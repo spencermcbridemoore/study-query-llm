@@ -294,3 +294,14 @@ def test_bank77_pipeline_hdbscan_phase1_analyze(
         assert run_row.config_hash is not None
         assert run_row.fingerprint_hash is not None
         assert run_row.config_json["parameters"]["hdbscan_min_cluster_size"] == 2
+        summary_result = (
+            session.query(AnalysisResult)
+            .filter(
+                AnalysisResult.analysis_group_id == analyzed.group_id,
+                AnalysisResult.result_key == "hdbscan_summary",
+            )
+            .first()
+        )
+        assert summary_result is not None
+        summary_value = dict(summary_result.result_json or {}).get("value") or {}
+        assert summary_value.get("operation_type") == "cluster_pipeline"

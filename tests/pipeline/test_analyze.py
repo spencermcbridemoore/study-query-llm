@@ -12,7 +12,7 @@ import pytest
 from study_query_llm.datasets.acquisition import FileFetchSpec
 from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.db.models_v2 import Group, GroupLink
+from study_query_llm.db.models_v2 import AnalysisResult, Group, GroupLink
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
@@ -364,6 +364,7 @@ def test_hdbscan_runner_uses_deterministic_defaults_and_echoes_parameters(
     used = (
         result["structured_results"]["hdbscan_summary"]["parameters"]  # type: ignore[index]
     )
+    assert result["structured_results"]["hdbscan_summary"]["operation_type"] == "cluster_pipeline"  # type: ignore[index]
     assert used["hdbscan_metric"] == "cosine"
     assert used["hdbscan_random_state"] == 0
     assert used["hdbscan_core_dist_n_jobs"] == 1
@@ -410,6 +411,7 @@ def test_hdbscan_runner_allows_explicit_policy_overrides(monkeypatch) -> None:
     used = (
         result["structured_results"]["hdbscan_summary"]["parameters"]  # type: ignore[index]
     )
+    assert result["structured_results"]["hdbscan_summary"]["operation_type"] == "cluster_pipeline"  # type: ignore[index]
     assert used["hdbscan_metric"] == "euclidean"
     assert used["hdbscan_random_state"] == 7
     assert used["hdbscan_core_dist_n_jobs"] == 2
@@ -436,3 +438,97 @@ def test_hdbscan_runner_rejects_zero_core_dist_jobs(monkeypatch) -> None:
                 "hdbscan_core_dist_n_jobs": 0,
             },
         )
+
+
+def test_analyze_v1_kmeans_writes_clustering_summary_and_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_v1_kmeans")
+
+    result = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name="kmeans+silhouette+kneedle",
+        run_key="rk_v1_kmeans",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        parameters={
+            "dataset_slug": "analyze_fixture",
+            "representation_type": "full",
+            "embedding_provider": "test-provider",
+            "embedding_deployment": "test-embedding-model",
+        },
+    )
+    assert "clustering_summary.json" in result.artifact_uris
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
+        assert run_row is not None
+        cfg = dict(run_row.config_json or {})
+        assert cfg["operation_type"] == "cluster_pipeline"
+        assert cfg["operation_version"] == "v1"
+        assert cfg["rule_set_hash"]
+        assert cfg["recipe_hash"] == cfg["pipeline_effective_hash"]
+
+        summary_result = (
+            session.query(AnalysisResult)
+            .filter(
+                AnalysisResult.analysis_group_id == int(result.group_id),
+                AnalysisResult.result_key == "clustering_summary",
+            )
+            .first()
+        )
+        assert summary_result is not None
+        value = dict(summary_result.result_json or {}).get("value") or {}
+        assert value["operation_type"] == "cluster_pipeline"
+        assert value["pipeline_effective_hash"] == value["recipe_hash"]
+        assert "pipeline_resolved" in value
+
+
+def test_analyze_v1_gmm_writes_clustering_summary_and_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_v1_gmm")
+
+    result = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name="gmm+bic+argmin",
+        run_key="rk_v1_gmm",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        parameters={
+            "dataset_slug": "analyze_fixture",
+            "representation_type": "full",
+            "embedding_provider": "test-provider",
+            "embedding_deployment": "test-embedding-model",
+        },
+    )
+    assert "clustering_summary.json" in result.artifact_uris
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
+        assert run_row is not None
+        cfg = dict(run_row.config_json or {})
+        assert cfg["operation_type"] == "cluster_pipeline"
+        assert cfg["recipe_hash"] == cfg["pipeline_effective_hash"]

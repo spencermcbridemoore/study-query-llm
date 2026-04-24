@@ -7,15 +7,35 @@ import json
 import os
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import numpy as np
 import pyarrow.parquet as pq
 
+from study_query_llm.algorithms.recipes import (
+    COMPOSITE_RECIPES,
+    canonical_recipe_hash,
+    ensure_composite_recipe,
+    register_clustering_components,
+)
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import CallArtifact, Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.pipeline.parse import find_dataframe_parquet_uri
+from study_query_llm.pipeline.clustering import (
+    build_effective_recipe_payload,
+    build_pipeline_effective_hash,
+    is_v1_clustering_method,
+    load_rule_set,
+    resolve_clustering_resolution,
+    run_gmm_bic_argmin_analysis,
+    run_kmeans_silhouette_kneedle_analysis,
+    validate_identity_contract,
+    validate_post_selection,
+    validate_pre_run,
+)
+from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.runner import StageIdentity, run_stage
 from study_query_llm.pipeline.types import StageResult
 from study_query_llm.services.artifact_service import ArtifactService
@@ -33,6 +53,13 @@ REPRESENTATION_LEGACY_INTENT_MEAN = "intent_mean"
 
 _ANALYZE_LOCK_GUARD = threading.Lock()
 _ANALYZE_LOCKS: dict[str, threading.Lock] = {}
+_CLUSTERING_RULES_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "config"
+    / "rules"
+    / "clustering"
+    / "rules-v1.0.0.yaml"
+)
 
 
 @dataclass
@@ -335,6 +362,31 @@ def _resolve_method_definition_id(
     method_name: str,
     method_version: str | None,
 ) -> int:
+    normalized_name = str(method_name).strip().lower()
+    if normalized_name in COMPOSITE_RECIPES:
+        register_clustering_components(method_service)
+        composite_version = str(method_version or "1.0")
+        return int(
+            ensure_composite_recipe(
+                method_service,
+                normalized_name,
+                composite_version=composite_version,
+                description=(
+                    "Composite clustering pipeline "
+                    f"({normalized_name}); see method_definitions.recipe_json "
+                    "for the stage list."
+                ),
+                parameters_schema={
+                    "type": "object",
+                    "properties": {
+                        "k_range": {"type": "array", "items": {"type": "integer"}},
+                        "selection_metric": {"type": "string"},
+                        "selection_rule": {"type": "string"},
+                    },
+                },
+            )
+        )
+
     method_row = method_service.get_method(method_name, version=method_version)
     if method_row is None and method_version is None:
         method_row = method_service.get_method(method_name)
@@ -400,6 +452,182 @@ def _default_method_runner(
     )
 
 
+def _resolve_builtin_method_runner(method_name: str) -> AnalysisRunner | None:
+    normalized = str(method_name or "").strip().lower()
+    if normalized == "hdbscan":
+        return run_hdbscan_analysis
+    if normalized == "kmeans+silhouette+kneedle":
+        return run_kmeans_silhouette_kneedle_analysis
+    if normalized == "gmm+bic+argmin":
+        return run_gmm_bic_argmin_analysis
+    return None
+
+
+def _extract_selection_evidence(payload: AnalysisPayload) -> dict[str, Any] | None:
+    candidate = payload.structured_results.get("selection_evidence")
+    if isinstance(candidate, Mapping):
+        return dict(candidate)
+    summary_candidate = payload.structured_results.get("clustering_summary")
+    if isinstance(summary_candidate, Mapping):
+        maybe = summary_candidate.get("selection_evidence")
+        if isinstance(maybe, Mapping):
+            return dict(maybe)
+    return None
+
+
+def _extract_cluster_summary(payload: AnalysisPayload) -> dict[str, Any]:
+    summary_candidate = payload.structured_results.get("clustering_summary")
+    if isinstance(summary_candidate, Mapping):
+        return dict(summary_candidate)
+    hdbscan_candidate = payload.structured_results.get("hdbscan_summary")
+    if isinstance(hdbscan_candidate, Mapping):
+        return dict(hdbscan_candidate)
+    return {}
+
+
+def _selected_value_from_evidence(selection_evidence: Mapping[str, Any]) -> tuple[str, int] | None:
+    for key in ("chosen_k", "chosen_value", "chosen_min_cluster_size", "chosen_resolution"):
+        if key in selection_evidence and selection_evidence[key] is not None:
+            return key, int(selection_evidence[key])
+    return None
+
+
+def _patch_terminal_selected_value(
+    pipeline_resolved: list[dict[str, Any]],
+    *,
+    terminal_stage: str,
+    selection_evidence: Mapping[str, Any] | None,
+) -> None:
+    if selection_evidence is None:
+        return
+    selected = _selected_value_from_evidence(selection_evidence)
+    if selected is None:
+        return
+    selected_key, selected_value = selected
+    target_param = "k"
+    if terminal_stage == "hdbscan" and selected_key == "chosen_min_cluster_size":
+        target_param = "min_cluster_size"
+    if terminal_stage not in {"kmeans", "gmm", "hdbscan"}:
+        return
+    for entry in pipeline_resolved:
+        if str(entry.get("stage") or "") != terminal_stage:
+            continue
+        stage_params = dict(entry.get("params") or {})
+        stage_params[target_param] = int(selected_value)
+        entry["params"] = stage_params
+        break
+
+
+def _labels_artifact_ref_for_payload(payload: AnalysisPayload) -> str:
+    for candidate in (
+        "kmeans_labels.json",
+        "gmm_labels.json",
+        "hdbscan_labels.json",
+        "analysis_labels.json",
+    ):
+        if candidate in payload.artifacts:
+            return candidate
+    return ""
+
+
+def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return json.dumps(
+        dict(payload),
+        indent=2,
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _attach_v1_clustering_provenance(
+    *,
+    resolution_pre: Any,
+    payload: AnalysisPayload,
+) -> dict[str, Any]:
+    """Patch payload with v1 clustering envelope + identity metadata."""
+    resolution = resolution_pre.clone()
+    selection_evidence = _extract_selection_evidence(payload)
+    _patch_terminal_selected_value(
+        resolution.pipeline_resolved,
+        terminal_stage=resolution.base_algorithm,
+        selection_evidence=selection_evidence,
+    )
+    validate_post_selection(resolution, selection_evidence=selection_evidence)
+
+    pipeline_effective_hash = build_pipeline_effective_hash(
+        resolution.pipeline_resolved,
+        resolution.pipeline_effective,
+    )
+    effective_recipe_payload = build_effective_recipe_payload(
+        resolution.pipeline_resolved,
+        resolution.pipeline_effective,
+    )
+    recipe_hash = canonical_recipe_hash(effective_recipe_payload)
+    validate_identity_contract(
+        pipeline_effective_hash=pipeline_effective_hash,
+        recipe_hash=recipe_hash,
+    )
+
+    cluster_summary = _extract_cluster_summary(payload)
+    labels_artifact_ref = str(
+        cluster_summary.get("labels_artifact_ref") or _labels_artifact_ref_for_payload(payload)
+    )
+    envelope: dict[str, Any] = {
+        "operation_type": resolution.operation_type,
+        "operation_version": resolution.operation_version,
+        "method_name": resolution.method_name,
+        "base_algorithm": resolution.base_algorithm,
+        "rule_set_version": resolution.rule_set_version,
+        "rule_set_hash": resolution.rule_set_hash,
+        "rule_inputs": dict(resolution.rule_inputs),
+        "input_audit_metadata": dict(resolution.input_audit_metadata),
+        "pipeline_declared": list(resolution.pipeline_declared),
+        "pipeline_resolved": [dict(entry) for entry in resolution.pipeline_resolved],
+        "pipeline_effective": list(resolution.pipeline_effective),
+        "pipeline_effective_hash": pipeline_effective_hash,
+        "recipe_hash": recipe_hash,
+        "skipped_stages": [dict(item) for item in resolution.skipped_stages],
+        "aliases": list(resolution.aliases),
+        "n_samples": int(cluster_summary.get("n_samples") or 0),
+        "n_features": int(cluster_summary.get("n_features") or 0),
+        "cluster_count": int(cluster_summary.get("cluster_count") or 0),
+        "cluster_ids": list(cluster_summary.get("cluster_ids") or []),
+        "cluster_sizes": dict(cluster_summary.get("cluster_sizes") or {}),
+        "noise_count": int(cluster_summary.get("noise_count") or 0),
+        "noise_fraction": float(cluster_summary.get("noise_fraction") or 0.0),
+        "labels_artifact_ref": labels_artifact_ref,
+    }
+    if selection_evidence is not None:
+        envelope["selection_evidence"] = dict(selection_evidence)
+
+    payload.structured_results["clustering_summary"] = envelope
+    payload.artifacts.setdefault("clustering_summary.json", _to_json_bytes(envelope))
+
+    hdbscan_summary = payload.structured_results.get("hdbscan_summary")
+    if isinstance(hdbscan_summary, Mapping):
+        upgraded = dict(hdbscan_summary)
+        upgraded.setdefault("operation_type", resolution.operation_type)
+        upgraded.setdefault("operation_version", resolution.operation_version)
+        upgraded.setdefault("rule_set_version", resolution.rule_set_version)
+        upgraded.setdefault("rule_set_hash", resolution.rule_set_hash)
+        upgraded.setdefault("rule_inputs", dict(resolution.rule_inputs))
+        upgraded.setdefault("pipeline_declared", list(resolution.pipeline_declared))
+        upgraded.setdefault("pipeline_resolved", [dict(entry) for entry in resolution.pipeline_resolved])
+        upgraded.setdefault("pipeline_effective", list(resolution.pipeline_effective))
+        upgraded.setdefault("pipeline_effective_hash", pipeline_effective_hash)
+        payload.structured_results["hdbscan_summary"] = upgraded
+        payload.artifacts["hdbscan_summary.json"] = _to_json_bytes(upgraded)
+
+    return {
+        "resolution": resolution,
+        "pipeline_effective_hash": pipeline_effective_hash,
+        "recipe_hash": recipe_hash,
+        "effective_recipe_payload": effective_recipe_payload,
+        "selection_evidence": dict(selection_evidence) if selection_evidence is not None else None,
+        "summary": envelope,
+    }
+
+
 def analyze(
     snapshot_group_id: int,
     embedding_batch_group_id: int,
@@ -417,6 +645,8 @@ def analyze(
 ) -> StageResult:
     """Execute analysis stage with explicit snapshot and embedding batch inputs."""
     resolved_params = dict(parameters or {})
+    clustering_resolution_pre = None
+    clustering_rule_set = None
     db_conn, _owned_db = _resolve_db(db=db, database_url=database_url)
     with db_conn.session_scope() as session:
         snapshot_group = _require_group(
@@ -492,6 +722,27 @@ def analyze(
             label_names=label_names,
             representation=representation,
         )
+        if is_v1_clustering_method(method_name):
+            clustering_rule_set = load_rule_set(_CLUSTERING_RULES_PATH)
+            clustering_resolution_pre = resolve_clustering_resolution(
+                method_name=method_name,
+                parameters=resolved_params,
+                rule_set=clustering_rule_set,
+                context={
+                    "embedding_dim": int(analysis_embeddings.shape[1]),
+                    "n_samples": int(analysis_embeddings.shape[0]),
+                },
+            )
+            validate_pre_run(
+                clustering_resolution_pre,
+                allowed_context_keys=clustering_rule_set.context_keys,
+            )
+            if resolved_params.get("determinism_class") is None:
+                normalized_method = str(method_name).strip().lower()
+                if normalized_method in {"kmeans+silhouette+kneedle", "gmm+bic+argmin"}:
+                    resolved_params["determinism_class"] = "pseudo_deterministic"
+                else:
+                    resolved_params["determinism_class"] = "non_deterministic"
 
         repo = RawCallRepository(session)
         resolved_request_group_id = _resolve_request_group_id(
@@ -534,7 +785,7 @@ def analyze(
                     },
                 )
 
-        runner = method_runner or _default_method_runner
+        runner = method_runner or _resolve_builtin_method_runner(method_name) or _default_method_runner
         payload_holder: dict[str, AnalysisPayload] = {}
 
         runner_input_metadata = {
@@ -553,6 +804,15 @@ def analyze(
             repo = artifact_service.repository
             if repo is None:
                 raise RuntimeError("ArtifactService requires repository for analyze stage writes")
+            runner_parameters = dict(resolved_params)
+            if clustering_resolution_pre is not None:
+                runner_parameters["_v1_pipeline_resolved"] = [
+                    dict(entry) for entry in clustering_resolution_pre.pipeline_resolved
+                ]
+                runner_parameters["_v1_pipeline_effective"] = list(
+                    clustering_resolution_pre.pipeline_effective
+                )
+                runner_parameters["_v1_rule_inputs"] = dict(clustering_resolution_pre.rule_inputs)
             raw_payload = runner(
                 method_name=method_name,
                 input_group_id=int(embedding_batch_group_id),
@@ -560,9 +820,14 @@ def analyze(
                 input_group_metadata=runner_input_metadata,
                 embeddings=analysis_embeddings,
                 texts=analysis_texts,
-                parameters=resolved_params,
+                parameters=runner_parameters,
             )
             payload = _coerce_payload(raw_payload)
+            if clustering_resolution_pre is not None:
+                payload_holder["v1_provenance"] = _attach_v1_clustering_provenance(
+                    resolution_pre=clustering_resolution_pre,
+                    payload=payload,
+                )
             payload_holder["payload"] = payload
 
             artifact_uris: dict[str, str] = {}
@@ -681,6 +946,46 @@ def analyze(
                 "snapshot_group_id": int(snapshot_group_id),
                 "representation_type": representation,
             }
+            v1_provenance = payload_holder.get("v1_provenance")
+            if isinstance(v1_provenance, Mapping):
+                recipe_hash = v1_provenance.get("recipe_hash")
+                if recipe_hash is not None:
+                    canonical_config["recipe_hash"] = str(recipe_hash)
+                summary_payload = v1_provenance.get("summary")
+                if isinstance(summary_payload, Mapping):
+                    canonical_config["operation_type"] = str(
+                        summary_payload.get("operation_type") or ""
+                    )
+                    canonical_config["operation_version"] = str(
+                        summary_payload.get("operation_version") or ""
+                    )
+                    canonical_config["rule_set_version"] = str(
+                        summary_payload.get("rule_set_version") or ""
+                    )
+                    canonical_config["rule_set_hash"] = str(
+                        summary_payload.get("rule_set_hash") or ""
+                    )
+                    canonical_config["rule_inputs"] = dict(
+                        summary_payload.get("rule_inputs") or {}
+                    )
+                    canonical_config["pipeline_declared"] = list(
+                        summary_payload.get("pipeline_declared") or []
+                    )
+                    canonical_config["pipeline_resolved"] = list(
+                        summary_payload.get("pipeline_resolved") or []
+                    )
+                    canonical_config["pipeline_effective"] = list(
+                        summary_payload.get("pipeline_effective") or []
+                    )
+                    canonical_config["pipeline_effective_hash"] = str(
+                        summary_payload.get("pipeline_effective_hash") or ""
+                    )
+                    execution_metadata["operation_type"] = str(
+                        summary_payload.get("operation_type") or ""
+                    )
+                    execution_metadata["operation_version"] = str(
+                        summary_payload.get("operation_version") or ""
+                    )
             if method_version is not None:
                 canonical_config["method_version"] = str(method_version)
 

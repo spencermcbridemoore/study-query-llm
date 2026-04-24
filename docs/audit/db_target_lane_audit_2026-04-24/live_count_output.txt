@@ -1,0 +1,92 @@
+Jetstream Local-Path URI Audit
+url_redacted: postgresql://***@127.0.0.1:5434/study_query_jetstream?sslmode=prefer
+env_var: JETSTREAM_DATABASE_URL
+
+==============================================================================
+== call_artifacts.uri
+==============================================================================
+total_rows: 31
+by_class: blob=20, local_path=11
+by_artifact_type x class:
+  dataset_subquery_spec                    local_path   6
+  dataset_subquery_spec                    blob         4
+  embedding_matrix                         blob         4
+  dataset_acquisition_file                 blob         3
+  dataset_acquisition_manifest             blob         3
+  dataset_canonical_parquet                blob         3
+  dataset_dataframe_manifest               blob         3
+  dataset_acquisition_file                 local_path   2
+  dataset_acquisition_manifest             local_path   1
+  dataset_canonical_parquet                local_path   1
+  dataset_dataframe_manifest               local_path   1
+
+sample non-blob URIs (up to 15):
+  id=    21  type=dataset_acquisition_file                  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\15\\acquisition\\data_train-00000-of-00001.parquet'
+  id=    22  type=dataset_acquisition_file                  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\15\\acquisition\\data_test-00000-of-00001.parquet'
+  id=    23  type=dataset_acquisition_manifest              class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\15\\acquisition\\acquisition.json'
+  id=    24  type=dataset_canonical_parquet                 class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\16\\parse\\dataframe.parquet'
+  id=    25  type=dataset_dataframe_manifest                class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\16\\parse\\dataframe_manifest.json'
+  id=    26  type=dataset_subquery_spec                     class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\17\\snapshot\\subquery_spec.json'
+  id=    27  type=dataset_subquery_spec                     class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\18\\snapshot\\subquery_spec.json'
+  id=    28  type=dataset_subquery_spec                     class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\19\\snapshot\\subquery_spec.json'
+  id=    29  type=dataset_subquery_spec                     class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\20\\snapshot\\subquery_spec.json'
+  id=    30  type=dataset_subquery_spec                     class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\21\\snapshot\\subquery_spec.json'
+  id=    31  type=dataset_subquery_spec                     class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\22\\snapshot\\subquery_spec.json'
+
+
+==============================================================================
+== raw_calls.response_json[uri]
+==============================================================================
+total_rows: 4381
+rows_with_uri_substring: 31
+by_class (over extracted URIs): blob=20, local_path=11
+
+sample non-blob URIs (up to 15):
+  raw_call_id=  4371  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\15\\acquisition\\data_train-00000-of-00001.parquet'
+  raw_call_id=  4372  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\15\\acquisition\\data_test-00000-of-00001.parquet'
+  raw_call_id=  4373  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\15\\acquisition\\acquisition.json'
+  raw_call_id=  4374  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\16\\parse\\dataframe.parquet'
+  raw_call_id=  4375  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\16\\parse\\dataframe_manifest.json'
+  raw_call_id=  4376  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\17\\snapshot\\subquery_spec.json'
+  raw_call_id=  4377  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\18\\snapshot\\subquery_spec.json'
+  raw_call_id=  4378  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\19\\snapshot\\subquery_spec.json'
+  raw_call_id=  4379  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\20\\snapshot\\subquery_spec.json'
+  raw_call_id=  4380  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\21\\snapshot\\subquery_spec.json'
+  raw_call_id=  4381  class=local_path    uri='C:\\Users\\spenc\\Cursor Repos\\study-query-llm\\artifacts\\bank77_contrast\\22\\snapshot\\subquery_spec.json'
+
+
+==============================================================================
+== groups.metadata_json[artifact_uri]
+==============================================================================
+total_rows: 22
+rows_with_artifact_uri_substring: 0
+(no rows with 'artifact_uri' — skipping classification)
+
+
+==============================================================================
+== analysis_results.result_json[uris]
+==============================================================================
+total_rows: 0
+rows_with_uris_substring: 0
+(no rows with 'uris' key — skipping classification)
+
+
+==============================================================================
+== provenanced_runs.result_ref
+==============================================================================
+total_rows: 0
+by_class: (empty)
+by_kind x class:
+
+sample non-blob result_refs (up to 15):
+
+
+==============================================================================
+== orchestration_jobs.result_ref
+==============================================================================
+total_rows: 0
+by_class: (empty)
+by_job_type x class:
+
+sample non-blob result_refs (up to 15):
+

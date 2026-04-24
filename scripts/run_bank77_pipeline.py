@@ -19,6 +19,10 @@ from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
+from study_query_llm.pipeline.clustering import (
+    run_gmm_bic_argmin_analysis,
+    run_kmeans_silhouette_kneedle_analysis,
+)
 from study_query_llm.pipeline.embed import embed
 from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.parse import parse
@@ -94,7 +98,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--analysis-strategy",
         type=str,
-        choices=["default", "hdbscan"],
+        choices=[
+            "default",
+            "hdbscan",
+            "kmeans_silhouette_kneedle",
+            "gmm_bic_argmin",
+        ],
         default="default",
         help="Analysis implementation strategy (default or hdbscan).",
     )
@@ -203,20 +212,24 @@ def _canonical_embedding_representation(value: str) -> str:
 def _validate_embedding_representation_for_analysis(args: argparse.Namespace) -> None:
     strategy = str(args.analysis_strategy).strip().lower()
     representation = _canonical_embedding_representation(args.embedding_representation)
-    if strategy == "hdbscan" and representation != "full":
+    if strategy in {"hdbscan", "kmeans_silhouette_kneedle", "gmm_bic_argmin"} and representation != "full":
         raise ValueError(
-            "--analysis-strategy hdbscan requires --embedding-representation full; "
+            "--analysis-strategy for canonical clustering runners requires "
+            "--embedding-representation full; "
             f"got {representation!r}"
         )
 
 
 def _resolve_analysis_method_name(args: argparse.Namespace) -> str:
     method_name = str(args.analysis_method).strip()
-    if (
-        str(args.analysis_strategy) == "hdbscan"
-        and method_name == "bank77_structural_summary"
-    ):
-        return "bank77_hdbscan_analysis"
+    strategy = str(args.analysis_strategy)
+    if method_name == "bank77_structural_summary":
+        if strategy == "hdbscan":
+            return "hdbscan"
+        if strategy == "kmeans_silhouette_kneedle":
+            return "kmeans+silhouette+kneedle"
+        if strategy == "gmm_bic_argmin":
+            return "gmm+bic+argmin"
     return method_name
 
 
@@ -251,6 +264,20 @@ def _build_analysis_parameters(args: argparse.Namespace) -> dict[str, object]:
                 "hdbscan_normalize_embeddings": bool(args.hdbscan_normalize_embeddings),
             }
         )
+    elif str(args.analysis_strategy) == "kmeans_silhouette_kneedle":
+        params.update(
+            {
+                "selection_metric": "silhouette",
+                "selection_rule": "kneedle",
+            }
+        )
+    elif str(args.analysis_strategy) == "gmm_bic_argmin":
+        params.update(
+            {
+                "selection_metric": "bic",
+                "selection_rule": "argmin",
+            }
+        )
     return params
 
 
@@ -281,8 +308,13 @@ def _resolve_run_key(
 
 
 def _resolve_method_runner(args: argparse.Namespace):
-    if str(args.analysis_strategy) == "hdbscan":
+    strategy = str(args.analysis_strategy)
+    if strategy == "hdbscan":
         return run_hdbscan_analysis
+    if strategy == "kmeans_silhouette_kneedle":
+        return run_kmeans_silhouette_kneedle_analysis
+    if strategy == "gmm_bic_argmin":
+        return run_gmm_bic_argmin_analysis
     return None
 
 

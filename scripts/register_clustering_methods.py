@@ -116,9 +116,10 @@ def main() -> int:
                 parameters_schema={
                     "type": "object",
                     "properties": {
-                        "k_min": {"type": "integer"},
-                        "k_max": {"type": "integer"},
-                        "n_restarts": {"type": "integer"},
+                        "k_range": {"type": "array", "items": {"type": "integer"}},
+                        "selection_metric": {"type": "string"},
+                        "selection_rule": {"type": "string"},
+                        "hdbscan_min_cluster_size": {"type": "integer"},
                     },
                 },
             )

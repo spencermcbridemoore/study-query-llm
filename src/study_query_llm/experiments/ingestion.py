@@ -133,7 +133,7 @@ def ingest_result_to_db(
 
             try:
                 run_id = provenance.create_run_group(
-                    algorithm="cosine_kllmeans_no_pca",
+                    algorithm=algorithm_name,
                     config=run_metadata,
                     name=f"sweep_{dataset}_{engine}_{data_type}",
                     description=f"{dataset}/{engine}/{summarizer} ({n_restarts} restarts)",

@@ -42,8 +42,11 @@ def serialize_sweep_result(result: Any) -> Dict[str, Any]:
         data["dist"] = result.dist.tolist()
 
     for k, k_data in result.by_k.items():
-        labels_raw = k_data.get("labels", [])
+        labels_raw = k_data.get("labels", k_data.get("cluster_labels", []))
         labels_all_raw = k_data.get("labels_all")
+        objective_value = k_data.get("objective", {})
+        if objective_value in ({}, None):
+            objective_value = k_data.get("objective_value")
         data["by_k"][k] = {
             "representatives": k_data.get("representatives", []),
             "labels": (
@@ -59,11 +62,14 @@ def serialize_sweep_result(result: Any) -> Dict[str, Any]:
                 if labels_all_raw is not None
                 else None
             ),
-            "objective": k_data.get("objective", {}),
+            "objective": objective_value,
             "objectives": k_data.get("objectives", []),
             "n_iter": k_data.get("n_iter", 0),
             "timing": k_data.get("timing", {}),
             "stability": k_data.get("stability"),
+            "selection_evidence": k_data.get("selection_evidence"),
+            "pipeline_effective_hash": k_data.get("pipeline_effective_hash"),
+            "recipe_hash": k_data.get("recipe_hash"),
         }
 
     return data

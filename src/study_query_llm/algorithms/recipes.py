@@ -188,9 +188,93 @@ COSINE_KLLMEANS_NO_PCA_RECIPE: Dict[str, Any] = {
     ),
 }
 
+KMEANS_SILHOUETTE_KNEEDLE_RECIPE: Dict[str, Any] = {
+    "recipe_version": RECIPE_VERSION,
+    "stages": [
+        {
+            "name": "embed",
+            "version": "1.0",
+            "role": "representation",
+            "params": {},
+        },
+        {
+            "name": "normalize",
+            "version": "1.0",
+            "role": "preprocess",
+            "params": {},
+        },
+        {
+            "name": "pca",
+            "version": "1.0",
+            "role": "preprocess",
+            "params": {},
+        },
+        {
+            "name": "kmeans",
+            "version": "1.0",
+            "role": "clustering",
+            "params": {"selection_metric": "silhouette", "selection_rule": "kneedle"},
+        },
+    ],
+    "notes": "Canonical v1 sweep runner recipe for kmeans+silhouette+kneedle.",
+}
+
+GMM_BIC_ARGMIN_RECIPE: Dict[str, Any] = {
+    "recipe_version": RECIPE_VERSION,
+    "stages": [
+        {
+            "name": "embed",
+            "version": "1.0",
+            "role": "representation",
+            "params": {},
+        },
+        {
+            "name": "normalize",
+            "version": "1.0",
+            "role": "preprocess",
+            "params": {},
+        },
+        {
+            "name": "pca",
+            "version": "1.0",
+            "role": "preprocess",
+            "params": {},
+        },
+        {
+            "name": "gmm",
+            "version": "1.0",
+            "role": "clustering",
+            "params": {"selection_metric": "bic", "selection_rule": "argmin"},
+        },
+    ],
+    "notes": "Canonical v1 sweep runner recipe for gmm+bic+argmin.",
+}
+
+HDBSCAN_V1_RECIPE: Dict[str, Any] = {
+    "recipe_version": RECIPE_VERSION,
+    "stages": [
+        {
+            "name": "embed",
+            "version": "1.0",
+            "role": "representation",
+            "params": {},
+        },
+        {
+            "name": "hdbscan",
+            "version": "1.0",
+            "role": "clustering",
+            "params": {},
+        },
+    ],
+    "notes": "Canonical v1 single-fit recipe for hdbscan.",
+}
+
 
 COMPOSITE_RECIPES: Dict[str, Dict[str, Any]] = {
     "cosine_kllmeans_no_pca": COSINE_KLLMEANS_NO_PCA_RECIPE,
+    "kmeans+silhouette+kneedle": KMEANS_SILHOUETTE_KNEEDLE_RECIPE,
+    "gmm+bic+argmin": GMM_BIC_ARGMIN_RECIPE,
+    "hdbscan": HDBSCAN_V1_RECIPE,
 }
 
 

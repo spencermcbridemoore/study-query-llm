@@ -177,7 +177,7 @@ def rows_from_sweep(item: dict) -> List[dict]:
             k = int(k_str)
         except ValueError:
             continue
-        labels = entry.get("labels")
+        labels = entry.get("labels", entry.get("cluster_labels"))
         if labels is not None:
             labels = np.asarray(labels)
         n = (
@@ -266,6 +266,22 @@ def extract_by_k_metrics(
             continue
         objectives = entry.get("objectives") or []
         labels_all = entry.get("labels_all") or []
+        if not labels_all and entry.get("labels") is not None:
+            labels_all = [entry.get("labels")]
+        if not labels_all and entry.get("cluster_labels") is not None:
+            labels_all = [entry.get("cluster_labels")]
+        if not objectives and entry.get("objective") is not None:
+            objective = entry.get("objective")
+            if isinstance(objective, dict):
+                maybe_value = objective.get("value")
+                if maybe_value is None and "inertia" in objective:
+                    maybe_value = objective.get("inertia")
+                if maybe_value is None and "bic" in objective:
+                    maybe_value = objective.get("bic")
+                if maybe_value is not None:
+                    objectives = [maybe_value]
+            elif isinstance(objective, (int, float)):
+                objectives = [objective]
         n_restarts = max(len(objectives), len(labels_all))
         if n_restarts == 0:
             continue

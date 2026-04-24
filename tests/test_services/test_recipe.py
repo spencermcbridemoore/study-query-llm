@@ -8,6 +8,7 @@ import copy
 import pytest
 
 from study_query_llm.algorithms.recipes import (
+    COMPOSITE_RECIPES,
     CLUSTERING_COMPONENT_METHODS,
     COSINE_KLLMEANS_NO_PCA_RECIPE,
     build_composite_recipe,
@@ -107,6 +108,21 @@ def test_build_composite_recipe_returns_copy():
 def test_build_composite_recipe_unknown_raises():
     with pytest.raises(KeyError):
         build_composite_recipe("does_not_exist")
+
+
+@pytest.mark.parametrize(
+    "composite_name",
+    [
+        "hdbscan",
+        "kmeans+silhouette+kneedle",
+        "gmm+bic+argmin",
+    ],
+)
+def test_build_composite_recipe_v1_clustering_methods(composite_name: str):
+    recipe = build_composite_recipe(composite_name)
+    assert recipe["recipe_version"] == "v0"
+    assert isinstance(recipe.get("stages"), list)
+    assert recipe["stages"]
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +240,33 @@ def test_ensure_composite_recipe_leaves_divergent_recipe_alone():
         row = session.query(MethodDefinition).filter_by(id=method_id).first()
         assert row is not None
         assert row.recipe_json == divergent
+
+
+def test_ensure_composite_recipe_supports_all_registered_composites():
+    """Every composite in COMPOSITE_RECIPES can be ensured idempotently."""
+    db = _db()
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_svc = MethodService(repo)
+        register_clustering_components(method_svc)
+
+        first_ids = {
+            name: ensure_composite_recipe(
+                method_svc,
+                name,
+                composite_version="1.0",
+            )
+            for name in COMPOSITE_RECIPES
+        }
+        second_ids = {
+            name: ensure_composite_recipe(
+                method_svc,
+                name,
+                composite_version="1.0",
+            )
+            for name in COMPOSITE_RECIPES
+        }
+        assert first_ids == second_ids
 
 
 # ---------------------------------------------------------------------------

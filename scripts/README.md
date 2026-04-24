@@ -82,6 +82,8 @@ stable unless accompanied by wrappers and doc updates:
 - `docker_smoke.py`
 - `run_bank77_pipeline.py`
 - `check_persistence_contract.py`
+- `check_living_docs_drift.py` (CI hard check for `.cursor/rules/living-docs-only.mdc`)
+- `warn_restricted_doc_edits.py` (pre-commit warning; called from `scripts/git-hooks/pre-commit`)
 - `validate_and_backfill_run_snapshots.py`
 - `run_300_bigrun_sweep.py`
 - `run_langgraph_job_worker.py`
@@ -98,6 +100,25 @@ stable unless accompanied by wrappers and doc updates:
 - `check_active_workers.py`
 - `backup_mcq_db_to_json.py`
 - `archive_mcq_artifact_blobs.py`
+
+## Living-Docs-Only Governance
+
+The binding doc-to-code map and restricted-reading set live in
+[`.cursor/rules/living-docs-only.mdc`](../.cursor/rules/living-docs-only.mdc).
+Two enforcement entrypoints live in this directory:
+
+- `check_living_docs_drift.py` -- CI hard check. Fails when a diff range edits
+  restricted paths without `[restricted-doc-edit-ok]` in any commit message in
+  the range. Wired into `.github/workflows/living-docs-drift.yml`. Shared
+  restricted-set source: `scripts/internal/living_docs_governance.py`.
+- `warn_restricted_doc_edits.py` -- optional pre-commit warning that lists
+  staged restricted-path edits to stderr and exits 0 (heads-up, not a block).
+  Install the hook with `git config core.hooksPath scripts/git-hooks` (see
+  [`scripts/git-hooks/README.md`](git-hooks/README.md)).
+
+When membership changes, update both
+`scripts/internal/living_docs_governance.py` and the table in the rule
+together.
 
 ## Usage
 

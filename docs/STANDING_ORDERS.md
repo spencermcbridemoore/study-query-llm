@@ -11,9 +11,18 @@ This document establishes consistent practices for all development work on this 
 ### Primary Source of Truth
 
 The binding doc-to-code map and the restricted-reading list (history,
-deprecated, plans, experiments) live in `.cursor/rules/living-docs-only.mdc`
+deprecated, plans, experiments, plus `scripts/history/**` and
+`scripts/deprecated/**`) live in `.cursor/rules/living-docs-only.mdc`
 (always-on). That rule is authoritative; the bullets below are a quick
 reference, not a replacement.
+
+The rule is enforced by:
+
+- `scripts/check_living_docs_drift.py` (CI hard check, wired into
+  `.github/workflows/living-docs-drift.yml`). Fails on restricted-path edits
+  without `[restricted-doc-edit-ok]` in a commit message in the diff range.
+- `scripts/warn_restricted_doc_edits.py` (optional pre-commit warning;
+  install via `git config core.hooksPath scripts/git-hooks`).
 
 - **`docs/living/CURRENT_STATE.md`** is authoritative for "what currently exists/works."
 - **`docs/living/ARCHITECTURE_CURRENT.md`** is authoritative for current architecture.

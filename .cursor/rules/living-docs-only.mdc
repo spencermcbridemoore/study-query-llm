@@ -45,9 +45,11 @@ Parity evidence layer (not a primary source itself):
 
 Do **not** open these to inform current implementation work unless the user
 explicitly asks for historical, migration, or deprecated context. The
-"History" and "Deprecated" sections of `docs/README.md` are authoritative for
-membership. Confirmed restricted paths today:
+"History" and "Deprecated" sections of `docs/README.md` and the lane structure
+in `scripts/README.md` are authoritative for membership. Confirmed restricted
+paths today:
 
+Docs:
 - `docs/history/**`
 - `docs/deprecated/**`
 - `docs/plans/**` (archived planning framework)
@@ -58,6 +60,27 @@ membership. Confirmed restricted paths today:
 - `docs/MIGRATION_GUIDE.md` (deprecated)
 - `docs/PHASE1_5_VERIFICATION.md`
 - `docs/PLOT_ORGANIZATION.md`
+
+Scripts (lane structure mirrors docs):
+- `scripts/history/**` (archived experiment/probe scripts; reproducibility only)
+- `scripts/deprecated/**` (retired compatibility wrappers)
+
+## Enforcement
+
+Two scripts back the doc-to-code binding above:
+
+- `scripts/check_living_docs_drift.py` (CI hard check) - fails when a diff
+  range edits restricted paths without `[restricted-doc-edit-ok]` in any
+  commit message in the range. Wired into
+  `.github/workflows/living-docs-drift.yml`.
+- `scripts/warn_restricted_doc_edits.py` (pre-commit warning) - prints staged
+  restricted-path edits to stderr; exits 0 (warning, not block). Optional
+  Git hook at `scripts/git-hooks/pre-commit`; install with
+  `git config core.hooksPath scripts/git-hooks`.
+
+Shared restricted-set source of truth:
+`scripts/internal/living_docs_governance.py`. Update it together with this
+table when membership changes.
 
 ## Rules
 

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Living-docs-only governance pre-commit hook (warning only).
+#
+# Install with:
+#   git config core.hooksPath scripts/git-hooks
+#
+# Uninstall with:
+#   git config --unset core.hooksPath
+#
+# Exits 0 even on findings; the hard check is in CI.
+exec python scripts/warn_restricted_doc_edits.py

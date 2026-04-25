@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from study_query_llm.datasets.source_specs.banking77 import BANKING77_DATASET_SLUG
 from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
 from study_query_llm.pipeline.clustering import (
@@ -333,7 +334,11 @@ def main() -> None:
     )
     _validate_embedding_representation_for_analysis(args)
 
-    db = DatabaseConnectionV2(database_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     acquired = acquire(

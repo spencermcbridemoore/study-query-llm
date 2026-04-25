@@ -7,6 +7,7 @@ for the v2 immutable capture schema. Designed for PostgreSQL.
 
 from sqlalchemy import text
 
+from .write_intent import WriteIntent
 from .models_v2 import BaseV2
 from ._base_connection import BaseDatabaseConnection, logger
 
@@ -28,11 +29,15 @@ class DatabaseConnectionV2(BaseDatabaseConnection):
         connection_string: str,
         echo: bool = False,
         enable_pgvector: bool = True,
+        write_intent: WriteIntent | str | None = None,
+        quiet: bool = False,
     ):
         self.enable_pgvector = enable_pgvector
         super().__init__(
             connection_string,
             echo=echo,
+            write_intent=write_intent,
+            quiet=quiet,
             pool_pre_ping=True,
             pool_recycle=3600,
         )

@@ -41,6 +41,7 @@ from study_query_llm.algorithms.text_classification_methods import (
 )
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.services.method_service import MethodService
 
 
@@ -69,7 +70,11 @@ def main() -> int:
     print(f"DATABASE_URL set: yes  dry_run={args.dry_run}")
     print("=" * 60)
 
-    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        db_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     with db.session_scope() as session:

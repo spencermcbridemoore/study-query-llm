@@ -20,6 +20,7 @@ from sqlalchemy import text as sa_text
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import ProvenancedRun
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 
 setup_logging()
@@ -35,7 +36,11 @@ def normalize_provenanced_run_kinds(*, strict_constraint: bool = True) -> int:
         logger.error("DATABASE_URL environment variable not set")
         return 1
 
-    db = DatabaseConnectionV2(database_url, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=True,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     logger.info("=" * 72)

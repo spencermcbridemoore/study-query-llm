@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.services.jobs import JobRunContext, create_job_runner
 from study_query_llm.services.langgraph_provenance import record_langgraph_job_outcome
 from study_query_llm.services.method_service import MethodService
@@ -65,7 +66,11 @@ def main_langgraph_worker(argv: Optional[list[str]] = None) -> int:
     parser = build_langgraph_worker_arg_parser()
     args = parser.parse_args(argv)
 
-    db = DatabaseConnectionV2(database_url, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=True,
+        write_intent=default_write_intent_for_connection(database_url),
+    )
     db.init_db()
 
     # repo root: .../study-query-llm (from src/study_query_llm/services/jobs/...)

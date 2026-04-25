@@ -53,6 +53,7 @@ from study_query_llm.algorithms.canonical_configs import (
 )
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.services.method_service import MethodService
 
 
@@ -135,7 +136,11 @@ def main() -> int:
         sys.stdout.write("\n")
         return 0
 
-    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        db_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     method_reports: List[Dict[str, Any]] = []

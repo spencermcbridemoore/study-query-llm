@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import SweepRunClaim
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 
 setup_logging()
@@ -86,7 +87,11 @@ def run_migration() -> None:
     logger.info("Adding sweep worker safety constraints/table")
     logger.info("=" * 60)
 
-    db = DatabaseConnectionV2(database_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
 
     with db.engine.connect() as conn:
         try:

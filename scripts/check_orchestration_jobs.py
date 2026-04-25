@@ -18,6 +18,7 @@ if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.write_intent import WriteIntent
 
 
 def main() -> int:
@@ -42,7 +43,11 @@ def main() -> int:
         print("ERROR: DATABASE_URL environment variable not set.", file=sys.stderr)
         return 1
 
-    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        db_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     with db.session_scope() as session:

@@ -34,6 +34,7 @@ from study_query_llm.datasets.source_specs.banking77 import BANKING77_DATASET_SL
 from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.parse import find_dataframe_parquet_uri, parse
 from study_query_llm.pipeline.snapshot import snapshot
@@ -327,7 +328,12 @@ def main() -> int:
     os.environ["ARTIFACT_RUNTIME_ENV"] = "dev"
 
     database_url, used_fallback_db = _resolve_database_url(args.database_url, artifact_dir)
-    db = DatabaseConnectionV2(database_url, enable_pgvector=False)
+    write_intent = WriteIntent.SANDBOX if used_fallback_db else WriteIntent.CANONICAL
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=False,
+        write_intent=write_intent,
+    )
     db.init_db()
 
     acquire_spec = ACQUIRE_REGISTRY[BANKING77_DATASET_SLUG]

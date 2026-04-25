@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from sqlalchemy import text
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.utils.logging_config import setup_logging, get_logger
 
 setup_logging()
@@ -39,7 +40,11 @@ def add_indexes():
     logger.info("Adding sweep request / run_key indexes")
     logger.info("=" * 60)
 
-    db = DatabaseConnectionV2(database_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
 
     with db.engine.connect() as conn:
         # Index for clustering_run run_key lookup (used by compute_progress)

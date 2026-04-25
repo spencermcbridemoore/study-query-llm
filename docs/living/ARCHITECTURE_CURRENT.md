@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-18
+Last reviewed: 2026-04-24
 
 ## System Shape
 
@@ -23,7 +23,9 @@ jobRuntimes --> repoLayer
 - `src/study_query_llm/providers/`: provider abstraction and factory entrypoints.
 - `src/study_query_llm/db/raw_call_repository.py`: canonical data access for v2 capture and grouping.
 - `src/study_query_llm/db/models_v2.py`: canonical schema for immutable calls + mutable grouping relationships.
+- `src/study_query_llm/db/_base_connection.py`: canonical DB chokepoint (lane resolution, explicit write intent, lane/intent enforcement, canonical identity conflict checks).
 - `src/study_query_llm/pipeline/`: canonical five-stage dataset flow (`acquire`, `parse`, `snapshot`, `embed`, `analyze`) with contract enforcement via `run_stage`.
+- `src/study_query_llm/services/artifact_service.py`: artifact persistence abstraction with backend governance; canonical write intent is fail-closed to Azure Blob storage.
 - `provenanced_runs`: first-class execution provenance row using canonical `run_kind=execution`, with role semantics in `metadata_json.execution_role`, linked to `method_definitions` for versioned method identity.
 
 ## Current Execution Surfaces

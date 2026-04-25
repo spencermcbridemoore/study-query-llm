@@ -18,6 +18,7 @@ from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import CallArtifact
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.pipeline.runner import StageIdentity, run_stage
 from study_query_llm.pipeline.types import StageResult
 
@@ -29,13 +30,18 @@ def _resolve_db(
     *,
     db: DatabaseConnectionV2 | None,
     database_url: str | None,
+    write_intent: WriteIntent | str | None,
 ) -> tuple[DatabaseConnectionV2, bool]:
     if db is not None:
         return db, False
     resolved = (database_url or os.environ.get("DATABASE_URL") or "").strip()
     if not resolved:
         raise ValueError("database_url or DATABASE_URL is required when db is not provided")
-    created = DatabaseConnectionV2(resolved, enable_pgvector=False)
+    created = DatabaseConnectionV2(
+        resolved,
+        enable_pgvector=False,
+        write_intent=write_intent,
+    )
     created.init_db()
     return created, True
 
@@ -85,13 +91,18 @@ def acquire(
     force: bool = False,
     db: DatabaseConnectionV2 | None = None,
     database_url: str | None = None,
+    write_intent: WriteIntent | str | None = WriteIntent.CANONICAL,
     artifact_dir: str = "artifacts",
     fetch: Callable[[str], bytes] = fetch_url,
 ) -> StageResult:
     """
     Acquire source bytes and persist a dataset group with acquisition artifacts.
     """
-    db_conn, _owned_db = _resolve_db(db=db, database_url=database_url)
+    db_conn, _owned_db = _resolve_db(
+        db=db,
+        database_url=database_url,
+        write_intent=write_intent,
+    )
     fetched_files: list[FetchedFile] = download_acquisition_files(
         list(spec.file_specs()),
         fetch=fetch,

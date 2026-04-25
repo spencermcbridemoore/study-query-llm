@@ -18,6 +18,7 @@ from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import CallArtifact, Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.pipeline.runner import StageIdentity, allow_no_run_stage, run_stage
 from study_query_llm.pipeline.types import SnapshotRow, StageResult
 from study_query_llm.services.artifact_service import ArtifactService
@@ -32,13 +33,18 @@ def _resolve_db(
     *,
     db: DatabaseConnectionV2 | None,
     database_url: str | None,
+    write_intent: WriteIntent | str | None,
 ) -> tuple[DatabaseConnectionV2, bool]:
     if db is not None:
         return db, False
     resolved = (database_url or os.environ.get("DATABASE_URL") or "").strip()
     if not resolved:
         raise ValueError("database_url or DATABASE_URL is required when db is not provided")
-    created = DatabaseConnectionV2(resolved, enable_pgvector=False)
+    created = DatabaseConnectionV2(
+        resolved,
+        enable_pgvector=False,
+        write_intent=write_intent,
+    )
     created.init_db()
     return created, True
 
@@ -225,10 +231,15 @@ def parse(
     force: bool = False,
     db: DatabaseConnectionV2 | None = None,
     database_url: str | None = None,
+    write_intent: WriteIntent | str | None = WriteIntent.CANONICAL,
     artifact_dir: str = "artifacts",
 ) -> StageResult:
     """Build deterministic canonical dataframe parquet from an acquired dataset group."""
-    db_conn, _owned_db = _resolve_db(db=db, database_url=database_url)
+    db_conn, _owned_db = _resolve_db(
+        db=db,
+        database_url=database_url,
+        write_intent=write_intent,
+    )
     with db_conn.session_scope() as session:
         dataset_group = (
             session.query(Group)

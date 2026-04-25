@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from sqlalchemy import text
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.utils.logging_config import setup_logging, get_logger
 
 setup_logging()
@@ -88,7 +89,10 @@ def add_recipe_json_column():
     logger.info("Adding recipe_json column to method_definitions")
     logger.info("=" * 60)
 
-    db = DatabaseConnectionV2(database_url)
+    db = DatabaseConnectionV2(
+        database_url,
+        write_intent=WriteIntent.CANONICAL,
+    )
 
     # Create any missing v2 tables using the current ORM models. SQLAlchemy's
     # create_all is a no-op on existing tables, so this is safe on a live DB.

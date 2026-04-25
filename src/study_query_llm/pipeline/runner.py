@@ -150,6 +150,7 @@ def run_stage(
                 artifact_service = ArtifactService(
                     repository=artifact_repo,
                     artifact_dir=artifact_dir,
+                    write_intent=getattr(db, "write_intent", None),
                 )
                 artifact_uris = _normalize_artifact_uris(
                     write_artifacts(artifact_service, identity)

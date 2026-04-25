@@ -10,6 +10,7 @@ from sqlalchemy import func, text as sa_text
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.db.models_v2 import Group
+from study_query_llm.db.write_intent import WriteIntent
 
 def main():
     parser = argparse.ArgumentParser(description="Inspect clustering_run groups")
@@ -25,7 +26,11 @@ def main():
         print("ERROR: DATABASE_URL environment variable not set")
         sys.exit(1)
     
-    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        db_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
     
     with db.session_scope() as session:

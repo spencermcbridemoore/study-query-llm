@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.services.embeddings import (
     DEPLOYMENT_MAX_TOKENS,
     EmbeddingRequest,
@@ -288,7 +289,11 @@ async def main(
 
     # Initialize database
     print("\n[INFO] Initializing database...")
-    db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        DATABASE_URL,
+        enable_pgvector=True,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
     print("[OK] Database initialized")
 

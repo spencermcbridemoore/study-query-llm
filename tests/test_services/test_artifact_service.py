@@ -14,6 +14,7 @@ from pathlib import Path
 from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 
 
 @pytest.fixture
@@ -468,6 +469,38 @@ def test_artifact_service_strict_mode_disallows_local(monkeypatch, temp_artifact
 
     with pytest.raises(ValueError, match="Local artifact backend is disallowed"):
         ArtifactService(repository=None, artifact_dir=temp_artifact_dir)
+
+
+def test_artifact_service_canonical_intent_requires_azure_backend(
+    monkeypatch, temp_artifact_dir
+):
+    """Canonical writes must fail closed when backend resolves to local."""
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("ARTIFACT_RUNTIME_ENV", "dev")
+    monkeypatch.setenv("ARTIFACT_STORAGE_STRICT_MODE", "false")
+
+    with pytest.raises(RuntimeError, match="Canonical write intent requires azure_blob"):
+        ArtifactService(
+            repository=None,
+            artifact_dir=temp_artifact_dir,
+            write_intent=WriteIntent.CANONICAL,
+        )
+
+
+def test_artifact_service_canonical_intent_rejects_local_backend_override(
+    temp_artifact_dir,
+):
+    """Explicit local backend override is invalid under canonical write intent."""
+    from study_query_llm.storage.local import LocalStorageBackend
+
+    backend = LocalStorageBackend(base_dir=temp_artifact_dir)
+    with pytest.raises(RuntimeError, match="Canonical write intent requires azure_blob"):
+        ArtifactService(
+            repository=None,
+            artifact_dir=temp_artifact_dir,
+            storage_backend=backend,
+            write_intent=WriteIntent.CANONICAL,
+        )
 
 
 def test_artifact_service_uses_env_scoped_container(monkeypatch, temp_artifact_dir):

@@ -34,6 +34,7 @@ import study_query_llm.config  # noqa: F401  # loads .env for DATABASE_URL
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.experiments.mcq_run_persistence import MCQ_RUN_METADATA_VERSION
 from study_query_llm.experiments.sweep_request_types import build_mcq_run_key
 from study_query_llm.services.provenance_service import GROUP_TYPE_MCQ_RUN, GROUP_TYPE_MCQ_SWEEP
@@ -142,7 +143,11 @@ def main() -> int:
         return 1
 
     print("[INFO] Connecting and initializing DB schema (Neon cold start can take 10–30s)...", flush=True)
-    db = DatabaseConnectionV2(db_url, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        db_url,
+        enable_pgvector=True,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
     print("[INFO] DB ready; checking which runs are new (one query per file)...", flush=True)
 

@@ -25,6 +25,7 @@ if str(REPO_ROOT / "src") not in sys.path:
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import MethodDefinition, ProvenancedRun
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.services.provenanced_run_service import canonical_run_fingerprint
 
 
@@ -40,7 +41,11 @@ def main() -> int:
         print("ERROR: DATABASE_URL not set.", file=sys.stderr)
         return 1
 
-    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        db_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     updated = 0

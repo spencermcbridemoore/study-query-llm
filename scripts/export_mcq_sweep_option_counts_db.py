@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group, GroupLink
+from study_query_llm.db.write_intent import WriteIntent
 
 
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "experimental_results" / "mcq_db_option_counts"
@@ -461,7 +462,11 @@ def main() -> int:
         print("DATABASE_URL environment variable is required", file=sys.stderr)
         return 1
 
-    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        db_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     with db.session_scope() as session:

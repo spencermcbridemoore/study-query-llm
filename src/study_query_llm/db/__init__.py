@@ -21,6 +21,8 @@ from .models_v2 import (
 )
 from .connection_v2 import DatabaseConnectionV2
 from .raw_call_repository import RawCallRepository
+from .lane import Lane, resolve_lane
+from .write_intent import WriteIntent, assert_intent_matches_lane
 
 __all__ = [
     # V1 schema
@@ -36,5 +38,9 @@ __all__ = [
     "CallArtifact",
     "DatabaseConnectionV2",
     "RawCallRepository",
+    "Lane",
+    "resolve_lane",
+    "WriteIntent",
+    "assert_intent_matches_lane",
 ]
 

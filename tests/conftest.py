@@ -6,6 +6,7 @@ available to all test modules.
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 
@@ -14,6 +15,36 @@ import asyncio
 from typing import AsyncGenerator
 from study_query_llm.providers.base import BaseLLMProvider, ProviderResponse
 from study_query_llm.config import Config
+
+
+# Keep artifact backend defaults stable across developer shells.
+@pytest.fixture(autouse=True)
+def _default_artifact_env_for_tests(monkeypatch):
+    """Force a deterministic local artifact test baseline unless tests override."""
+    monkeypatch.setenv("ARTIFACT_RUNTIME_ENV", "dev")
+    monkeypatch.setenv("ARTIFACT_STORAGE_STRICT_MODE", "false")
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+
+
+@pytest.fixture(autouse=True)
+def _guard_test_db_lane_env(monkeypatch):
+    """
+    Keep test defaults away from accidental canonical/jetstream targets.
+
+    Individual tests can still override these vars with monkeypatch.
+    """
+    for var_name in ("CANONICAL_DATABASE_URL", "JETSTREAM_DATABASE_URL"):
+        value = (os.environ.get(var_name) or "").strip().lower()
+        if "jetstream" in value:
+            monkeypatch.delenv(var_name, raising=False)
+    database_url = (os.environ.get("DATABASE_URL") or "").strip().lower()
+    if "jetstream" in database_url:
+        monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    if not (os.environ.get("LOCAL_DATABASE_URL") or "").strip():
+        monkeypatch.setenv(
+            "LOCAL_DATABASE_URL",
+            "postgresql://study:study@127.0.0.1:5433/study_query_local",
+        )
 
 
 # Configure pytest-asyncio

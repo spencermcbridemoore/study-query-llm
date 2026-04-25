@@ -9,6 +9,7 @@ Database Connection Management (V1 -- deprecated).
 
 import warnings
 
+from .write_intent import WriteIntent
 from .models import Base
 from ._base_connection import BaseDatabaseConnection
 
@@ -20,13 +21,24 @@ class DatabaseConnection(BaseDatabaseConnection):
         Use ``DatabaseConnectionV2`` instead.
     """
 
-    def __init__(self, connection_string: str, echo: bool = False):
+    def __init__(
+        self,
+        connection_string: str,
+        echo: bool = False,
+        write_intent: WriteIntent | str | None = None,
+        quiet: bool = False,
+    ):
         warnings.warn(
             "DatabaseConnection (V1) is deprecated; use DatabaseConnectionV2",
             DeprecationWarning,
             stacklevel=2,
         )
-        super().__init__(connection_string, echo=echo)
+        super().__init__(
+            connection_string,
+            echo=echo,
+            write_intent=write_intent,
+            quiet=quiet,
+        )
 
     def _get_metadata(self):
         return Base.metadata

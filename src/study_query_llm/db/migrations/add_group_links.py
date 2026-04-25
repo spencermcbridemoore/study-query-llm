@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import BaseV2, GroupLink
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.utils.logging_config import setup_logging, get_logger
 
 setup_logging()
@@ -34,7 +35,10 @@ def add_group_links_table():
     logger.info("Adding GroupLink table to v2 schema")
     logger.info("=" * 60)
 
-    db = DatabaseConnectionV2(database_url)
+    db = DatabaseConnectionV2(
+        database_url,
+        write_intent=WriteIntent.CANONICAL,
+    )
     
     try:
         # Create the table

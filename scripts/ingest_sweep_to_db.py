@@ -32,6 +32,7 @@ from study_query_llm.config import config
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.db.models_v2 import CallArtifact, Group, GroupLink
+from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.utils.logging_config import get_logger, setup_logging
@@ -484,7 +485,12 @@ def main():
     print(f"sklearn version: {ingestion_env['sklearn_version']}")
     print(f"numpy version: {ingestion_env['numpy_version']}")
 
-    db = DatabaseConnectionV2(config.database.connection_string)
+    db = DatabaseConnectionV2(
+        config.database.connection_string,
+        write_intent=default_write_intent_for_connection(
+            config.database.connection_string
+        ),
+    )
     db.init_db()
 
     created = 0

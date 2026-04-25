@@ -28,6 +28,9 @@ jobs:
       - name: Run persistence contract lint
         run: python scripts/check_persistence_contract.py
 
+      - name: Run DB lane policy lint
+        run: python scripts/check_db_lane_policy.py
+
       - name: Assert EmbeddingVector refs removed
         run: |
           if rg "EmbeddingVector" src panel_app scripts tests --glob "*.py"; then

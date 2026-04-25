@@ -17,6 +17,7 @@ from study_query_llm.analysis.mcq_from_run import (
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_MCQ
 from study_query_llm.services.provenance_service import GROUP_TYPE_MCQ_RUN
 from study_query_llm.services.sweep_request_service import SweepRequestService
@@ -312,7 +313,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not url:
         print("DATABASE_URL is required", file=sys.stderr)
         sys.exit(1)
-    db = DatabaseConnectionV2(url, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        url,
+        enable_pgvector=True,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
     report = run_enqueued_analysis_jobs_for_request(
         db,

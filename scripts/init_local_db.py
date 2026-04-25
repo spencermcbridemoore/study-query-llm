@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", encoding="utf-8")
 
 
 def main():
@@ -46,9 +46,14 @@ def main():
     print(f"Connecting to local DB: ...@{display_url}")
 
     from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+    from study_query_llm.db.write_intent import WriteIntent
 
     # pgvector not needed for local archive — store vectors as JSON
-    db = DatabaseConnectionV2(local_url, enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        local_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.SANDBOX,
+    )
 
     try:
         with db.engine.connect() as conn:

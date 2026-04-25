@@ -25,6 +25,7 @@ from study_query_llm.analysis.mcq_analyze_request import run_mcq_analyses_for_re
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import SweepRunClaim
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.experiments.ingestion import ingest_result_to_db
 from study_query_llm.experiments.sweep_mcq_standalone import execute_mcq_standalone_run
 from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_CLUSTERING, SWEEP_TYPE_MCQ
@@ -609,7 +610,11 @@ def worker_main_queued(
     """Queue-based worker: receives job snapshots from job_queue, runs run_k_try, puts
     (job_id, result_ref, error) on result_queue. Creates own DB connection (Windows-safe).
     Does not call claim/complete/fail/promote."""
-    db = DatabaseConnectionV2(database_url, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=True,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
 
     datasets = _load_datasets(repo_root)
@@ -1328,7 +1333,11 @@ def main(argv: Optional[list] = None) -> None:
     parser = build_sweep_worker_arg_parser()
     args = parser.parse_args(argv)
 
-    db = DatabaseConnectionV2(DATABASE_URL, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        DATABASE_URL,
+        enable_pgvector=True,
+        write_intent=WriteIntent.CANONICAL,
+    )
     db.init_db()
     root = Path(__file__).resolve().parents[3]
     worker_id = args.worker_id or f"sweep-worker-{os.getpid()}"

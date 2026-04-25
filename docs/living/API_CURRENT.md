@@ -41,6 +41,8 @@ Notes:
 - v2 connection: `DatabaseConnectionV2`
 - v2 repository: `RawCallRepository`
 - Primary entities: `RawCall`, `Group`, `GroupMember`, `CallArtifact`, `EmbeddingVector`, `GroupLink`
+- Non-sqlite `DatabaseConnectionV2` constructors now require explicit `write_intent` (or `SQLLM_WRITE_INTENT`) with lane/intent compatibility checks at connection time.
+- Canonical-intent artifact writes are fail-closed to Azure Blob storage (`ArtifactService(write_intent=WriteIntent.CANONICAL)` rejects local backends).
 
 ## Sweep / Execution APIs
 

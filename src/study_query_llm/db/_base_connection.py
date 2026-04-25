@@ -3,18 +3,32 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 import os
+import sys
 from typing import Generator
 from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
+from .lane import (
+    CANONICAL_DATABASE_URL_ENV,
+    JETSTREAM_DATABASE_URL_ENV,
+    Lane,
+    resolve_canonical_target,
+    resolve_lane,
+)
+from .write_intent import (
+    WriteIntent,
+    assert_intent_matches_lane,
+    parse_write_intent,
+)
 from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 _DESTRUCTIVE_DDL_OVERRIDE_ENV = "SQLLM_ALLOW_DESTRUCTIVE_DDL"
 _JETSTREAM_DATABASE_URL_ENV = "JETSTREAM_DATABASE_URL"
+_WRITE_INTENT_ENV = "SQLLM_WRITE_INTENT"
 
 
 @dataclass(frozen=True)
@@ -95,6 +109,91 @@ def _is_sqlite_url(connection_string: str) -> bool:
     return scheme.startswith("sqlite")
 
 
+def _normalize_write_intent(raw_or_enum: WriteIntent | str | None) -> WriteIntent | None:
+    """Normalize optional write-intent constructor input."""
+    if raw_or_enum is None:
+        return None
+    if isinstance(raw_or_enum, WriteIntent):
+        return raw_or_enum
+    return parse_write_intent(raw_or_enum)
+
+
+def _intent_from_env() -> WriteIntent | None:
+    """Parse SQLLM_WRITE_INTENT from environment when provided."""
+    env_raw = (os.environ.get(_WRITE_INTENT_ENV) or "").strip()
+    if not env_raw:
+        return None
+    return parse_write_intent(env_raw)
+
+
+def _identity_label_for_lane(lane: Lane, source_var: str | None) -> str:
+    """Return human-readable identity label for preflight banner."""
+    if lane is Lane.CANONICAL:
+        if source_var == JETSTREAM_DATABASE_URL_ENV:
+            return "Jetstream"
+        return "canonical-target"
+    if lane is Lane.LOCAL_POSTGRES:
+        return "local clone"
+    if lane is Lane.SQLITE_MEMORY:
+        return "sqlite memory"
+    if lane is Lane.SQLITE_FILE:
+        return "sqlite file"
+    return "unknown"
+
+
+def _print_preflight_banner(
+    connection_string: str,
+    lane: Lane,
+    write_intent: WriteIntent,
+    source_var: str | None,
+) -> None:
+    """Print a visible DB preflight banner to stderr."""
+    identity = _identity_label_for_lane(lane, source_var)
+    backend = (os.environ.get("ARTIFACT_STORAGE_BACKEND") or "local").strip().lower()
+    source_var_display = source_var or "(none)"
+    print("=" * 64, file=sys.stderr)
+    print("  STUDY-QUERY-LLM - DB SESSION", file=sys.stderr)
+    print(f"  lane:           {lane.name:<15} (identity: {identity})", file=sys.stderr)
+    print(f"  source_var:     {source_var_display}", file=sys.stderr)
+    print(f"  intent:         {write_intent.name}", file=sys.stderr)
+    print(f"  artifact_back:  {backend}", file=sys.stderr)
+    print(f"  target:         {_mask_password(connection_string)}", file=sys.stderr)
+    print(
+        f"  destructive:    BLOCKED unless {_DESTRUCTIVE_DDL_OVERRIDE_ENV}=1",
+        file=sys.stderr,
+    )
+    if lane is not Lane.CANONICAL:
+        print(
+            "  WARNING:        this work will NOT propagate to the canonical DB",
+            file=sys.stderr,
+        )
+    print("=" * 64, file=sys.stderr)
+
+
+def _select_write_intent(
+    *,
+    lane: Lane,
+    explicit_intent: WriteIntent | None,
+    env_intent: WriteIntent | None,
+) -> WriteIntent:
+    """Resolve final write intent with Phase 1c mandatory semantics."""
+    if explicit_intent is not None and env_intent is not None and explicit_intent != env_intent:
+        raise ValueError(
+            f"write_intent={explicit_intent.value!r} conflicts with "
+            f"{_WRITE_INTENT_ENV}={env_intent.value!r}. Use one consistent intent."
+        )
+    if explicit_intent is not None:
+        return explicit_intent
+    if env_intent is not None:
+        return env_intent
+    if lane in {Lane.SQLITE_FILE, Lane.SQLITE_MEMORY}:
+        return WriteIntent.SANDBOX
+    raise ValueError(
+        "Non-sqlite database connections require an explicit write intent. "
+        "Pass write_intent=WriteIntent.<...> or set SQLLM_WRITE_INTENT."
+    )
+
+
 class BaseDatabaseConnection:
     """Shared engine, session, and lifecycle management.
 
@@ -102,7 +201,32 @@ class BaseDatabaseConnection:
     and may override :pymethod:`init_db` for schema-specific setup (e.g. pgvector).
     """
 
-    def __init__(self, connection_string: str, *, echo: bool = False, **engine_kwargs):
+    def __init__(
+        self,
+        connection_string: str,
+        *,
+        echo: bool = False,
+        write_intent: WriteIntent | str | None = None,
+        quiet: bool = False,
+        **engine_kwargs,
+    ):
+        self.connection_string = connection_string
+        canonical_target = resolve_canonical_target()
+        self.canonical_source_var = canonical_target.source_var if canonical_target else None
+        self.lane = resolve_lane(connection_string)
+        self.write_intent = _select_write_intent(
+            lane=self.lane,
+            explicit_intent=_normalize_write_intent(write_intent),
+            env_intent=_intent_from_env(),
+        )
+        assert_intent_matches_lane(self.write_intent, self.lane)
+        if not quiet:
+            _print_preflight_banner(
+                connection_string=connection_string,
+                lane=self.lane,
+                write_intent=self.write_intent,
+                source_var=self.canonical_source_var,
+            )
         self.connection_string = connection_string
         self.engine = create_engine(connection_string, echo=echo, **engine_kwargs)
         self.SessionLocal = sessionmaker(

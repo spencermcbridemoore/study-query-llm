@@ -17,6 +17,7 @@ import docker
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.experiments.sweep_worker_main import EMBEDDING_ENGINES, worker_main_queued
 from study_query_llm.providers.managers.local_docker_tei import LocalDockerTEIManager
 from study_query_llm.services.jobs.job_reducer_service import JobReducerService
@@ -38,7 +39,11 @@ def _run_cached_job_supervisor(
     repo_root: Path,
     database_url: str,
 ) -> None:
-    db = DatabaseConnectionV2(database_url, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=True,
+        write_intent=default_write_intent_for_connection(database_url),
+    )
     db.init_db()
 
     manager = multiprocessing.Manager()
@@ -364,7 +369,11 @@ def main_engine_supervisor(argv: Optional[list[str]] = None) -> int:
     parser = build_engine_supervisor_arg_parser()
     args = parser.parse_args(argv)
 
-    db = DatabaseConnectionV2(database_url, enable_pgvector=True)
+    db = DatabaseConnectionV2(
+        database_url,
+        enable_pgvector=True,
+        write_intent=default_write_intent_for_connection(database_url),
+    )
     db.init_db()
     repo_root = Path(__file__).resolve().parents[4]
 

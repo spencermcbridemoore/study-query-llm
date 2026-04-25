@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
 import numpy as np
 
+from ..db.write_intent import WriteIntent, parse_write_intent
 from ..utils.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -65,6 +66,7 @@ class ArtifactService:
         repository: Optional["RawCallRepository"] = None,
         artifact_dir: str = DEFAULT_ARTIFACT_DIR,
         storage_backend: Optional["StorageBackend"] = None,
+        write_intent: WriteIntent | str | None = None,
     ):
         """
         Initialize the artifact service.
@@ -78,12 +80,35 @@ class ArtifactService:
         self.repository = repository
         self.artifact_dir = Path(artifact_dir)
         self._operation_counts: dict[str, int] = defaultdict(int)
+        self.write_intent = self._normalize_write_intent(write_intent)
         if storage_backend is not None:
             self.storage = storage_backend
         else:
-            self.storage = self._resolve_default_backend(artifact_dir)
+            self.storage = self._resolve_default_backend(
+                artifact_dir,
+                enforce_azure=self.write_intent is WriteIntent.CANONICAL,
+            )
+        self._enforce_backend_intent_contract()
 
-    def _resolve_default_backend(self, artifact_dir: str):
+    @staticmethod
+    def _normalize_write_intent(
+        write_intent: WriteIntent | str | None,
+    ) -> WriteIntent | None:
+        if write_intent is None:
+            return None
+        if isinstance(write_intent, WriteIntent):
+            return write_intent
+        return parse_write_intent(write_intent)
+
+    def _enforce_backend_intent_contract(self) -> None:
+        backend_type = str(getattr(self.storage, "backend_type", "unknown")).lower()
+        if self.write_intent is WriteIntent.CANONICAL and backend_type != "azure_blob":
+            raise RuntimeError(
+                "Canonical write intent requires azure_blob artifact storage backend. "
+                f"Resolved backend={backend_type!r}."
+            )
+
+    def _resolve_default_backend(self, artifact_dir: str, *, enforce_azure: bool):
         """
         Resolve storage backend from ARTIFACT_STORAGE_BACKEND env.
         Safe fallback to local when unset or when azure_blob cannot be created.
@@ -96,7 +121,12 @@ class ArtifactService:
         if runtime_env in {"stage", "prod"}:
             strict_mode = True
 
-        if backend_type == "local" and strict_mode:
+        if backend_type == "local" and (strict_mode or enforce_azure):
+            if enforce_azure:
+                raise RuntimeError(
+                    "Canonical write intent requires azure_blob artifact storage backend. "
+                    "Set ARTIFACT_STORAGE_BACKEND=azure_blob."
+                )
             raise ValueError(
                 "Local artifact backend is disallowed in strict mode "
                 f"(runtime={runtime_env}). Set ARTIFACT_STORAGE_BACKEND=azure_blob."
@@ -126,9 +156,10 @@ class ArtifactService:
                     runtime_env=runtime_env,
                 )
             except (ValueError, ImportError) as e:
-                if strict_mode:
+                if strict_mode or enforce_azure:
                     raise RuntimeError(
-                        "Failed to configure azure_blob artifact backend in strict mode."
+                        "Failed to configure azure_blob artifact backend in strict mode "
+                        "or canonical intent mode."
                     ) from e
                 logger.warning(
                     "ARTIFACT_STORAGE_BACKEND=azure_blob requested but backend unavailable: %s. "

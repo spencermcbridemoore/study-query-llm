@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", encoding="utf-8")
 
 
 def copy_groups_to_local(online_session, local_session, group_ids: list[int], dry_run: bool) -> dict[int, int]:
@@ -178,6 +178,7 @@ def main():
 
     from study_query_llm.db.connection_v2 import DatabaseConnectionV2
     from study_query_llm.db.raw_call_repository import RawCallRepository
+    from study_query_llm.db.write_intent import WriteIntent
     from study_query_llm.services.data_quality_service import DataQualityService
     from study_query_llm.db.models_v2 import RawCall, GroupMember, Group
 
@@ -186,8 +187,16 @@ def main():
     if args.dry_run:
         print("[DRY RUN] No changes will be written or deleted.\n")
 
-    online_db = DatabaseConnectionV2(online_url, enable_pgvector=False)
-    local_db = DatabaseConnectionV2(local_url, enable_pgvector=False)
+    online_db = DatabaseConnectionV2(
+        online_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.CANONICAL,
+    )
+    local_db = DatabaseConnectionV2(
+        local_url,
+        enable_pgvector=False,
+        write_intent=WriteIntent.READ_MIRROR,
+    )
 
     # --- Step 1: Find defective call IDs on the online DB ---
     with online_db.session_scope() as online_session:

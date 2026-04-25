@@ -65,6 +65,7 @@ from study_query_llm.datasets.source_specs.sources_uncertainty_zenodo import (
     parse_sources_uncertainty_pm_snapshot,
 )
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.parse import find_dataframe_parquet_uri, parse
 from study_query_llm.pipeline.snapshot import snapshot
@@ -310,7 +311,16 @@ def main() -> int:
         print(f"[setup] artifact_dir = {artifact_dir}", flush=True)
         print(f"[setup] db_url       = {db_url}", flush=True)
 
-        db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+        write_intent = (
+            WriteIntent.SANDBOX
+            if str(db_url).strip().lower().startswith("sqlite")
+            else WriteIntent.CANONICAL
+        )
+        db = DatabaseConnectionV2(
+            db_url,
+            enable_pgvector=False,
+            write_intent=write_intent,
+        )
         db.init_db()
 
         results: list[dict[str, Any]] = []

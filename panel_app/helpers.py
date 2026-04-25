@@ -9,6 +9,7 @@ from typing import Optional
 from study_query_llm.config import config, database_connection_summary
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.providers.factory import ProviderFactory
 from study_query_llm.services.inference_service import InferenceService
 from study_query_llm.services.study_service import StudyService
@@ -35,7 +36,10 @@ def get_db_connection() -> DatabaseConnectionV2:
             "Initializing v2 database connection (%s)",
             database_connection_summary(config.database.connection_string),
         )
-        _db_connection = DatabaseConnectionV2(config.database.connection_string)
+        _db_connection = DatabaseConnectionV2(
+            config.database.connection_string,
+            write_intent=WriteIntent.CANONICAL,
+        )
         _db_connection.init_db()
         logger.info("V2 database connection established")
     return _db_connection

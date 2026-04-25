@@ -499,11 +499,11 @@ defense-in-depth ordering matters:
   connection wrapper).
 - **Phase 3 (Postgres `CHECK` constraint)** catches the same class of defect
   at the **database layer** for any path that bypasses both Phase 1 and
-  Phase 2 — for example, the eight direct `create_engine(...)` sites in
-  subagent 1 §D (which appear across §6.10 §A, §B, §D, §E), or any future
-  raw-SQL inserter. This is why Phase 3 is in MVP (§6.9): until every site
-  in §6.10 has been migrated to flow through the chokepoint, direct-engine
-  writers remain a real bypass surface.
+  Phase 2 — for example, any of the direct `create_engine(...)` sites
+  enumerated in the §6.10 migration checklist (originally surfaced by
+  subagent 1 §D), or any future raw-SQL inserter. This is why Phase 3 is in
+  MVP (§6.9): until every site in §6.10 has been migrated to flow through
+  the chokepoint, direct-engine writers remain a real bypass surface.
 
 The three layers cover the defect at three independent altitudes; any one
 of them in isolation closes the user's stated concern, but shipping all
@@ -830,10 +830,28 @@ Per subagent 6 §C:
 >   back the paired raw_calls placeholder in the same transaction. Coverage
 >   gap: a hypothetical future direct-engine writer that wrote
 >   `raw_calls.response_json[uri]` **without** a paired `call_artifacts`
->   row would not be caught by Phase 3. No such caller exists today
->   (subagent 2 §A's writer inventory has no direct `raw_calls` insert
->   outside `ArtifactService` / `RawCallRepository`); Phase 5's sentinel
->   index covers the case post-hoc.
+>   row would not be caught by Phase 3. Two direct `RawCall` writers
+>   outside `RawCallRepository` already exist today —
+>   `scripts/sync_from_online.py:179`
+>   (`pg_insert(RawCall).values(...).on_conflict_do_nothing` on a raw
+>   `create_engine(local_url)` session at `:295`) and
+>   `scripts/archive_defective_data.py:98-112`
+>   (`local_session.add(RawCall(...))` on `DatabaseConnectionV2(local_url)`
+>   at `:190`) — but both default to `LOCAL_DATABASE_URL`
+>   (`sync_from_online.py:255`, `archive_defective_data.py:170`),
+>   `sync_from_online.py` additionally blocks non-loopback targets unless
+>   `--allow-remote-target` is passed (`:276`), and **each co-inserts the
+>   paired `CallArtifact` row in the same session as the `RawCall`**
+>   (`sync_from_online.py:206-218`, `archive_defective_data.py:145-155, 217`),
+>   so the Phase 3 `CHECK` on `call_artifacts.uri` would reject the
+>   COMMIT and roll back the paired `raw_calls` mirror if either script
+>   were ever misconfigured against canonical.
+>   `archive_defective_data.py` is additionally gated by the Phase 1
+>   chokepoint (it uses `DatabaseConnectionV2`);
+>   `sync_from_online.py` bypasses Phase 1 (raw `create_engine`) but is
+>   still caught at Phase 3 plus its loopback guard. Phase 5's sentinel
+>   index covers the residual case of a future writer that emits a
+>   `raw_calls` row **without** a paired `call_artifacts` row.
 > - **Other artifact-bearing JSON columns**
 >   (`groups.metadata_json[artifact_uri]`, `analysis_results.result_json[uris]`,
 >   `provenanced_runs.result_ref`, `orchestration_jobs.result_ref`): MVP
@@ -842,8 +860,8 @@ Per subagent 6 §C:
 >   `WriteIntent` does not match the resolved lane. §3.3 confirms these
 >   columns currently hold **zero** URIs in the canonical DB, so the
 >   residual risk is narrow: a future first-write that simultaneously
->   (a) bypasses the chokepoint (one of the eight direct `create_engine`
->   sites in subagent 1 §D, or a brand-new such site) **and** (b) targets
+>   (a) bypasses the chokepoint (any of the direct `create_engine(...)`
+>   sites enumerated in §6.10, or a brand-new such site) **and** (b) targets
 >   one of these JSON paths. Phase 5 (sentinel index) catches the
 >   `raw_calls` analogue post-hoc; extending similar sentinels (or JSON
 >   `CHECK`/trigger constraints) to the other four columns is tracked as
@@ -912,6 +930,16 @@ rg "create_engine\(" \
   -g '!**/tests/**' \
   -g '!docs/audit/**'
 ```
+
+**Operator note on false positives.** The `rg` patterns above match
+`DatabaseConnectionV2(` and `create_engine(` as raw substrings, so they
+will also surface docstring/comment usage examples that are not real
+call sites. The canonical example is `src/study_query_llm/db/connection_v2.py:19`,
+which shows `db = DatabaseConnectionV2("postgresql://user:pass@localhost/dbname")`
+inside the class docstring. When triaging the output, eyeball each
+match for the surrounding `"""` / `#` context and skip docstring,
+comment, and type-stub examples; only true call-site invocations need
+to flow through the chokepoint and declare a `WriteIntent`.
 
 The original draft of this section claimed exhaustiveness and was based on
 subagent 2 §A; the Codex audit found additional sites that subagent 2 missed

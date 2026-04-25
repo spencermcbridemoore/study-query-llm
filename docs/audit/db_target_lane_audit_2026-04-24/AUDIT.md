@@ -843,9 +843,13 @@ Per subagent 6 §C:
 >   `--allow-remote-target` is passed (`:276`), and **each co-inserts the
 >   paired `CallArtifact` row in the same session as the `RawCall`**
 >   (`sync_from_online.py:206-218`, `archive_defective_data.py:145-155, 217`),
->   so the Phase 3 `CHECK` on `call_artifacts.uri` would reject the
->   COMMIT and roll back the paired `raw_calls` mirror if either script
->   were ever misconfigured against canonical.
+>   so the Phase 3 `CHECK` on `call_artifacts.uri` would fail the
+>   transaction during flush/commit (the constraint is non-deferrable, so
+>   it fires at the offending `INSERT` statement when SQLAlchemy `flush()`s
+>   the pending insert — see `archive_defective_data.py:116,155` flush
+>   points and `sync_from_online.py:218` commit point), rolling back the
+>   paired `raw_calls` mirror in the same session if either script were
+>   ever misconfigured against canonical.
 >   `archive_defective_data.py` is additionally gated by the Phase 1
 >   chokepoint (it uses `DatabaseConnectionV2`);
 >   `sync_from_online.py` bypasses Phase 1 (raw `create_engine`) but is
@@ -936,10 +940,17 @@ rg "create_engine\(" \
 will also surface docstring/comment usage examples that are not real
 call sites. The canonical example is `src/study_query_llm/db/connection_v2.py:19`,
 which shows `db = DatabaseConnectionV2("postgresql://user:pass@localhost/dbname")`
-inside the class docstring. When triaging the output, eyeball each
-match for the surrounding `"""` / `#` context and skip docstring,
-comment, and type-stub examples; only true call-site invocations need
-to flow through the chokepoint and declare a `WriteIntent`.
+inside the class docstring. Additional docstring false positives appear in
+the top-of-module `Usage:` blocks of several service modules — at minimum
+`src/study_query_llm/services/artifact_service.py:12`,
+`src/study_query_llm/services/summarization_service.py:12`,
+`src/study_query_llm/services/provenance_service.py:12`, and
+`src/study_query_llm/services/embeddings/service.py:9` — each of which
+contains a `db = DatabaseConnectionV2("postgresql://...")` example line.
+When triaging the output, eyeball each match for the surrounding `"""` /
+`#` context and skip docstring, comment, and type-stub examples; only
+true call-site invocations need to flow through the chokepoint and
+declare a `WriteIntent`.
 
 The original draft of this section claimed exhaustiveness and was based on
 subagent 2 §A; the Codex audit found additional sites that subagent 2 missed

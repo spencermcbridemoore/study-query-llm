@@ -25,7 +25,16 @@ async def fetch_embeddings_async(
     db: DatabaseConnectionV2,
     timeout: float = 600.0,
     chunk_size: Optional[int] = None,
+    chunk_worker_concurrency: int = 1,
+    chunk_circuit_breaker_enabled: bool = False,
+    chunk_failure_fallback_threshold: int = 2,
     provider_name: str = "azure",
+    max_retries: int = 6,
+    initial_wait: float = 1.0,
+    max_wait: float = 30.0,
+    singleflight_lease_seconds: int = 45,
+    singleflight_wait_timeout_seconds: float = 90.0,
+    singleflight_poll_seconds: float = 0.1,
     l3_cache_key: Optional[str] = None,
     l3_entry_max: Optional[int] = None,
     l3_snapshot_group_id: Optional[int] = None,
@@ -36,6 +45,16 @@ async def fetch_embeddings_async(
     async def _fetch() -> np.ndarray:
         factory = ProviderFactory()
         embedding_provider = factory.create_embedding_provider(provider_name)
+        service_kwargs = {
+            "max_retries": int(max_retries),
+            "initial_wait": float(initial_wait),
+            "max_wait": float(max_wait),
+            "singleflight_lease_seconds": int(singleflight_lease_seconds),
+            "singleflight_wait_timeout_seconds": float(
+                singleflight_wait_timeout_seconds
+            ),
+            "singleflight_poll_seconds": float(singleflight_poll_seconds),
+        }
 
         def _load_l3_hit() -> Optional[np.ndarray]:
             with db.session_scope() as session:
@@ -107,13 +126,25 @@ async def fetch_embeddings_async(
                 total = len(texts_list)
                 step = int(chunk_size)
                 total_chunks = (total + step - 1) // step
-                chunk_mats: List[np.ndarray] = []
-                for chunk_idx, start in enumerate(range(0, total, step), start=1):
-                    texts_chunk = texts_list[start : start + step]
+                chunk_mats: List[Optional[np.ndarray]] = [None] * total_chunks
+                requested_workers = max(1, int(chunk_worker_concurrency))
+                worker_count = (
+                    requested_workers if provider_name == "openrouter" else 1
+                )
+                circuit_breaker_enabled = bool(chunk_circuit_breaker_enabled)
+                failure_threshold = max(1, int(chunk_failure_fallback_threshold))
+
+                async def _run_chunk(
+                    chunk_zero_idx: int,
+                    start: int,
+                    texts_chunk: List[str],
+                ) -> tuple[int, int, int, np.ndarray]:
                     with db.session_scope() as session:
                         repo = RawCallRepository(session)
                         service = EmbeddingService(
-                            repository=repo, provider=embedding_provider
+                            repository=repo,
+                            provider=embedding_provider,
+                            **service_kwargs,
                         )
                         requests = [
                             EmbeddingRequest(
@@ -126,18 +157,178 @@ async def fetch_embeddings_async(
                         responses = await service.get_embeddings_batch(
                             requests, chunk_size=step
                         )
-                    chunk_mats.append(
-                        np.asarray([resp.vector for resp in responses], dtype=np.float64)
+                    return (
+                        chunk_zero_idx,
+                        start,
+                        len(texts_chunk),
+                        np.asarray([resp.vector for resp in responses], dtype=np.float64),
                     )
-                    if total_chunks <= 20 or chunk_idx == total_chunks or chunk_idx % 10 == 0:
-                        logger.info(
-                            "Embedding progress: chunk %s/%s (%s/%s rows)",
-                            chunk_idx,
-                            total_chunks,
-                            min(start + len(texts_chunk), total),
-                            total,
+
+                chunk_specs = list(enumerate(range(0, total, step), start=0))
+                if worker_count <= 1:
+                    for chunk_zero_idx, start in chunk_specs:
+                        texts_chunk = texts_list[start : start + step]
+                        idx, chunk_start, chunk_len, chunk_matrix = await _run_chunk(
+                            chunk_zero_idx=chunk_zero_idx,
+                            start=start,
+                            texts_chunk=texts_chunk,
                         )
-                matrix = np.vstack(chunk_mats) if chunk_mats else np.empty((0, 0), dtype=np.float64)
+                        chunk_mats[idx] = chunk_matrix
+                        chunk_idx = idx + 1
+                        if (
+                            total_chunks <= 20
+                            or chunk_idx == total_chunks
+                            or chunk_idx % 10 == 0
+                        ):
+                            logger.info(
+                                "Embedding progress: chunk %s/%s (%s/%s rows)",
+                                chunk_idx,
+                                total_chunks,
+                                min(chunk_start + chunk_len, total),
+                                total,
+                            )
+                else:
+                    active_worker_limit = worker_count
+                    chunk_failures = 0
+                    next_spec_idx = 0
+                    in_flight: dict[asyncio.Task, tuple[int, int, int]] = {}
+                    failed_specs: list[tuple[int, int, int]] = []
+
+                    async def _run_limited(
+                        chunk_zero_idx: int,
+                        start: int,
+                    ) -> tuple[int, int, int, np.ndarray]:
+                        texts_chunk = texts_list[start : start + step]
+                        return await _run_chunk(
+                            chunk_zero_idx=chunk_zero_idx,
+                            start=start,
+                            texts_chunk=texts_chunk,
+                        )
+
+                    while next_spec_idx < len(chunk_specs) or in_flight:
+                        while (
+                            next_spec_idx < len(chunk_specs)
+                            and len(in_flight) < active_worker_limit
+                        ):
+                            chunk_zero_idx, start = chunk_specs[next_spec_idx]
+                            chunk_len = min(step, total - start)
+                            task = asyncio.create_task(
+                                _run_limited(chunk_zero_idx=chunk_zero_idx, start=start)
+                            )
+                            in_flight[task] = (chunk_zero_idx, start, chunk_len)
+                            next_spec_idx += 1
+
+                        done, _ = await asyncio.wait(
+                            in_flight.keys(),
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        for task in done:
+                            chunk_zero_idx, chunk_start, chunk_len = in_flight.pop(task)
+                            try:
+                                idx, row_start, row_len, chunk_matrix = await task
+                                chunk_mats[idx] = chunk_matrix
+                                chunk_idx = idx + 1
+                                if (
+                                    total_chunks <= 20
+                                    or chunk_idx == total_chunks
+                                    or chunk_idx % 10 == 0
+                                ):
+                                    logger.info(
+                                        "Embedding progress: chunk %s/%s (%s/%s rows)",
+                                        chunk_idx,
+                                        total_chunks,
+                                        min(row_start + row_len, total),
+                                        total,
+                                    )
+                            except Exception as exc:
+                                # Each exception here is terminal *after* EmbeddingService
+                                # retry/backoff handling for that chunk call.
+                                chunk_failures += 1
+                                failed_specs.append(
+                                    (chunk_zero_idx, chunk_start, chunk_len)
+                                )
+                                logger.error(
+                                    "Chunk embedding failed: chunk=%s/%s rows=[%s:%s) "
+                                    "model=%s provider=%s error=%s",
+                                    chunk_zero_idx + 1,
+                                    total_chunks,
+                                    chunk_start,
+                                    chunk_start + chunk_len,
+                                    deployment,
+                                    provider_name,
+                                    exc,
+                                    exc_info=True,
+                                )
+                                if (
+                                    circuit_breaker_enabled
+                                    and active_worker_limit > 1
+                                    and chunk_failures >= failure_threshold
+                                ):
+                                    active_worker_limit = 1
+                                    logger.warning(
+                                        "Chunk circuit breaker triggered for model=%s "
+                                        "(provider=%s, failures=%s, threshold=%s). "
+                                        "Downgrading remaining undispatched chunks to serial.",
+                                        deployment,
+                                        provider_name,
+                                        chunk_failures,
+                                        failure_threshold,
+                                    )
+
+                    if failed_specs and circuit_breaker_enabled and active_worker_limit == 1:
+                        logger.info(
+                            "Retrying %s failed chunks serially after circuit breaker for model=%s",
+                            len(failed_specs),
+                            deployment,
+                        )
+                        for chunk_zero_idx, start, chunk_len in failed_specs:
+                            texts_chunk = texts_list[start : start + step]
+                            try:
+                                idx, row_start, row_len, chunk_matrix = await _run_chunk(
+                                    chunk_zero_idx=chunk_zero_idx,
+                                    start=start,
+                                    texts_chunk=texts_chunk,
+                                )
+                                chunk_mats[idx] = chunk_matrix
+                                logger.info(
+                                    "Recovered chunk %s/%s (%s/%s rows) in serial fallback",
+                                    idx + 1,
+                                    total_chunks,
+                                    min(row_start + row_len, total),
+                                    total,
+                                )
+                            except Exception as exc:
+                                logger.error(
+                                    "Serial fallback failed for chunk=%s/%s rows=[%s:%s) "
+                                    "model=%s provider=%s error=%s",
+                                    chunk_zero_idx + 1,
+                                    total_chunks,
+                                    start,
+                                    start + chunk_len,
+                                    deployment,
+                                    provider_name,
+                                    exc,
+                                    exc_info=True,
+                                )
+                                raise
+                    elif failed_specs:
+                        first_idx, first_start, first_len = failed_specs[0]
+                        raise RuntimeError(
+                            "Chunk embedding failed without fallback "
+                            f"(chunk={first_idx + 1}/{total_chunks}, "
+                            f"rows=[{first_start}:{first_start + first_len}), "
+                            f"model={deployment}, provider={provider_name})."
+                        )
+
+                if any(mat is None for mat in chunk_mats):
+                    raise RuntimeError(
+                        "Chunk embedding assembly failed: one or more chunks are missing."
+                    )
+                matrix = (
+                    np.vstack([mat for mat in chunk_mats if mat is not None])
+                    if chunk_mats
+                    else np.empty((0, 0), dtype=np.float64)
+                )
                 _store_l3_matrix(matrix)
                 return matrix
 
@@ -145,7 +336,9 @@ async def fetch_embeddings_async(
             with db.session_scope() as session:
                 repo = RawCallRepository(session)
                 service = EmbeddingService(
-                    repository=repo, provider=embedding_provider
+                    repository=repo,
+                    provider=embedding_provider,
+                    **service_kwargs,
                 )
                 requests = [
                     EmbeddingRequest(

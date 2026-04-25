@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from openai.types.embedding import Embedding as EmbeddingObj
 
 from study_query_llm.providers.openai_compatible_embedding_provider import (
+    MalformedEmbeddingResponseError,
     OpenAICompatibleEmbeddingProvider,
 )
 from study_query_llm.providers.base_embedding import EmbeddingResult
@@ -80,6 +81,27 @@ async def test_create_embeddings_omits_dimensions_when_none(provider):
 async def test_validate_model_defaults_to_true(provider):
     """Default validate_model always returns True."""
     assert await provider.validate_model("any-model") is True
+
+
+@pytest.mark.asyncio
+async def test_create_embeddings_raises_for_missing_data_field(provider):
+    """Missing response.data raises typed payload error."""
+    mock_response = object()
+    provider._mock_client.embeddings.create = AsyncMock(return_value=mock_response)
+
+    with pytest.raises(MalformedEmbeddingResponseError, match="missing 'data'"):
+        await provider.create_embeddings(["text"], "bge-m3")
+
+
+@pytest.mark.asyncio
+async def test_create_embeddings_raises_for_empty_data(provider):
+    """Empty data for non-empty input raises typed payload error."""
+    mock_response = MagicMock()
+    mock_response.data = []
+    provider._mock_client.embeddings.create = AsyncMock(return_value=mock_response)
+
+    with pytest.raises(MalformedEmbeddingResponseError, match="empty 'data'"):
+        await provider.create_embeddings(["text"], "bge-m3")
 
 
 @pytest.mark.asyncio

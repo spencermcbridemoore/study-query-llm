@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-24
+Last reviewed: 2026-04-25
 
 ## Scope
 
@@ -56,6 +56,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - `parse` is the canonical dataframe stage: it writes `dataset_dataframe` groups and `dataset_canonical_parquet` artifacts keyed by stable parser identity (`parser_id` + `parser_version`) and dataframe hash.
 - `snapshot` is now declarative (`SubquerySpec`) and writes deterministic resolved-index artifacts (`dataset_subquery_spec`) keyed by `spec_hash` + `resolved_index_hash`; unseeded sampling requests are rejected; `category_filter` enables strict typed membership filtering against parser-emitted keys nested in `extra_json` while preserving legacy `spec_hash` behavior when unset.
 - `embed` now persists/reuses dataframe-level `full` matrices only (`dataset_key=dataframe:<id>:full`); non-full representations are intentionally deferred to analyze-time derivation.
+- `embed` forwards optional embedding runtime knobs (`chunk_worker_concurrency`, retry/backoff settings, singleflight settings, chunk circuit-breaker controls) to the helper/service chain with safe defaults preserving legacy behavior.
 - `analyze` now requires dual input lineage (`snapshot_group_id`, `embedding_batch_group_id`), slices text/vectors by the same resolved-index ordering, and includes representation identity plus `input_snapshot_group_id` in canonical run fingerprinting.
 - BANK77 execution is scriptable via `scripts/run_bank77_pipeline.py` using the five-stage flow; idempotent reuse is verified in pipeline tests and full-suite regression runs.
 - Clustering provenance v1 is active in `analyze`: YAML-backed rule resolution (`config/rules/clustering/rules-v1.0.0.yaml`), pre-run and post-selection hard-constraint validation, and final effective-pipeline identity fields (`operation_type`, `operation_version`, `rule_set_version`, `rule_set_hash`, `rule_inputs`, `pipeline_declared`, `pipeline_resolved`, `pipeline_effective`, `pipeline_effective_hash`, `recipe_hash`) are persisted in analysis execution config + `structured_results.clustering_summary`.
@@ -67,6 +68,14 @@ This document is the canonical "what exists and works now" summary for the repos
 - Artifact writes enforce an Azure blob quota hard-stop (default 100 GiB; configurable via env).
 - `ArtifactService` now supports `write_intent` coupling and fails closed for canonical intent when storage backend resolves to local.
 - Embedding token-limit validation can use discovered model `context_length` from `ModelRegistry` cache when available (provider+deployment key match), then falls back to existing static/inferred limits.
+- OpenAI-compatible embedding responses now fail with typed payload-shape errors when provider payloads are malformed (for example missing/empty `data`) instead of surfacing opaque downstream iteration failures.
+- `fetch_embeddings_async()` supports OpenRouter-gated chunk-worker parallelism with deterministic index-based chunk assembly and optional circuit-breaker serial fallback (`chunk_circuit_breaker_enabled`, `chunk_failure_fallback_threshold`), while preserving serial defaults.
+- `scripts/run_snapshot_embedding_model_sweep.py` now includes:
+  - model exclusion controls (`--exclude-model`, `--exclude-models-file`)
+  - best-effort pre-validation with bounded concurrency + TTL cache
+  - provider budget math + kill switch (`SQLLM_DISABLE_PARALLEL_CHUNKS`)
+  - runtime knob passthrough for retries/singleflight/chunk workers
+  - advisory auto-quarantine candidate reporting in summary output.
 
 ## What To Use By Default
 

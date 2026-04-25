@@ -6,7 +6,7 @@ making it work with any endpoint that speaks the OpenAI embeddings protocol:
 HuggingFace TEI, Ollama, vLLM, Together AI, Fireworks, direct OpenAI, etc.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from openai import AsyncOpenAI
 
@@ -14,6 +14,10 @@ from .base_embedding import BaseEmbeddingProvider, EmbeddingResult
 from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+class MalformedEmbeddingResponseError(ValueError):
+    """Raised when a provider returns an invalid embeddings response payload."""
 
 
 class OpenAICompatibleEmbeddingProvider(BaseEmbeddingProvider):
@@ -60,8 +64,37 @@ class OpenAICompatibleEmbeddingProvider(BaseEmbeddingProvider):
             params["extra_body"] = self._extra_body
 
         response = await self._client.embeddings.create(**params)
+        response_data: Any = getattr(response, "data", None)
+        if response_data is None:
+            raise MalformedEmbeddingResponseError(
+                "Embedding response is missing 'data' field "
+                f"(provider={self._provider_label}, model={model})."
+            )
+        if not isinstance(response_data, list):
+            raise MalformedEmbeddingResponseError(
+                "Embedding response 'data' must be a list "
+                f"(provider={self._provider_label}, model={model}, "
+                f"type={type(response_data).__name__})."
+            )
+        if texts and len(response_data) == 0:
+            raise MalformedEmbeddingResponseError(
+                "Embedding response returned empty 'data' for non-empty input "
+                f"(provider={self._provider_label}, model={model}, inputs={len(texts)})."
+            )
 
-        sorted_data = sorted(response.data, key=lambda e: e.index)
+        for idx, item in enumerate(response_data):
+            if getattr(item, "index", None) is None:
+                raise MalformedEmbeddingResponseError(
+                    "Embedding response item is missing 'index' "
+                    f"(provider={self._provider_label}, model={model}, item={idx})."
+                )
+            if getattr(item, "embedding", None) is None:
+                raise MalformedEmbeddingResponseError(
+                    "Embedding response item is missing 'embedding' "
+                    f"(provider={self._provider_label}, model={model}, item={idx})."
+                )
+
+        sorted_data = sorted(response_data, key=lambda e: e.index)
         return [
             EmbeddingResult(vector=item.embedding, index=item.index)
             for item in sorted_data

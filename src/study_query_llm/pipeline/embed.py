@@ -89,6 +89,15 @@ def _default_embedding_fetcher(
     dataset_key: str,
     entry_max: int,
     chunk_size: int | None,
+    chunk_worker_concurrency: int,
+    chunk_circuit_breaker_enabled: bool,
+    chunk_failure_fallback_threshold: int,
+    max_retries: int,
+    initial_wait: float,
+    max_wait: float,
+    singleflight_lease_seconds: int,
+    singleflight_wait_timeout_seconds: float,
+    singleflight_poll_seconds: float,
     timeout: float,
 ) -> np.ndarray:
     matrix = asyncio.run(
@@ -98,7 +107,16 @@ def _default_embedding_fetcher(
             db=db,
             timeout=timeout,
             chunk_size=chunk_size,
+            chunk_worker_concurrency=chunk_worker_concurrency,
+            chunk_circuit_breaker_enabled=chunk_circuit_breaker_enabled,
+            chunk_failure_fallback_threshold=chunk_failure_fallback_threshold,
             provider_name=provider,
+            max_retries=max_retries,
+            initial_wait=initial_wait,
+            max_wait=max_wait,
+            singleflight_lease_seconds=singleflight_lease_seconds,
+            singleflight_wait_timeout_seconds=singleflight_wait_timeout_seconds,
+            singleflight_poll_seconds=singleflight_poll_seconds,
             l3_cache_key=dataset_key,
             l3_entry_max=entry_max,
             l3_snapshot_group_id=None,
@@ -132,6 +150,15 @@ def embed(
     artifact_dir: str = "artifacts",
     embedding_fetcher: EmbeddingFetcher | None = None,
     chunk_size: int | None = None,
+    chunk_worker_concurrency: int = 1,
+    chunk_circuit_breaker_enabled: bool = False,
+    chunk_failure_fallback_threshold: int = 2,
+    max_retries: int = 6,
+    initial_wait: float = 1.0,
+    max_wait: float = 30.0,
+    singleflight_lease_seconds: int = 45,
+    singleflight_wait_timeout_seconds: float = 90.0,
+    singleflight_poll_seconds: float = 0.1,
     timeout: float = 600.0,
 ) -> StageResult:
     """Build/reuse a dataframe-scoped full embedding matrix artifact."""
@@ -162,9 +189,16 @@ def embed(
     )
     if not texts:
         raise ValueError("canonical dataframe has no text rows to embed")
+    if entry_max is not None:
+        bounded_entry_max = int(entry_max)
+        if bounded_entry_max <= 0:
+            raise ValueError("entry_max must be a positive integer when provided")
+        # entry_max is intended to limit how many dataframe rows are embedded.
+        # Keep behavior explicit here so cache keys and matrix shape align.
+        texts = texts[:bounded_entry_max]
 
     dataset_key = f"dataframe:{int(dataframe_group_id)}:{canonical_repr}"
-    initial_entry_max = int(entry_max if entry_max is not None else len(texts))
+    initial_entry_max = int(len(texts))
 
     with db_conn.session_scope() as session:
         repo = RawCallRepository(session)
@@ -204,6 +238,15 @@ def embed(
             dataset_key=dataset_key,
             entry_max=initial_entry_max,
             chunk_size=chunk_size,
+            chunk_worker_concurrency=int(chunk_worker_concurrency),
+            chunk_circuit_breaker_enabled=bool(chunk_circuit_breaker_enabled),
+            chunk_failure_fallback_threshold=int(chunk_failure_fallback_threshold),
+            max_retries=int(max_retries),
+            initial_wait=float(initial_wait),
+            max_wait=float(max_wait),
+            singleflight_lease_seconds=int(singleflight_lease_seconds),
+            singleflight_wait_timeout_seconds=float(singleflight_wait_timeout_seconds),
+            singleflight_poll_seconds=float(singleflight_poll_seconds),
             timeout=timeout,
         ),
         dtype=np.float64,
@@ -255,6 +298,9 @@ def embed(
             "provider": provider,
             "embedding_engine": deployment,
             "entry_max": effective_entry_max,
+            "chunk_worker_concurrency": int(chunk_worker_concurrency),
+            "chunk_circuit_breaker_enabled": bool(chunk_circuit_breaker_enabled),
+            "chunk_failure_fallback_threshold": int(chunk_failure_fallback_threshold),
             "key_version": key_version,
             "source_dataframe_group_id": int(dataframe_group_id),
         },

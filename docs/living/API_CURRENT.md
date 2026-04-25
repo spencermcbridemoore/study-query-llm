@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-11
+Last reviewed: 2026-04-25
 
 ## Configuration
 
@@ -61,6 +61,20 @@ Notes:
 - CLI compatibility surfaces:
   - `python -m study_query_llm.cli sweep-worker --request-id <id>`
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)
+
+Embedding sweep runner (snapshot -> provider model sweep):
+
+- Script: `scripts/run_snapshot_embedding_model_sweep.py`
+- Core controls:
+  - model-level concurrency: `--engine-concurrency`
+  - provider budget cap: `--provider-concurrency-budget`
+  - chunk workers (opt-in): `--chunk-worker-concurrency`
+  - chunk fallback (opt-in): `--chunk-circuit-breaker-fallback`, `--chunk-failure-fallback-threshold`
+  - model filtering: `--exclude-model`, `--exclude-models-file`
+  - best-effort availability prefilter: `--pre-validate-models`, `--validation-concurrency`, `--validation-cache-ttl-seconds`, `--validation-timeout-seconds`
+  - retry/singleflight runtime passthroughs: `--max-retries`, `--initial-wait-seconds`, `--max-wait-seconds`, `--singleflight-lease-seconds`, `--singleflight-wait-timeout-seconds`, `--singleflight-poll-seconds`
+- Environment override:
+  - `SQLLM_DISABLE_PARALLEL_CHUNKS=1` forces effective chunk-worker concurrency to 1.
 
 Execution-model feature flags:
 

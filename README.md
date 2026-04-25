@@ -39,6 +39,7 @@ See [docs/living/ARCHITECTURE_CURRENT.md](docs/living/ARCHITECTURE_CURRENT.md) f
 - Prompt preprocessing
 - Comprehensive error handling and logging
 - Sweep/job orchestration CLI and runbook workflows
+- Snapshot embedding sweep runner with provider-aware filtering, concurrency budgeting, and opt-in chunk-worker throughput controls
 
 ## Installation
 

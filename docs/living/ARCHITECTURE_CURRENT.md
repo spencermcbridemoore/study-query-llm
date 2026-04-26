@@ -18,7 +18,7 @@ jobRuntimes --> repoLayer
 
 ## Current Layer Responsibilities
 
-- `panel_app/`: user-facing inference and analytics workflows.
+- `panel_app/`: user-facing analytics/exploration workflows (Inference tab is intentionally disabled in current safe-mode runtime posture).
 - `src/study_query_llm/services/`: orchestration/business logic (`InferenceService`, `StudyService`, sweep/provenance/jobs).
 - `src/study_query_llm/providers/`: provider abstraction and factory entrypoints.
 - `src/study_query_llm/db/raw_call_repository.py`: canonical data access for v2 capture and grouping.

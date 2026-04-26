@@ -86,11 +86,14 @@ panel serve panel_app/app.py --show
 
 The application will open in your default web browser at `http://localhost:5006`.
 
+> Note: the current Panel runtime disables the **Inference** tab (`panel_app/app.py`) as a safe-mode posture.  
+> Use CLI/programmatic inference flows when you need to generate new calls.
+
 ## Using the Application
 
-### Inference Tab
+### Inference Workflows (Panel tab currently disabled)
 
-The Inference tab allows you to run LLM inference experiments.
+The inference workflows below describe available behavior in service/programmatic paths, but the Panel inference tab is currently disabled.
 
 #### Running an Inference
 

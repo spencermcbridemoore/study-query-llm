@@ -703,6 +703,29 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     database_url = _resolve_database_url(args.database_url)
     target = _resolve_snapshot_target(database_url, int(args.snapshot_group_id))
+    snapshot_rows = int(target.get("snapshot_row_count") or 0)
+    source_df_rows = int(target.get("source_dataframe_row_count") or 0)
+    if args.entry_max is not None:
+        effective_entry_max: int | None = int(args.entry_max)
+    elif (
+        snapshot_rows > 0
+        and source_df_rows > 0
+        and snapshot_rows < source_df_rows
+    ):
+        # embed() truncates the canonical dataframe to texts[:entry_max]; when the
+        # snapshot is a strict subset of the source dataframe, default entry_max to
+        # the snapshot row_count so embedding_batch keys align with snapshot lineage
+        # (matches how partial-view sweeps must be invoked explicitly).
+        effective_entry_max = snapshot_rows
+        print(
+            "[INFO] auto entry_max from snapshot row_count "
+            f"(partial dataframe view): entry_max={effective_entry_max} "
+            f"snapshot_row_count={snapshot_rows} "
+            f"source_dataframe_row_count={source_df_rows}"
+        )
+    else:
+        effective_entry_max = None
+
     discovered_models = await _list_embedding_models(provider, int(args.max_models))
     if not discovered_models:
         raise ValueError(
@@ -774,7 +797,7 @@ async def _async_main(args: argparse.Namespace) -> int:
         disable_parallel_chunks_env=disable_parallel_chunks_env,
         retry_failed_serial=bool(args.retry_failed_serial),
         force=bool(args.force),
-        entry_max=int(args.entry_max) if args.entry_max is not None else None,
+        entry_max=effective_entry_max,
         chunk_size=max(1, int(args.chunk_size)),
         max_retries=max(1, int(args.max_retries)),
         initial_wait_seconds=max(0.01, float(args.initial_wait_seconds)),
@@ -1057,8 +1080,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Optional max rows passed to embed() per model. "
-            "Useful for bounded test passes on large source dataframes."
+            "Optional max rows passed to embed() per model (truncates canonical "
+            "dataframe to texts[:entry_max]). When omitted and snapshot_row_count is "
+            "strictly less than source_dataframe_row_count, the sweep defaults "
+            "entry_max to snapshot_row_count so batches align with partial snapshots."
         ),
     )
     parser.add_argument(

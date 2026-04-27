@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: ops-maintainers  
-Last reviewed: 2026-04-23
+Last reviewed: 2026-04-26
 
 Use this page as the **single procedural entrypoint** for operator workflows.
 
@@ -52,6 +52,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 - Canonical remediation + constraint validation: `python scripts/remediate_call_artifacts_to_blob.py --apply --validate-constraint`
 - Raw-call URI sentinel monitor: `python scripts/check_raw_calls_uri_sentinel.py --env-var CANONICAL_DATABASE_URL --require-zero`
 - Upload a Jetstream-sourced `pg_dump -Fc` to Azure `db-backups` (same account as artifacts): after `python scripts/dump_postgres_for_jetstream_migration.py --from-jetstream`, run `python scripts/upload_jetstream_pg_dump_to_blob.py` (or `--dump-path …`); then re-run `verify_db_backup_inventory.py`
+- One-command full-state backup (DB dump/upload/verify + artifact container mirror + receipt): `python scripts/backup_jetstream_full_state.py` (defaults source container from `ARTIFACT_RUNTIME_ENV`/`AZURE_STORAGE_CONTAINER`; destination defaults to `<source>-backups`; optional cross-account destination via `AZURE_BACKUP_STORAGE_CONNECTION_STRING`)
 
 ## Application / Infrastructure Runbooks
 

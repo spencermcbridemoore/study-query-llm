@@ -65,6 +65,7 @@ Source-of-truth policy and URL contract live in [`docs/runbooks/README.md`](../d
 | `remediate_call_artifacts_to_blob.py` | Re-upload local-path `call_artifacts.uri` payloads to Azure blob and relink rows | `CANONICAL_DATABASE_URL` + Azure blob auth vars | Updates canonical `call_artifacts` rows; optional `VALIDATE CONSTRAINT` | High |
 | `check_raw_calls_uri_sentinel.py` | Report non-blob `raw_calls.response_json['uri']` anomalies and sentinel index status | `CANONICAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low |
 | `upload_jetstream_pg_dump_to_blob.py` | Upload `jetstream_for_local_*.dump` to Azure `db-backups` + write manifest | `AZURE_STORAGE_CONNECTION_STRING`; optional `JETSTREAM_DATABASE_URL` for manifest `table_counts` | Writes blobs + `backup_pg_dumps/*.manifest.json` | Medium (blob writes; sensitive dump contents) |
+| `backup_jetstream_full_state.py` | One-command full-state backup (`pg_dump` orchestration + manifest verify + artifact container mirror + local receipt) | Jetstream DB/tunnel env and Azure blob auth (`AZURE_STORAGE_CONNECTION_STRING`; optional destination env override) | Writes `db-backups` blobs/manifests + destination artifact backup prefix + local receipt JSON | Medium-High (copies potentially large artifact corpus) |
 | `start_jetstream_postgres_tunnel.py` | SSH local-forward to Jetstream Postgres | Requires Jetstream SSH host/auth env | No DB writes; network tunnel only | Low |
 | `purge_dataset_acquisition.py` | Remove dataset acquisition artifacts for a dataset group | Selected DB URL + artifact storage backend | Deletes blob artifacts + matching DB rows | High (destructive by design) |
 | `backup_mcq_db_to_json.py` | Export MCQ lineage rows (`groups`, `provenanced_runs`, `analysis_results`, `call_artifacts`) to JSON + `.manifest.json` | `LOCAL_DATABASE_URL` or `DATABASE_URL` | No writes | Low (can contain sensitive prompts/artifacts) |
@@ -107,6 +108,7 @@ stable unless accompanied by wrappers and doc updates:
 - `remediate_call_artifacts_to_blob.py`
 - `backup_mcq_db_to_json.py`
 - `archive_mcq_artifact_blobs.py`
+- `backup_jetstream_full_state.py`
 
 ## Living-Docs-Only Governance
 

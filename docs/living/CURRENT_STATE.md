@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-25
+Last reviewed: 2026-04-26
 
 ## Scope
 
@@ -86,6 +86,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Read-only check that `call_artifacts.uri` Azure blob URLs target the expected container (e.g. `artifacts-dev`): `scripts/verify_call_artifact_blob_lanes.py`.
 - Data pipeline behavior/acceptance criteria are documented in `docs/DATA_PIPELINE.md`; use this as the canonical contract for acquisition/snapshot/embedding/analysis behavior.
 - Optional Jetstream `pg_dump` archival to Azure container `db-backups`: `scripts/upload_jetstream_pg_dump_to_blob.py` writes the dump blob plus `backup_pg_dumps/*.manifest.json` for `scripts/verify_db_backup_inventory.py` (uses `AZURE_STORAGE_CONNECTION_STRING`, same account as artifacts).
+- Automated full-state backup entrypoint: `scripts/backup_jetstream_full_state.py` orchestrates Jetstream dump/upload/inventory verification plus artifact container mirroring into a dated backup prefix, then writes a local JSON receipt under `backup_pg_dumps/`.
 - High-risk DB scripts now enforce write-target guardrails (remote-target overrides, same-target refusal, and explicit destructive confirmations).
 - DB lane static policy checks are available at `scripts/check_db_lane_policy.py` and run in `.github/workflows/persistence-contract.yml`.
 - Scripts use lane governance (`scripts/living`, `scripts/history`, `scripts/deprecated`, `scripts/internal`). No-PCA/experiment drivers live under `scripts/history`; **move set v1.1** adds canonical implementations under `scripts/deprecated/` (thin root wrappers forward there, then into history where applicable). **Move set v1.2** adds `scripts/history/one_offs/` for ad-hoc probes/utilities moved out of root without wrappers where no active references required path stability. Incident sweep tooling: `scripts/history/sweep_recovery/` (`archive_pre_fix_runs`, `label_pre_fix_runs`) with root wrappers preserved.

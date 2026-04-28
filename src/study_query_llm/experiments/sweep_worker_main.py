@@ -42,6 +42,7 @@ from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.services.jobs import (
+    ClusteringReducerPlugin,
     JobReducerService,
     JobRunContext,
     JobRunOutcome,
@@ -717,6 +718,7 @@ def _run_sharded_worker_loop(
 ) -> int:
     loaded = _load_datasets(repo_root)
     reducer = JobReducerService(db)
+    reducer_plugin = ClusteringReducerPlugin(reducer)
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         req = SweepRequestService(repo).get_request(request_id)
@@ -768,6 +770,7 @@ def _run_sharded_worker_loop(
                 run_k_try_fn=run_one_run_k_try_job,
                 mcq_run_fn=run_one_mcq_run_job,
                 analysis_run_fn=run_one_analysis_run_job,
+                reducer_plugin=reducer_plugin,
                 reducer=reducer,
             )
             context = JobRunContext(

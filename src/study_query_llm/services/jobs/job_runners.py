@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Optional, Protocol
 
 from pydantic import ValidationError
 
+from .reducer_plugin import ReducerInput, ReducerPlugin
 
 @dataclass
 class JobRunOutcome:
@@ -90,14 +91,15 @@ class RunKTryRunner:
 class ReduceKRunner:
     """Runner for reduce_k jobs. Reducer completes job internally."""
 
-    def __init__(self, reducer: Any) -> None:
-        self._reducer = reducer
+    def __init__(self, reducer_plugin: ReducerPlugin) -> None:
+        self._reducer_plugin = reducer_plugin
 
     def run(self, job_snapshot: Dict[str, Any], context: JobRunContext) -> JobRunOutcome:
-        from .job_payload_models import parse_job_snapshot
+        from .job_payload_models import parse_job_snapshot, parse_reduce_k_payload
 
         try:
             parse_job_snapshot(job_snapshot)
+            parse_reduce_k_payload(job_snapshot.get("payload_json") or {})
         except ValidationError as e:
             job_id = int(job_snapshot.get("id", 0))
             return JobRunOutcome(
@@ -106,11 +108,12 @@ class ReduceKRunner:
                 error=f"payload_validation_error: {e}",
                 db_updated_by_runner=False,
             )
-        job_id = int(job_snapshot["id"])
-        result_ref = self._reducer.reduce_k_job(job_id)
+        reducer_output = self._reducer_plugin.reduce_k(
+            ReducerInput(job_snapshot=job_snapshot, context=context)
+        )
         return JobRunOutcome(
-            job_id=job_id,
-            result_ref=result_ref,
+            job_id=int(reducer_output.job_id),
+            result_ref=reducer_output.result_ref,
             error=None,
             db_updated_by_runner=True,
         )
@@ -119,14 +122,15 @@ class ReduceKRunner:
 class FinalizeRunRunner:
     """Runner for finalize_run jobs. Reducer completes job internally."""
 
-    def __init__(self, reducer: Any) -> None:
-        self._reducer = reducer
+    def __init__(self, reducer_plugin: ReducerPlugin) -> None:
+        self._reducer_plugin = reducer_plugin
 
     def run(self, job_snapshot: Dict[str, Any], context: JobRunContext) -> JobRunOutcome:
-        from .job_payload_models import parse_job_snapshot
+        from .job_payload_models import parse_finalize_run_payload, parse_job_snapshot
 
         try:
             parse_job_snapshot(job_snapshot)
+            parse_finalize_run_payload(job_snapshot.get("payload_json") or {})
         except ValidationError as e:
             job_id = int(job_snapshot.get("id", 0))
             return JobRunOutcome(
@@ -135,11 +139,12 @@ class FinalizeRunRunner:
                 error=f"payload_validation_error: {e}",
                 db_updated_by_runner=False,
             )
-        job_id = int(job_snapshot["id"])
-        run_id = self._reducer.finalize_run_job(job_id)
+        reducer_output = self._reducer_plugin.finalize_run(
+            ReducerInput(job_snapshot=job_snapshot, context=context)
+        )
         return JobRunOutcome(
-            job_id=job_id,
-            result_ref=str(run_id) if run_id is not None else None,
+            job_id=int(reducer_output.job_id),
+            result_ref=reducer_output.result_ref,
             error=None,
             db_updated_by_runner=True,
         )

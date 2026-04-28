@@ -14,6 +14,7 @@ from study_query_llm.services.provenance_service import (
     GROUP_TYPE_CLUSTERING_SWEEP,
     GROUP_TYPE_CLUSTERING_SWEEP_REQUEST,
 )
+from study_query_llm.services.jobs import normalize_result_ref
 from study_query_llm.services.sweep_request_service import SweepRequestService
 from study_query_llm.experiments.sweep_request_types import (
     SWEEP_TYPE_CLUSTERING,
@@ -49,6 +50,18 @@ def test_normalize_summarizer():
     """normalize_summarizer: None -> 'None', str unchanged."""
     assert normalize_summarizer(None) == "None"
     assert normalize_summarizer("gpt-4o") == "gpt-4o"
+
+
+def test_normalize_result_ref_strips_temp_and_timestamp_path_noise():
+    raw_ref = (
+        r"C:\Users\spenc\AppData\Local\Temp\sq-run-123\2026-04-28T15:00:00Z\job_shards\leaf.json"
+    )
+    assert normalize_result_ref(raw_ref) == "job_shards/leaf.json"
+
+
+def test_normalize_result_ref_keeps_semantic_non_path_refs():
+    assert normalize_result_ref("analysis:mcq_compliance:2") == "analysis:mcq_compliance:2"
+    assert normalize_result_ref("12345") == "<INT>"
 
 
 def test_build_run_key():
@@ -121,6 +134,202 @@ def test_get_sweep_type_adapter_shapes():
     assert mcq.request_group_type == "mcq_sweep_request"
     assert mcq.run_group_type == "mcq_run"
     assert mcq.sweep_group_type == "mcq_sweep"
+
+
+def _node_signatures(graph_spec):
+    return [
+        {
+            "job_type": node.job_type,
+            "job_key": node.job_key,
+            "base_run_key": node.base_run_key,
+            "payload_keys": sorted((node.payload_json or {}).keys()),
+            "seed_value": node.seed_value,
+            "max_attempts": node.max_attempts,
+            "depends_on_job_keys": list(node.depends_on_job_keys),
+        }
+        for node in graph_spec.jobs
+    ]
+
+
+def test_clustering_adapter_graph_spec_matches_legacy_shape():
+    adapter = get_sweep_type_adapter(SWEEP_TYPE_CLUSTERING)
+    run_key_to_target = {
+        "dbpedia_engine_a_None_50_50runs": {
+            "dataset": "dbpedia",
+            "embedding_engine": "engine/a",
+            "summarizer": "None",
+        }
+    }
+    graph = adapter.build_orchestration_graph(
+        request_group_id=101,
+        run_key_to_target=run_key_to_target,
+        fixed_config={"k_min": 2, "k_max": 3, "n_restarts": 2, "base_seed": 7},
+        execution_mode="sharded",
+        shard_config={"k_ranges": [[2, 3]], "tries_per_k": 2},
+        analysis_catalog=[],
+        enable_analysis_jobs=True,
+    )
+    assert graph.graph_kind == "k_try_reduce_finalize"
+
+    expected = [
+        {
+            "job_type": "run_k_try",
+            "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "payload_keys": [
+                "dataset",
+                "embedding_engine",
+                "k_max",
+                "k_min",
+                "run_key",
+                "summarizer",
+                "tries_per_k",
+                "try_idx",
+            ],
+            "seed_value": 7,
+            "max_attempts": 3,
+            "depends_on_job_keys": [],
+        },
+        {
+            "job_type": "run_k_try",
+            "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try1",
+            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "payload_keys": [
+                "dataset",
+                "embedding_engine",
+                "k_max",
+                "k_min",
+                "run_key",
+                "summarizer",
+                "tries_per_k",
+                "try_idx",
+            ],
+            "seed_value": 8,
+            "max_attempts": 3,
+            "depends_on_job_keys": [],
+        },
+        {
+            "job_type": "reduce_k",
+            "job_key": "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
+            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "payload_keys": [
+                "dataset",
+                "embedding_engine",
+                "k_max",
+                "k_min",
+                "run_key",
+                "summarizer",
+                "tries_per_k",
+            ],
+            "seed_value": None,
+            "max_attempts": 3,
+            "depends_on_job_keys": [
+                "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+                "dbpedia_engine_a_None_50_50runs__k2_3__try1",
+            ],
+        },
+        {
+            "job_type": "finalize_run",
+            "job_key": "dbpedia_engine_a_None_50_50runs__finalize_run",
+            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "payload_keys": [
+                "dataset",
+                "embedding_engine",
+                "k_ranges",
+                "run_key",
+                "summarizer",
+                "tries_per_k",
+            ],
+            "seed_value": None,
+            "max_attempts": 3,
+            "depends_on_job_keys": [
+                "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
+            ],
+        },
+    ]
+    assert _node_signatures(graph) == expected
+
+
+def test_mcq_adapter_graph_spec_matches_legacy_shape():
+    adapter = get_sweep_type_adapter(SWEEP_TYPE_MCQ)
+    run_key_to_target = {
+        "mcq_key_a": {
+            "deployment": "gpt-4o-mini",
+            "level": "high school",
+            "subject": "physics",
+            "options_per_question": 4,
+            "questions_per_test": 20,
+            "label_style": "upper",
+            "spread_correct_answer_uniformly": False,
+            "samples_per_combo": 5,
+            "template_version": "v1",
+        },
+    }
+    analysis_catalog = [
+        {
+            "analysis_key": "mcq_compliance",
+            "scope": "run",
+            "method_name": "mcq_compliance_metrics",
+            "method_version": "1.0",
+            "required": True,
+            "blocking": False,
+            "result_keys": ["format_compliance_rate"],
+        }
+    ]
+    graph = adapter.build_orchestration_graph(
+        request_group_id=42,
+        run_key_to_target=run_key_to_target,
+        fixed_config={"max_attempts": 4},
+        execution_mode="standalone",
+        shard_config={},
+        analysis_catalog=analysis_catalog,
+        enable_analysis_jobs=True,
+    )
+    assert graph.graph_kind == "single_job_per_run"
+    assert graph.metadata_updates["analysis_job_count"] == 1
+    assert graph.metadata_updates["analysis_execution_mode"] == "orchestration_jobs"
+    assert _node_signatures(graph) == [
+        {
+            "job_type": "mcq_run",
+            "job_key": "mcq_key_a__mcq_run",
+            "base_run_key": "mcq_key_a",
+            "payload_keys": [
+                "deployment",
+                "determinism_class",
+                "label_style",
+                "level",
+                "options_per_question",
+                "questions_per_test",
+                "run_key",
+                "samples_per_combo",
+                "spread_correct_answer_uniformly",
+                "subject",
+                "template_version",
+            ],
+            "seed_value": None,
+            "max_attempts": 4,
+            "depends_on_job_keys": [],
+        },
+        {
+            "job_type": "analysis_run",
+            "job_key": "req42__analysis__mcq_compliance",
+            "base_run_key": "mcq_compliance",
+            "payload_keys": [
+                "analysis_key",
+                "blocking",
+                "method_name",
+                "method_version",
+                "request_id",
+                "required",
+                "result_keys",
+                "scope",
+                "sweep_type",
+            ],
+            "seed_value": None,
+            "max_attempts": 4,
+            "depends_on_job_keys": ["mcq_key_a__mcq_run"],
+        },
+    ]
 
 
 def test_build_mcq_run_key_deterministic():

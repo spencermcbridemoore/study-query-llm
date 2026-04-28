@@ -21,6 +21,10 @@ from study_query_llm.experiments.sweep_request_types import (
     ANALYSIS_STATUS_NOT_REQUIRED,
     ANALYSIS_STATUS_NOT_STARTED,
     ANALYSIS_STATUS_RUNNING,
+    MCQ_DETERMINISM_CLASS,
+    MCQ_HISTORICAL_BACKFILL_POLICY,
+    MCQ_ORCHESTRATION_GRAPH_KIND,
+    OrchestrationGraphSpec,
     REQUEST_SCHEMA_VERSION,
     REQUEST_STATUS_FULFILLED,
     REQUEST_STATUS_REQUESTED,
@@ -45,10 +49,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-MCQ_ORCHESTRATION_GRAPH_KIND = "single_job_per_run"
-MCQ_HISTORICAL_BACKFILL_POLICY = "compatibility_only"
-MCQ_DETERMINISM_CLASS = "non_deterministic"
-JOB_TYPE_MCQ_RUN = "mcq_run"
 JOB_TYPE_ANALYSIS_RUN = "analysis_run"
 
 
@@ -61,13 +61,6 @@ def _env_flag(name: str, default: bool) -> bool:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _safe_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return int(default)
 
 
 class SweepRequestService:
@@ -354,195 +347,35 @@ class SweepRequestService:
         except Exception:
             return False
 
-    def _normalize_k_ranges(
-        self,
-        *,
-        fixed_config: Dict[str, Any],
-        shard_config: Dict[str, Any],
-    ) -> List[Tuple[int, int]]:
-        raw_ranges = list(shard_config.get("k_ranges") or [])
-        ranges: List[Tuple[int, int]] = []
-        for item in raw_ranges:
-            if not isinstance(item, (list, tuple)) or len(item) != 2:
-                continue
-            lo = _safe_int(item[0], 2)
-            hi = _safe_int(item[1], lo)
-            if hi < lo:
-                lo, hi = hi, lo
-            ranges.append((lo, hi))
-        if ranges:
-            return ranges
-        k_min = _safe_int(fixed_config.get("k_min"), 2)
-        k_max = _safe_int(fixed_config.get("k_max"), max(k_min, 20))
-        if k_max < k_min:
-            k_min, k_max = k_max, k_min
-        return [(k_min, k_max)]
-
-    def _enqueue_sharded_jobs(
+    def _enqueue_graph_spec(
         self,
         *,
         request_group_id: int,
-        run_key_to_target: Dict[str, Dict[str, Any]],
-        fixed_config: Dict[str, Any],
-        shard_config: Dict[str, Any],
+        graph_spec: OrchestrationGraphSpec,
     ) -> int:
-        k_ranges = self._normalize_k_ranges(fixed_config=fixed_config, shard_config=shard_config)
-        tries_per_k = max(
-            1,
-            _safe_int(
-                shard_config.get("tries_per_k", fixed_config.get("n_restarts", 1)),
-                1,
-            ),
-        )
-        max_attempts = max(1, _safe_int(fixed_config.get("max_attempts"), 3))
-        base_seed = _safe_int(fixed_config.get("base_seed"), 0)
+        job_id_by_key: Dict[str, int] = {}
         planned = 0
-
-        for run_key, target in run_key_to_target.items():
-            reduce_job_ids: List[int] = []
-            for k_min, k_max in k_ranges:
-                leaf_job_ids: List[int] = []
-                for try_idx in range(tries_per_k):
-                    seed_value = base_seed + try_idx
-                    leaf_job_key = f"{run_key}__k{k_min}_{k_max}__try{try_idx}"
-                    leaf_payload = {
-                        "run_key": run_key,
-                        "dataset": target.get("dataset"),
-                        "embedding_engine": target.get("embedding_engine"),
-                        "summarizer": target.get("summarizer", "None"),
-                        "k_min": int(k_min),
-                        "k_max": int(k_max),
-                        "try_idx": int(try_idx),
-                        "tries_per_k": int(tries_per_k),
-                    }
-                    leaf_id = self.repository.enqueue_orchestration_job(
-                        request_group_id=request_group_id,
-                        job_type="run_k_try",
-                        job_key=leaf_job_key,
-                        base_run_key=run_key,
-                        payload_json=leaf_payload,
-                        seed_value=seed_value,
-                        max_attempts=max_attempts,
+        for node in graph_spec.jobs:
+            depends_on_job_ids: List[int] = []
+            for dep_key in node.depends_on_job_keys:
+                dep_id = job_id_by_key.get(dep_key)
+                if dep_id is None:
+                    raise ValueError(
+                        f"Invalid orchestration graph: dependency {dep_key!r} "
+                        f"must appear before {node.job_key!r}"
                     )
-                    leaf_job_ids.append(int(leaf_id))
-                    planned += 1
-
-                reduce_job_key = f"{run_key}__reduce_k{k_min}_{k_max}"
-                reduce_payload = {
-                    "run_key": run_key,
-                    "dataset": target.get("dataset"),
-                    "embedding_engine": target.get("embedding_engine"),
-                    "summarizer": target.get("summarizer", "None"),
-                    "k_min": int(k_min),
-                    "k_max": int(k_max),
-                    "tries_per_k": int(tries_per_k),
-                }
-                reduce_id = self.repository.enqueue_orchestration_job(
-                    request_group_id=request_group_id,
-                    job_type="reduce_k",
-                    job_key=reduce_job_key,
-                    base_run_key=run_key,
-                    payload_json=reduce_payload,
-                    max_attempts=max_attempts,
-                    depends_on_job_ids=leaf_job_ids,
-                )
-                reduce_job_ids.append(int(reduce_id))
-                planned += 1
-
-            finalize_job_key = f"{run_key}__finalize_run"
-            finalize_payload = {
-                "run_key": run_key,
-                "dataset": target.get("dataset"),
-                "embedding_engine": target.get("embedding_engine"),
-                "summarizer": target.get("summarizer", "None"),
-                "k_ranges": [[int(lo), int(hi)] for (lo, hi) in k_ranges],
-                "tries_per_k": int(tries_per_k),
-            }
-            self.repository.enqueue_orchestration_job(
-                request_group_id=request_group_id,
-                job_type="finalize_run",
-                job_key=finalize_job_key,
-                base_run_key=run_key,
-                payload_json=finalize_payload,
-                max_attempts=max_attempts,
-                depends_on_job_ids=reduce_job_ids,
-            )
-            planned += 1
-        return planned
-
-    def _enqueue_mcq_jobs(
-        self,
-        *,
-        request_group_id: int,
-        run_key_to_target: Dict[str, Dict[str, Any]],
-        fixed_config: Dict[str, Any],
-    ) -> Tuple[int, List[int]]:
-        """
-        Enqueue one canonical mcq_run job per request run_key.
-        """
-        max_attempts = max(1, _safe_int(fixed_config.get("max_attempts"), 3))
-        planned = 0
-        job_ids: List[int] = []
-        for run_key, target in run_key_to_target.items():
-            payload = dict(target or {})
-            payload["run_key"] = run_key
-            payload["determinism_class"] = MCQ_DETERMINISM_CLASS
-            job_key = f"{run_key}__mcq_run"
+                depends_on_job_ids.append(dep_id)
             job_id = self.repository.enqueue_orchestration_job(
                 request_group_id=request_group_id,
-                job_type=JOB_TYPE_MCQ_RUN,
-                job_key=job_key,
-                base_run_key=run_key,
-                payload_json=payload,
-                max_attempts=max_attempts,
+                job_type=node.job_type,
+                job_key=node.job_key,
+                base_run_key=node.base_run_key,
+                payload_json=dict(node.payload_json or {}),
+                max_attempts=int(node.max_attempts),
+                seed_value=node.seed_value,
+                depends_on_job_ids=depends_on_job_ids or None,
             )
-            job_ids.append(int(job_id))
-            planned += 1
-        return planned, job_ids
-
-    def _enqueue_mcq_analysis_jobs(
-        self,
-        *,
-        request_group_id: int,
-        metadata_json: Dict[str, Any],
-        fixed_config: Dict[str, Any],
-        depends_on_job_ids: List[int],
-    ) -> int:
-        """
-        Enqueue one analysis_run job per analysis_catalog key for MCQ requests.
-        """
-        catalog = list(metadata_json.get("analysis_catalog") or [])
-        if not catalog:
-            return 0
-        max_attempts = max(1, _safe_int(fixed_config.get("max_attempts"), 3))
-        planned = 0
-        for entry in catalog:
-            if not isinstance(entry, dict):
-                continue
-            analysis_key = str(entry.get("analysis_key") or "").strip()
-            if not analysis_key:
-                continue
-            payload = {
-                "request_id": int(request_group_id),
-                "sweep_type": SWEEP_TYPE_MCQ,
-                "analysis_key": analysis_key,
-                "scope": str(entry.get("scope") or "run"),
-                "method_name": str(entry.get("method_name") or analysis_key),
-                "method_version": str(entry.get("method_version") or "1.0"),
-                "required": bool(entry.get("required")),
-                "blocking": bool(entry.get("blocking")),
-                "result_keys": list(entry.get("result_keys") or []),
-            }
-            job_key = f"req{int(request_group_id)}__analysis__{analysis_key}"
-            self.repository.enqueue_orchestration_job(
-                request_group_id=request_group_id,
-                job_type=JOB_TYPE_ANALYSIS_RUN,
-                job_key=job_key,
-                base_run_key=analysis_key,
-                payload_json=payload,
-                max_attempts=max_attempts,
-                depends_on_job_ids=list(depends_on_job_ids),
-            )
+            job_id_by_key[str(node.job_key)] = int(job_id)
             planned += 1
         return planned
 
@@ -561,57 +394,32 @@ class SweepRequestService:
         if not run_key_to_target:
             return 0, metadata_json
 
-        fixed_config = dict(metadata_json.get("fixed_config") or {})
-        if sweep_type == SWEEP_TYPE_MCQ:
-            planned_mcq, mcq_job_ids = self._enqueue_mcq_jobs(
-                request_group_id=request_group_id,
-                run_key_to_target=run_key_to_target,
-                fixed_config=fixed_config,
-            )
-            planned_analysis = 0
-            if self.enable_analysis_jobs:
-                planned_analysis = self._enqueue_mcq_analysis_jobs(
-                    request_group_id=request_group_id,
-                    metadata_json=metadata_json,
-                    fixed_config=fixed_config,
-                    depends_on_job_ids=mcq_job_ids,
-                )
-            planned_total = int(planned_mcq + planned_analysis)
-            metadata_json["orchestration_graph_kind"] = MCQ_ORCHESTRATION_GRAPH_KIND
-            metadata_json["historical_backfill_policy"] = MCQ_HISTORICAL_BACKFILL_POLICY
-            metadata_json["determinism_class"] = MCQ_DETERMINISM_CLASS
-            metadata_json["analysis_execution_mode"] = (
-                "orchestration_jobs" if self.enable_analysis_jobs else "compatibility_only"
-            )
-            metadata_json["analysis_job_count"] = int(planned_analysis)
-            metadata_json["orchestration_planned_at"] = _now_iso()
-            metadata_json["orchestration_job_count"] = planned_total
-            metadata_json["updated_at"] = _now_iso()
-            return planned_total, metadata_json
-
-        if sweep_type != SWEEP_TYPE_CLUSTERING:
+        if sweep_type not in {SWEEP_TYPE_CLUSTERING, SWEEP_TYPE_MCQ}:
             return 0, metadata_json
 
+        adapter = get_sweep_type_adapter(sweep_type)
+        fixed_config = dict(metadata_json.get("fixed_config") or {})
         execution_mode = str(metadata_json.get("execution_mode") or "standalone").lower()
         shard_config = dict(metadata_json.get("shard_config") or {})
-        if execution_mode != "sharded":
-            k_min = _safe_int(fixed_config.get("k_min"), 2)
-            k_max = _safe_int(fixed_config.get("k_max"), max(k_min, 20))
-            if k_max < k_min:
-                k_min, k_max = k_max, k_min
-            k_ranges = [[k, k] for k in range(k_min, k_max + 1)]
-            shard_config = {
-                "k_ranges": k_ranges,
-                "tries_per_k": _safe_int(fixed_config.get("n_restarts"), 50),
-                "standalone_special_case": True,
-            }
-
-        planned = self._enqueue_sharded_jobs(
+        analysis_catalog = list(metadata_json.get("analysis_catalog") or [])
+        graph_spec = adapter.build_orchestration_graph(
             request_group_id=request_group_id,
             run_key_to_target=run_key_to_target,
             fixed_config=fixed_config,
+            execution_mode=execution_mode,
             shard_config=shard_config,
+            analysis_catalog=analysis_catalog,
+            enable_analysis_jobs=self.enable_analysis_jobs,
         )
+        planned = self._enqueue_graph_spec(
+            request_group_id=request_group_id,
+            graph_spec=graph_spec,
+        )
+        metadata_json.update(dict(graph_spec.metadata_updates or {}))
+        metadata_json.setdefault("orchestration_graph_kind", str(graph_spec.graph_kind))
+        if sweep_type == SWEEP_TYPE_MCQ:
+            metadata_json.setdefault("historical_backfill_policy", MCQ_HISTORICAL_BACKFILL_POLICY)
+            metadata_json.setdefault("determinism_class", MCQ_DETERMINISM_CLASS)
         metadata_json["orchestration_planned_at"] = _now_iso()
         metadata_json["orchestration_job_count"] = int(planned)
         metadata_json["updated_at"] = _now_iso()

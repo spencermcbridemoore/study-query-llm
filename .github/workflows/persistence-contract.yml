@@ -31,6 +31,11 @@ jobs:
       - name: Run DB lane policy lint
         run: python scripts/check_db_lane_policy.py
 
+      - name: Run P0 control-plane baseline parity checks
+        run: |
+          python scripts/regenerate_p0_baseline.py --check
+          pytest tests/test_services/test_orchestration_jobs.py -q -k p0_baseline_fixture_matches_generated_snapshot
+
       - name: Assert EmbeddingVector refs removed
         run: |
           if rg "EmbeddingVector" src panel_app scripts tests --glob "*.py"; then

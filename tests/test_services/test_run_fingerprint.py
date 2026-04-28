@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.services.jobs import build_p0_baseline_snapshot
 from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.provenance_service import GROUP_TYPE_CLUSTERING_RUN
 from study_query_llm.services.provenanced_run_service import (
@@ -63,6 +64,13 @@ def test_canonical_run_fingerprint_strips_scheduling_keys():
     )
     assert h_with == h_without
     assert fp_with == fp_without
+
+
+def test_p0_baseline_fingerprint_canary_matches():
+    snapshot = build_p0_baseline_snapshot()
+    canary = dict(snapshot.get("fingerprint_canary") or {})
+    assert canary.get("matches") is True
+    assert canary.get("scheduling_hash") == canary.get("canonical_hash")
 
 
 def test_canonical_run_fingerprint_different_method_different_hash():

@@ -6,12 +6,16 @@ import pytest
 from pydantic import ValidationError
 
 from study_query_llm.services.jobs import (
+    FinalizeRunPayload,
     JobSnapshot,
     McqRunPayload,
+    ReduceKPayload,
     RunKTryPayload,
     parse_analysis_run_payload,
+    parse_finalize_run_payload,
     parse_job_snapshot,
     parse_mcq_run_payload,
+    parse_reduce_k_payload,
     parse_run_k_try_payload,
 )
 
@@ -124,3 +128,46 @@ def test_parse_analysis_run_payload_valid():
 def test_parse_analysis_run_payload_invalid():
     with pytest.raises(ValidationError):
         parse_analysis_run_payload({"request_id": 1})  # missing sweep_type/analysis_key
+
+
+def test_parse_reduce_k_payload_valid():
+    payload = parse_reduce_k_payload(
+        {
+            "run_key": "rk1",
+            "dataset": "dbpedia",
+            "embedding_engine": "engine/a",
+            "summarizer": "None",
+            "k_min": 2,
+            "k_max": 3,
+            "tries_per_k": 2,
+        }
+    )
+    assert isinstance(payload, ReduceKPayload)
+    assert payload.run_key == "rk1"
+    assert payload.tries_per_k == 2
+
+
+def test_parse_reduce_k_payload_invalid():
+    with pytest.raises(ValidationError):
+        parse_reduce_k_payload({"run_key": "rk1"})  # missing required fields
+
+
+def test_parse_finalize_run_payload_valid():
+    payload = parse_finalize_run_payload(
+        {
+            "run_key": "rk1",
+            "dataset": "dbpedia",
+            "embedding_engine": "engine/a",
+            "summarizer": "None",
+            "k_ranges": [[2, 3]],
+            "tries_per_k": 2,
+        }
+    )
+    assert isinstance(payload, FinalizeRunPayload)
+    assert payload.run_key == "rk1"
+    assert payload.k_ranges == [[2, 3]]
+
+
+def test_parse_finalize_run_payload_invalid():
+    with pytest.raises(ValidationError):
+        parse_finalize_run_payload({"run_key": "rk1"})  # missing required fields

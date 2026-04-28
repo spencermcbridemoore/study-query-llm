@@ -9,7 +9,7 @@ This module provides:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 
 
@@ -32,6 +32,9 @@ ANALYSIS_STATUS_FAILED = "failed"
 # Sweep types used by typed request dispatch.
 SWEEP_TYPE_CLUSTERING = "clustering"
 SWEEP_TYPE_MCQ = "mcq"
+MCQ_ORCHESTRATION_GRAPH_KIND = "single_job_per_run"
+MCQ_HISTORICAL_BACKFILL_POLICY = "compatibility_only"
+MCQ_DETERMINISM_CLASS = "non_deterministic"
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,28 @@ class SweepAnalysisDefinition:
     result_keys: Tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class OrchestrationJobSpec:
+    """Single schedulable orchestration-job node emitted by adapters."""
+
+    job_type: str
+    job_key: str
+    base_run_key: Optional[str]
+    payload_json: Dict[str, Any]
+    max_attempts: int = 3
+    seed_value: Optional[int] = None
+    depends_on_job_keys: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OrchestrationGraphSpec:
+    """Adapter-defined orchestration graph specification for one request."""
+
+    graph_kind: str
+    jobs: Tuple[OrchestrationJobSpec, ...]
+    metadata_updates: Dict[str, Any] = field(default_factory=dict)
+
+
 class SweepTypeAdapter(Protocol):
     """Adapter contract for typed sweep request expansion/finalization."""
 
@@ -89,6 +114,19 @@ class SweepTypeAdapter(Protocol):
     def analysis_definitions(self) -> List[SweepAnalysisDefinition]:
         ...
 
+    def build_orchestration_graph(
+        self,
+        *,
+        request_group_id: int,
+        run_key_to_target: Dict[str, Dict[str, Any]],
+        fixed_config: Dict[str, Any],
+        execution_mode: str,
+        shard_config: Dict[str, Any],
+        analysis_catalog: List[Dict[str, Any]],
+        enable_analysis_jobs: bool,
+    ) -> OrchestrationGraphSpec:
+        ...
+
 
 def _safe_name(s: str) -> str:
     """Normalize string for use in run_key."""
@@ -110,6 +148,37 @@ def _axis_values(parameter_axes: Dict[str, Any], names: Sequence[str]) -> List[A
         if name in parameter_axes:
             return _coerce_axis_values(parameter_axes.get(name))
     return []
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _normalize_k_ranges(
+    *,
+    fixed_config: Dict[str, Any],
+    shard_config: Dict[str, Any],
+) -> List[Tuple[int, int]]:
+    raw_ranges = list(shard_config.get("k_ranges") or [])
+    ranges: List[Tuple[int, int]] = []
+    for item in raw_ranges:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            continue
+        lo = _safe_int(item[0], 2)
+        hi = _safe_int(item[1], lo)
+        if hi < lo:
+            lo, hi = hi, lo
+        ranges.append((lo, hi))
+    if ranges:
+        return ranges
+    k_min = _safe_int(fixed_config.get("k_min"), 2)
+    k_max = _safe_int(fixed_config.get("k_max"), max(k_min, 20))
+    if k_max < k_min:
+        k_min, k_max = k_max, k_min
+    return [(k_min, k_max)]
 
 
 def normalize_summarizer(value: Any) -> str:
@@ -248,6 +317,118 @@ class ClusteringSweepAdapter:
     def analysis_definitions(self) -> List[SweepAnalysisDefinition]:
         return []
 
+    def build_orchestration_graph(
+        self,
+        *,
+        request_group_id: int,
+        run_key_to_target: Dict[str, Dict[str, Any]],
+        fixed_config: Dict[str, Any],
+        execution_mode: str,
+        shard_config: Dict[str, Any],
+        analysis_catalog: List[Dict[str, Any]],
+        enable_analysis_jobs: bool,
+    ) -> OrchestrationGraphSpec:
+        del request_group_id, analysis_catalog, enable_analysis_jobs
+        resolved_shard_config = dict(shard_config or {})
+        if str(execution_mode or "standalone").lower() != "sharded":
+            k_min = _safe_int(fixed_config.get("k_min"), 2)
+            k_max = _safe_int(fixed_config.get("k_max"), max(k_min, 20))
+            if k_max < k_min:
+                k_min, k_max = k_max, k_min
+            resolved_shard_config = {
+                "k_ranges": [[k, k] for k in range(k_min, k_max + 1)],
+                "tries_per_k": _safe_int(fixed_config.get("n_restarts"), 50),
+                "standalone_special_case": True,
+            }
+
+        k_ranges = _normalize_k_ranges(
+            fixed_config=fixed_config,
+            shard_config=resolved_shard_config,
+        )
+        tries_per_k = max(
+            1,
+            _safe_int(
+                resolved_shard_config.get("tries_per_k", fixed_config.get("n_restarts", 1)),
+                1,
+            ),
+        )
+        max_attempts = max(1, _safe_int(fixed_config.get("max_attempts"), 3))
+        base_seed = _safe_int(fixed_config.get("base_seed"), 0)
+
+        jobs: List[OrchestrationJobSpec] = []
+        for run_key, target in run_key_to_target.items():
+            reduce_job_keys: List[str] = []
+            for k_min, k_max in k_ranges:
+                leaf_job_keys: List[str] = []
+                for try_idx in range(tries_per_k):
+                    leaf_job_key = f"{run_key}__k{k_min}_{k_max}__try{try_idx}"
+                    leaf_job_keys.append(leaf_job_key)
+                    jobs.append(
+                        OrchestrationJobSpec(
+                            job_type="run_k_try",
+                            job_key=leaf_job_key,
+                            base_run_key=run_key,
+                            payload_json={
+                                "run_key": run_key,
+                                "dataset": target.get("dataset"),
+                                "embedding_engine": target.get("embedding_engine"),
+                                "summarizer": target.get("summarizer", "None"),
+                                "k_min": int(k_min),
+                                "k_max": int(k_max),
+                                "try_idx": int(try_idx),
+                                "tries_per_k": int(tries_per_k),
+                            },
+                            max_attempts=max_attempts,
+                            seed_value=base_seed + try_idx,
+                        )
+                    )
+
+                reduce_job_key = f"{run_key}__reduce_k{k_min}_{k_max}"
+                reduce_job_keys.append(reduce_job_key)
+                jobs.append(
+                    OrchestrationJobSpec(
+                        job_type="reduce_k",
+                        job_key=reduce_job_key,
+                        base_run_key=run_key,
+                        payload_json={
+                            "run_key": run_key,
+                            "dataset": target.get("dataset"),
+                            "embedding_engine": target.get("embedding_engine"),
+                            "summarizer": target.get("summarizer", "None"),
+                            "k_min": int(k_min),
+                            "k_max": int(k_max),
+                            "tries_per_k": int(tries_per_k),
+                        },
+                        max_attempts=max_attempts,
+                        depends_on_job_keys=tuple(leaf_job_keys),
+                    )
+                )
+
+            finalize_job_key = f"{run_key}__finalize_run"
+            jobs.append(
+                OrchestrationJobSpec(
+                    job_type="finalize_run",
+                    job_key=finalize_job_key,
+                    base_run_key=run_key,
+                    payload_json={
+                        "run_key": run_key,
+                        "dataset": target.get("dataset"),
+                        "embedding_engine": target.get("embedding_engine"),
+                        "summarizer": target.get("summarizer", "None"),
+                        "k_ranges": [[int(lo), int(hi)] for (lo, hi) in k_ranges],
+                        "tries_per_k": int(tries_per_k),
+                    },
+                    max_attempts=max_attempts,
+                    depends_on_job_keys=tuple(reduce_job_keys),
+                )
+            )
+
+        return OrchestrationGraphSpec(
+            graph_kind="k_try_reduce_finalize",
+            jobs=tuple(jobs),
+            metadata_updates={},
+        )
+
 
 class McqSweepAdapter:
     """Typed adapter for MCQ probe sweeps with formal analysis contract."""
@@ -365,6 +546,84 @@ class McqSweepAdapter:
                 result_keys=("chi_square", "p_value"),
             ),
         ]
+
+    def build_orchestration_graph(
+        self,
+        *,
+        request_group_id: int,
+        run_key_to_target: Dict[str, Dict[str, Any]],
+        fixed_config: Dict[str, Any],
+        execution_mode: str,
+        shard_config: Dict[str, Any],
+        analysis_catalog: List[Dict[str, Any]],
+        enable_analysis_jobs: bool,
+    ) -> OrchestrationGraphSpec:
+        del execution_mode, shard_config
+        max_attempts = max(1, _safe_int(fixed_config.get("max_attempts"), 3))
+
+        jobs: List[OrchestrationJobSpec] = []
+        mcq_job_keys: List[str] = []
+        for run_key, target in run_key_to_target.items():
+            payload = dict(target or {})
+            payload["run_key"] = run_key
+            payload["determinism_class"] = MCQ_DETERMINISM_CLASS
+            job_key = f"{run_key}__mcq_run"
+            mcq_job_keys.append(job_key)
+            jobs.append(
+                OrchestrationJobSpec(
+                    job_type="mcq_run",
+                    job_key=job_key,
+                    base_run_key=run_key,
+                    payload_json=payload,
+                    max_attempts=max_attempts,
+                )
+            )
+
+        analysis_job_count = 0
+        if enable_analysis_jobs:
+            for entry in analysis_catalog:
+                if not isinstance(entry, dict):
+                    continue
+                analysis_key = str(entry.get("analysis_key") or "").strip()
+                if not analysis_key:
+                    continue
+                payload = {
+                    "request_id": int(request_group_id),
+                    "sweep_type": SWEEP_TYPE_MCQ,
+                    "analysis_key": analysis_key,
+                    "scope": str(entry.get("scope") or "run"),
+                    "method_name": str(entry.get("method_name") or analysis_key),
+                    "method_version": str(entry.get("method_version") or "1.0"),
+                    "required": bool(entry.get("required")),
+                    "blocking": bool(entry.get("blocking")),
+                    "result_keys": list(entry.get("result_keys") or []),
+                }
+                job_key = f"req{int(request_group_id)}__analysis__{analysis_key}"
+                jobs.append(
+                    OrchestrationJobSpec(
+                        job_type="analysis_run",
+                        job_key=job_key,
+                        base_run_key=analysis_key,
+                        payload_json=payload,
+                        max_attempts=max_attempts,
+                        depends_on_job_keys=tuple(mcq_job_keys),
+                    )
+                )
+                analysis_job_count += 1
+
+        return OrchestrationGraphSpec(
+            graph_kind=MCQ_ORCHESTRATION_GRAPH_KIND,
+            jobs=tuple(jobs),
+            metadata_updates={
+                "orchestration_graph_kind": MCQ_ORCHESTRATION_GRAPH_KIND,
+                "historical_backfill_policy": MCQ_HISTORICAL_BACKFILL_POLICY,
+                "determinism_class": MCQ_DETERMINISM_CLASS,
+                "analysis_execution_mode": (
+                    "orchestration_jobs" if enable_analysis_jobs else "compatibility_only"
+                ),
+                "analysis_job_count": int(analysis_job_count),
+            },
+        )
 
 
 _SWEEP_TYPE_REGISTRY: Dict[str, SweepTypeAdapter] = {

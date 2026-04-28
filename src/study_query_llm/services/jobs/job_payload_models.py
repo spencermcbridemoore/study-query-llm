@@ -34,6 +34,33 @@ class RunKTryPayload(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class ReduceKPayload(BaseModel):
+    """Payload for reduce_k jobs."""
+
+    run_key: str
+    dataset: str
+    embedding_engine: str
+    summarizer: str = "None"
+    k_min: int = 2
+    k_max: int = 20
+    tries_per_k: int = 1
+
+    model_config = {"extra": "allow"}
+
+
+class FinalizeRunPayload(BaseModel):
+    """Payload for finalize_run jobs."""
+
+    run_key: str
+    dataset: str
+    embedding_engine: str
+    summarizer: str = "None"
+    k_ranges: list[list[int]] = Field(default_factory=list)
+    tries_per_k: int = 1
+
+    model_config = {"extra": "allow"}
+
+
 def parse_job_snapshot(raw: Dict[str, Any]) -> JobSnapshot:
     """Parse and validate job snapshot. Raises ValidationError on invalid data."""
     return JobSnapshot.model_validate(raw)
@@ -89,6 +116,16 @@ class AnalysisRunPayload(BaseModel):
 def parse_run_k_try_payload(payload_json: Dict[str, Any]) -> RunKTryPayload:
     """Parse and validate run_k_try payload. Raises ValidationError on invalid data."""
     return RunKTryPayload.model_validate(payload_json or {})
+
+
+def parse_reduce_k_payload(payload_json: Dict[str, Any]) -> ReduceKPayload:
+    """Parse and validate reduce_k payload. Raises ValidationError on invalid data."""
+    return ReduceKPayload.model_validate(payload_json or {})
+
+
+def parse_finalize_run_payload(payload_json: Dict[str, Any]) -> FinalizeRunPayload:
+    """Parse and validate finalize_run payload. Raises ValidationError on invalid data."""
+    return FinalizeRunPayload.model_validate(payload_json or {})
 
 
 def parse_langgraph_run_payload(payload_json: Dict[str, Any]) -> LangGraphRunPayload:

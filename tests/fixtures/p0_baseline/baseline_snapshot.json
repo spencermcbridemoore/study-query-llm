@@ -1,0 +1,375 @@
+{
+  "clustering": {
+    "claimed_completion": {
+      "claimed_count": 4,
+      "normalized_result_refs": [
+        "finalize_run/dbpedia_engine_a_None_50_50runs__finalize_run.json",
+        "reduce_k/dbpedia_engine_a_None_50_50runs__reduce_k2_3.json",
+        "run_k_try/dbpedia_engine_a_None_50_50runs__k2_3__try0.json",
+        "run_k_try/dbpedia_engine_a_None_50_50runs__k2_3__try1.json"
+      ]
+    },
+    "completed_jobs": {
+      "graph": [
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [
+            "dbpedia_engine_a_None_50_50runs__reduce_k2_3"
+          ],
+          "job_key": "dbpedia_engine_a_None_50_50runs__finalize_run",
+          "job_type": "finalize_run",
+          "status": "completed"
+        },
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [
+            "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+            "dbpedia_engine_a_None_50_50runs__k2_3__try1"
+          ],
+          "job_key": "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
+          "job_type": "reduce_k",
+          "status": "completed"
+        },
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [],
+          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+          "job_type": "run_k_try",
+          "status": "completed"
+        },
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [],
+          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try1",
+          "job_type": "run_k_try",
+          "status": "completed"
+        }
+      ],
+      "job_type_counts": {
+        "finalize_run": 1,
+        "reduce_k": 1,
+        "run_k_try": 2
+      },
+      "payload_key_sets": {
+        "finalize_run": [
+          "dataset",
+          "embedding_engine",
+          "k_ranges",
+          "run_key",
+          "summarizer",
+          "tries_per_k"
+        ],
+        "reduce_k": [
+          "dataset",
+          "embedding_engine",
+          "k_max",
+          "k_min",
+          "run_key",
+          "summarizer",
+          "tries_per_k"
+        ],
+        "run_k_try": [
+          "dataset",
+          "embedding_engine",
+          "k_max",
+          "k_min",
+          "run_key",
+          "summarizer",
+          "tries_per_k",
+          "try_idx"
+        ]
+      },
+      "status_counts": {
+        "completed": 4
+      },
+      "total_jobs": 4
+    },
+    "finalized_request": {
+      "completed_count": 1,
+      "expected_count": 1,
+      "linked_sweep_id_present": true,
+      "missing_count": 0,
+      "request_status": "fulfilled"
+    },
+    "planned": {
+      "graph": [
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [
+            "dbpedia_engine_a_None_50_50runs__reduce_k2_3"
+          ],
+          "job_key": "dbpedia_engine_a_None_50_50runs__finalize_run",
+          "job_type": "finalize_run",
+          "status": "pending"
+        },
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [
+            "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+            "dbpedia_engine_a_None_50_50runs__k2_3__try1"
+          ],
+          "job_key": "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
+          "job_type": "reduce_k",
+          "status": "pending"
+        },
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [],
+          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+          "job_type": "run_k_try",
+          "status": "ready"
+        },
+        {
+          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "depends_on_job_keys": [],
+          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try1",
+          "job_type": "run_k_try",
+          "status": "ready"
+        }
+      ],
+      "job_type_counts": {
+        "finalize_run": 1,
+        "reduce_k": 1,
+        "run_k_try": 2
+      },
+      "payload_key_sets": {
+        "finalize_run": [
+          "dataset",
+          "embedding_engine",
+          "k_ranges",
+          "run_key",
+          "summarizer",
+          "tries_per_k"
+        ],
+        "reduce_k": [
+          "dataset",
+          "embedding_engine",
+          "k_max",
+          "k_min",
+          "run_key",
+          "summarizer",
+          "tries_per_k"
+        ],
+        "run_k_try": [
+          "dataset",
+          "embedding_engine",
+          "k_max",
+          "k_min",
+          "run_key",
+          "summarizer",
+          "tries_per_k",
+          "try_idx"
+        ]
+      },
+      "status_counts": {
+        "pending": 2,
+        "ready": 2
+      },
+      "total_jobs": 4
+    }
+  },
+  "fingerprint_canary": {
+    "canonical_hash": "d9ae89c2f0d372955e0fdbe5450c65a49d9a43f65a7a44cb41c127cdcae2fb67",
+    "matches": true,
+    "scheduling_hash": "d9ae89c2f0d372955e0fdbe5450c65a49d9a43f65a7a44cb41c127cdcae2fb67"
+  },
+  "mcq": {
+    "claimed_completion": {
+      "claimed_count": 5,
+      "normalized_result_refs": [
+        "analysis_run/req4__analysis__mcq_answer_position_chi_square.json",
+        "analysis_run/req4__analysis__mcq_answer_position_distribution.json",
+        "analysis_run/req4__analysis__mcq_compliance.json",
+        "mcq_run/mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run.json",
+        "mcq_run/mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run.json"
+      ]
+    },
+    "completed_jobs": {
+      "graph": [
+        {
+          "base_run_key": "mcq_answer_position_chi_square",
+          "depends_on_job_keys": [
+            "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+            "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run"
+          ],
+          "job_key": "req4__analysis__mcq_answer_position_chi_square",
+          "job_type": "analysis_run",
+          "status": "completed"
+        },
+        {
+          "base_run_key": "mcq_answer_position_distribution",
+          "depends_on_job_keys": [
+            "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+            "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run"
+          ],
+          "job_key": "req4__analysis__mcq_answer_position_distribution",
+          "job_type": "analysis_run",
+          "status": "completed"
+        },
+        {
+          "base_run_key": "mcq_compliance",
+          "depends_on_job_keys": [
+            "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+            "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run"
+          ],
+          "job_key": "req4__analysis__mcq_compliance",
+          "job_type": "analysis_run",
+          "status": "completed"
+        },
+        {
+          "base_run_key": "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1",
+          "depends_on_job_keys": [],
+          "job_key": "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+          "job_type": "mcq_run",
+          "status": "completed"
+        },
+        {
+          "base_run_key": "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1",
+          "depends_on_job_keys": [],
+          "job_key": "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run",
+          "job_type": "mcq_run",
+          "status": "completed"
+        }
+      ],
+      "job_type_counts": {
+        "analysis_run": 3,
+        "mcq_run": 2
+      },
+      "payload_key_sets": {
+        "analysis_run": [
+          "analysis_key",
+          "blocking",
+          "method_name",
+          "method_version",
+          "request_id",
+          "required",
+          "result_keys",
+          "scope",
+          "sweep_type"
+        ],
+        "mcq_run": [
+          "concurrency",
+          "deployment",
+          "determinism_class",
+          "label_style",
+          "level",
+          "max_tokens",
+          "options_per_question",
+          "progress_every",
+          "questions_per_test",
+          "run_key",
+          "samples_per_combo",
+          "spread_correct_answer_uniformly",
+          "subject",
+          "temperature",
+          "template_version"
+        ]
+      },
+      "status_counts": {
+        "completed": 5
+      },
+      "total_jobs": 5
+    },
+    "finalized_request": {
+      "completed_count": 2,
+      "expected_count": 2,
+      "linked_sweep_id_present": true,
+      "missing_count": 0,
+      "request_status": "fulfilled"
+    },
+    "planned": {
+      "graph": [
+        {
+          "base_run_key": "mcq_answer_position_chi_square",
+          "depends_on_job_keys": [
+            "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+            "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run"
+          ],
+          "job_key": "req4__analysis__mcq_answer_position_chi_square",
+          "job_type": "analysis_run",
+          "status": "pending"
+        },
+        {
+          "base_run_key": "mcq_answer_position_distribution",
+          "depends_on_job_keys": [
+            "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+            "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run"
+          ],
+          "job_key": "req4__analysis__mcq_answer_position_distribution",
+          "job_type": "analysis_run",
+          "status": "pending"
+        },
+        {
+          "base_run_key": "mcq_compliance",
+          "depends_on_job_keys": [
+            "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+            "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run"
+          ],
+          "job_key": "req4__analysis__mcq_compliance",
+          "job_type": "analysis_run",
+          "status": "pending"
+        },
+        {
+          "base_run_key": "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1",
+          "depends_on_job_keys": [],
+          "job_key": "mcq_gpt_4o_mini_high_school_physics_4opt_10q_upper_no_spread_3samples_v1__mcq_run",
+          "job_type": "mcq_run",
+          "status": "ready"
+        },
+        {
+          "base_run_key": "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1",
+          "depends_on_job_keys": [],
+          "job_key": "mcq_gpt_4o_mini_high_school_physics_5opt_10q_upper_no_spread_3samples_v1__mcq_run",
+          "job_type": "mcq_run",
+          "status": "ready"
+        }
+      ],
+      "job_type_counts": {
+        "analysis_run": 3,
+        "mcq_run": 2
+      },
+      "payload_key_sets": {
+        "analysis_run": [
+          "analysis_key",
+          "blocking",
+          "method_name",
+          "method_version",
+          "request_id",
+          "required",
+          "result_keys",
+          "scope",
+          "sweep_type"
+        ],
+        "mcq_run": [
+          "concurrency",
+          "deployment",
+          "determinism_class",
+          "label_style",
+          "level",
+          "max_tokens",
+          "options_per_question",
+          "progress_every",
+          "questions_per_test",
+          "run_key",
+          "samples_per_combo",
+          "spread_correct_answer_uniformly",
+          "subject",
+          "temperature",
+          "template_version"
+        ]
+      },
+      "status_counts": {
+        "pending": 3,
+        "ready": 2
+      },
+      "total_jobs": 5
+    }
+  },
+  "normalization_examples": {
+    "analysis_result_ref": "analysis:mcq_compliance:2",
+    "integer_run_id": "<INT>",
+    "unix_temp_path": "job_shards/reduce.json",
+    "windows_temp_path": "job_shards/leaf.json"
+  },
+  "schema_version": 1
+}

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.services.jobs import build_p0_baseline_snapshot
 from study_query_llm.services.sweep_request_service import SweepRequestService
 
 
@@ -11,6 +15,22 @@ def _db():
     db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
     db.init_db()
     return db
+
+
+def _baseline_fixture_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "p0_baseline"
+        / "baseline_snapshot.json"
+    )
+
+
+def test_p0_baseline_fixture_matches_generated_snapshot():
+    fixture_path = _baseline_fixture_path()
+    expected = json.loads(fixture_path.read_text(encoding="utf-8"))
+    actual = build_p0_baseline_snapshot()
+    assert actual == expected
 
 
 def test_enqueue_claim_dependency_and_promote():

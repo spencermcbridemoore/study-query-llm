@@ -8,11 +8,14 @@ import pytest
 
 from study_query_llm.services.jobs import (
     AnalysisRunRunner,
+    ClusteringReducerPlugin,
     FinalizeRunRunner,
     JobRunContext,
     JobRunOutcome,
     LangGraphJobRunner,
     McqRunRunner,
+    ReducerInput,
+    ReducerOutput,
     ReduceKRunner,
     RunKTryRunner,
     create_job_runner,
@@ -66,7 +69,7 @@ def test_create_job_runner_run_k_try_missing_fn():
 
 
 def test_create_job_runner_reduce_k_missing_reducer():
-    with pytest.raises(ValueError, match="reducer required"):
+    with pytest.raises(ValueError, match="reducer_plugin"):
         create_job_runner("reduce_k")
 
 
@@ -88,6 +91,22 @@ def test_create_job_runner_analysis_run():
 def test_create_job_runner_analysis_run_missing_fn():
     with pytest.raises(ValueError, match="analysis_run_fn required"):
         create_job_runner("analysis_run")
+
+
+def test_clustering_reducer_plugin_wraps_legacy_service():
+    class MockReducer:
+        def reduce_k_job(self, job_id: int) -> str:
+            return f"/tmp/reduce_{job_id}.json"
+
+        def finalize_run_job(self, job_id: int) -> int:
+            return 77
+
+    plugin = ClusteringReducerPlugin(MockReducer())
+    reduce_out = plugin.reduce_k(ReducerInput(job_snapshot={"id": 11}, context=None))
+    finalize_out = plugin.finalize_run(ReducerInput(job_snapshot={"id": 12}, context=None))
+    assert isinstance(reduce_out, ReducerOutput)
+    assert reduce_out.result_ref == "/tmp/reduce_11.json"
+    assert finalize_out.run_id == 77
 
 
 def test_create_job_runner_langgraph_run():

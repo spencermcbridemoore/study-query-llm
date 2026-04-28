@@ -71,6 +71,12 @@ The **planner / enqueue site** (e.g. `SweepRequestService`, request config)
 decides how to partition work into jobs. Workers execute whatever shape they
 receive.
 
+Current control-plane seam details:
+
+- Sweep-type adapters emit deterministic orchestration graph specs (job nodes + dependency edges).
+- Job execution dispatch is registry-based by `job_type`.
+- Reducer/finalizer execution is routed through a typed reducer plugin seam.
+
 Neither the DB schema nor the fingerprint encode or depend on the job graph
 shape (fan-out, batch size, number of jobs).
 

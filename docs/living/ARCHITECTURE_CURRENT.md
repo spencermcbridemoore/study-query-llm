@@ -49,8 +49,11 @@ Legacy `scripts/run_*.py` files are compatibility wrappers where retained.
 ## Orchestration and Provenance Notes
 
 - `OrchestrationJob` is the canonical scheduling/lease substrate for clustering and MCQ execution paths.
+- Planner ownership is adapter-driven: sweep-type adapters emit orchestration graph specs (nodes + dependency edges), and `SweepRequestService` performs generic enqueue from those specs.
 - Standalone execution is modeled as an orchestration profile, not a separate run-key control plane.
 - MCQ orchestration uses per-run `mcq_run` jobs plus dependent `analysis_run` jobs in the same control plane.
+- Job execution dispatch is registry-based in `job_runner_factory.py`; `langgraph_run` remains a first-class registry entry.
+- Reducer/finalizer execution uses a typed plugin seam (`ReducerPlugin`) with a default clustering adapter that wraps `JobReducerService`.
 - `analyze` CLI remains as compatibility UX, but now enqueues/claims/executes orchestration `analysis_run` jobs instead of a separate non-orchestrated write path.
 - Read models derive request-level analysis state from orchestration/execution records, with legacy metadata arrays retained as compatibility mirrors during cutover.
 - New MCQ method executions are captured as explicit `provenanced_runs` rows (`run_kind=execution`, `execution_role=method_execution`, `determinism_class=non_deterministic`).

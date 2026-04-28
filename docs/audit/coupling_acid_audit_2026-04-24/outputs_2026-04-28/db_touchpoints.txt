@@ -1,0 +1,198 @@
+# DB Touchpoint Inventory
+Files with any DB indicator: 46
+
+## REPOSITORY (legitimate)  (16 files)
+- src/study_query_llm/db/__init__.py  (v2_import=3)
+- src/study_query_llm/db/_base_connection.py  (session_ops=1)
+- src/study_query_llm/db/connection_v2.py  (v2_import=1, session_ops=2, raw_sql=2)
+- src/study_query_llm/db/inference_repository.py  (session_ops=11)
+- src/study_query_llm/db/migrations/add_call_artifacts_blob_uri_check.py  (v2_import=1, session_ops=1, raw_sql=2)
+- src/study_query_llm/db/migrations/add_fingerprint_columns.py  (v2_import=1, session_ops=3, raw_sql=2)
+- src/study_query_llm/db/migrations/add_group_links.py  (v2_import=2)
+- src/study_query_llm/db/migrations/add_method_analysis_tables.py  (v2_import=2)
+- src/study_query_llm/db/migrations/add_provenanced_runs_table.py  (v2_import=2)
+- src/study_query_llm/db/migrations/add_raw_calls_uri_sentinel_index.py  (v2_import=1, session_ops=1, raw_sql=2)
+- src/study_query_llm/db/migrations/add_recipe_json_column.py  (v2_import=1, session_ops=3, raw_sql=1)
+- src/study_query_llm/db/migrations/add_sweep_request_indexes.py  (v2_import=1, session_ops=1, raw_sql=3)
+- src/study_query_llm/db/migrations/add_sweep_worker_safety.py  (v2_import=2, session_ops=1, raw_sql=1)
+- src/study_query_llm/db/migrations/drop_embedding_vectors.py  (v2_import=1, session_ops=2, raw_sql=4)
+- src/study_query_llm/db/migrations/normalize_provenanced_run_kind_execution.py  (v2_import=2, session_ops=5, raw_sql=1)
+- src/study_query_llm/db/raw_call_repository.py  (v2_import=1, session_ops=93, raw_sql=5)
+
+## SERVICE (potentially legitimate via repository)  (18 files)
+- src/study_query_llm/services/artifact_service.py  (v2_import=5, session_ops=4)
+- src/study_query_llm/services/data_quality_service.py  (v2_import=2, session_ops=2)
+- src/study_query_llm/services/embeddings/helpers.py  (v2_import=2, session_ops=4)
+- src/study_query_llm/services/embeddings/service.py  (v2_import=2, session_ops=1)
+- src/study_query_llm/services/inference_service.py  (v2_import=2, session_ops=1)
+- src/study_query_llm/services/jobs/job_reducer_service.py  (v2_import=4, session_ops=4)
+- src/study_query_llm/services/jobs/p0_baseline.py  (v2_import=3, session_ops=2)
+- src/study_query_llm/services/jobs/runtime_supervisors.py  (v2_import=2, session_ops=5)
+- src/study_query_llm/services/jobs/runtime_workers.py  (v2_import=2, session_ops=4)
+- src/study_query_llm/services/method_service.py  (v2_import=7, session_ops=11)
+- src/study_query_llm/services/paraphraser_factory.py  (v2_import=2, session_ops=1)
+- src/study_query_llm/services/provenance_service.py  (v2_import=6, session_ops=7)
+- src/study_query_llm/services/provenanced_run_service.py  (v2_import=3, session_ops=7)
+- src/study_query_llm/services/study_service.py  (v2_import=1, session_ops=1)
+- src/study_query_llm/services/summarization_service.py  (v2_import=3, session_ops=1)
+- src/study_query_llm/services/supervisor_mode.py  (v2_import=2, session_ops=3)
+- src/study_query_llm/services/sweep_query_service.py  (v2_import=2, session_ops=12, raw_sql=1)
+- src/study_query_llm/services/sweep_request_service.py  (v2_import=4, session_ops=10)
+
+## PIPELINE (stage code)  (6 files)
+- src/study_query_llm/pipeline/acquire.py  (v2_import=3, session_ops=2)
+- src/study_query_llm/pipeline/analyze.py  (v2_import=3, session_ops=6)
+- src/study_query_llm/pipeline/embed.py  (v2_import=3, session_ops=5)
+- src/study_query_llm/pipeline/parse.py  (v2_import=3, session_ops=4)
+- src/study_query_llm/pipeline/runner.py  (v2_import=2, session_ops=4)
+- src/study_query_llm/pipeline/snapshot.py  (v2_import=3, session_ops=4)
+
+## EXPERIMENTS (workers / ingestion)  (5 files)
+- src/study_query_llm/experiments/ingestion.py  (v2_import=4, session_ops=9, raw_sql=1)
+- src/study_query_llm/experiments/mcq_run_persistence.py  (v2_import=3, session_ops=4, raw_sql=1)
+- src/study_query_llm/experiments/runtime_sweeps.py  (v2_import=4, session_ops=21)
+- src/study_query_llm/experiments/sweep_mcq_standalone.py  (v2_import=1)
+- src/study_query_llm/experiments/sweep_worker_main.py  (v2_import=3, session_ops=24)
+
+## ANALYSIS  (1 files)
+- src/study_query_llm/analysis/mcq_analyze_request.py  (v2_import=3, session_ops=4)
+
+## v1 + v2 dual-import bridges
+  (none)
+
+## Direct session ops outside db/ (top 30 by op count)
+-  24  src/study_query_llm/experiments/sweep_worker_main.py
+      L126  session_scope()  -- with conn.session_scope() as session:
+      L200  session_scope()  -- with db.session_scope() as session:
+      L202  session.query(  -- session.query(SweepRunClaim)
+      L219  session.add(  -- session.add(claim)
+      L221  session.flush(  -- session.flush()
+-  21  src/study_query_llm/experiments/runtime_sweeps.py
+      L97  session_scope()  -- with db.session_scope() as session:
+      L99  session.query(  -- session.query(SweepRunClaim)
+      L117  session.add(  -- session.add(claim)
+      L119  session.flush(  -- session.flush()
+      L125  session.query(  -- session.query(SweepRunClaim)
+-  12  src/study_query_llm/services/sweep_query_service.py
+      L103  session.query(  -- session.query(
+      L145  session.query(  -- session.query(Group)
+      L159  session.query(  -- session.query(
+      L254  session.query(  -- session.query(GroupLink)
+      L264  session.query(  -- query = session.query(Group).filter(
+-  11  src/study_query_llm/services/method_service.py
+      L16  session_scope()  -- with db.session_scope() as session:
+      L116  session.query(  -- session.query(MethodDefinition)
+      L139  session.add(  -- session.add(method)
+      L140  session.flush(  -- session.flush()
+      L173  session.query(  -- self.repository.session.query(MethodDefinition)
+-  10  src/study_query_llm/services/sweep_request_service.py
+      L444  session.flush(  -- self.repository.session.flush()
+      L546  session.flush(  -- self.repository.session.flush()
+      L606  session.query(  -- self.repository.session.query(Group)
+      L675  session.query(  -- self.repository.session.query(Group)
+      L732  session.flush(  -- self.repository.session.flush()
+-   9  src/study_query_llm/experiments/ingestion.py
+      L34  session_scope()  -- with db.session_scope() as session:
+      L36  session.query(  -- session.query(Group)
+      L102  session_scope()  -- with db.session_scope() as session:
+      L106  session.query(  -- existing = session.query(Group).filter(
+      L144  session.query(  -- existing = session.query(Group).filter(
+-   7  src/study_query_llm/services/provenanced_run_service.py
+      L273  session.query(  -- self.repository.session.query(MethodDefinition)
+      L290  session.query(  -- run_a = self.repository.session.query(ProvenancedRun).filter_by(id=run_a_id).first()
+      L291  session.query(  -- run_b = self.repository.session.query(ProvenancedRun).filter_by(id=run_b_id).first()
+      L330  session.query(  -- self.repository.session.query(Group).filter(Group.group_type == run_group_type).all()
+      L338  session.query(  -- self.repository.session.query(
+-   7  src/study_query_llm/services/provenance_service.py
+      L15  session_scope()  -- with db.session_scope() as session:
+      L211  session.query(  -- self.repository.session.query(Group)
+      L367  session.add(  -- session.add(artifact)
+      L368  session.flush(  -- session.flush()
+      L403  session.query(  -- all_groups = session.query(Group).filter(Group.group_type == GROUP_TYPE_CLUSTERING_STEP).all()
+-   6  src/study_query_llm/pipeline/analyze.py
+      L108  session.query(  -- repo.session.query(CallArtifact).filter(CallArtifact.id == int(artifact_id)).first()
+      L158  session.query(  -- artifacts = session.query(CallArtifact).order_by(CallArtifact.id.asc()).all()
+      L169  session.query(  -- row = session.query(Group).filter(Group.id == int(group_id)).first()
+      L186  session.query(  -- session.query(CallArtifact)
+      L662  session_scope()  -- with db_conn.session_scope() as session:
+-   5  src/study_query_llm/services/jobs/runtime_supervisors.py
+      L77  session_scope()  -- with db.session_scope() as session:
+      L108  session_scope()  -- with db.session_scope() as session:
+      L116  session_scope()  -- with db.session_scope() as session:
+      L126  session_scope()  -- with db.session_scope() as session:
+      L543  session_scope()  -- with db.session_scope() as session:
+-   5  src/study_query_llm/pipeline/embed.py
+      L53  session.query(  -- repo.session.query(CallArtifact).filter(CallArtifact.id == int(artifact_id)).first()
+      L62  session.query(  -- artifacts = session.query(CallArtifact).order_by(CallArtifact.id.asc()).all()
+      L171  session_scope()  -- with db_conn.session_scope() as session:
+      L173  session.query(  -- session.query(Group)
+      L203  session_scope()  -- with db_conn.session_scope() as session:
+-   4  src/study_query_llm/services/jobs/runtime_workers.py
+      L28  session_scope()  -- with db.session_scope() as session:
+      L120  session_scope()  -- with db.session_scope() as session:
+      L139  session_scope()  -- with db.session_scope() as session:
+      L165  session_scope()  -- with db.session_scope() as session:
+-   4  src/study_query_llm/services/jobs/job_reducer_service.py
+      L61  session_scope()  -- with self.db.session_scope() as session:
+      L68  session.query(  -- dep_rows = session.query(OrchestrationJobDependency).filter_by(job_id=job.id).all()
+      L115  session_scope()  -- with self.db.session_scope() as session:
+      L123  session.query(  -- dep_rows = session.query(OrchestrationJobDependency).filter_by(job_id=job.id).all()
+-   4  src/study_query_llm/services/embeddings/helpers.py
+      L60  session_scope()  -- with db.session_scope() as session:
+      L78  session_scope()  -- with db.session_scope() as session:
+      L142  session_scope()  -- with db.session_scope() as session:
+      L336  session_scope()  -- with db.session_scope() as session:
+-   4  src/study_query_llm/services/artifact_service.py
+      L15  session_scope()  -- with db.session_scope() as session:
+      L493  session.add(  -- session.add(artifact)
+      L494  session.flush(  -- session.flush()
+      L757  session.query(  -- session.query(CallArtifact)
+-   4  src/study_query_llm/pipeline/snapshot.py
+      L160  session.query(  -- repo.session.query(CallArtifact).filter(CallArtifact.id == int(artifact_id)).first()
+      L239  session_scope()  -- with db_conn.session_scope() as session:
+      L241  session.query(  -- session.query(Group)
+      L288  session_scope()  -- with db_conn.session_scope() as session:
+-   4  src/study_query_llm/pipeline/runner.py
+      L98  session_scope()  -- with db.session_scope() as session:
+      L148  session_scope()  -- with db.session_scope() as session:
+      L159  session_scope()  -- with db.session_scope() as session:
+      L170  session_scope()  -- with db.session_scope() as session:
+-   4  src/study_query_llm/pipeline/parse.py
+      L201  session.query(  -- repo.session.query(CallArtifact).filter(CallArtifact.id == int(artifact_id)).first()
+      L243  session_scope()  -- with db_conn.session_scope() as session:
+      L245  session.query(  -- session.query(Group)
+      L289  session_scope()  -- with db_conn.session_scope() as session:
+-   4  src/study_query_llm/experiments/mcq_run_persistence.py
+      L29  session_scope()  -- with db.session_scope() as session:
+      L31  session.query(  -- session.query(Group)
+      L68  session_scope()  -- with db.session_scope() as session:
+      L81  session.flush(  -- session.flush()
+-   4  src/study_query_llm/analysis/mcq_analyze_request.py
+      L39  session.query(  -- all_mcq = session.query(Group).filter(Group.group_type == GROUP_TYPE_MCQ_RUN).all()
+      L72  session_scope()  -- with db.session_scope() as session:
+      L225  session_scope()  -- with db.session_scope() as session:
+      L248  session_scope()  -- with db.session_scope() as session:
+-   3  src/study_query_llm/services/supervisor_mode.py
+      L18  session_scope()  -- with db.session_scope() as session:
+      L39  session_scope()  -- with db.session_scope() as session:
+      L116  session_scope()  -- with db.session_scope() as session:
+-   2  src/study_query_llm/services/jobs/p0_baseline.py
+      L83  session.query(  -- session.query(OrchestrationJobDependency)
+      L215  session_scope()  -- with db.session_scope() as session:
+-   2  src/study_query_llm/services/data_quality_service.py
+      L25  session_scope()  -- with db.session_scope() as session:
+      L58  session.query(  -- existing = self.repository.session.query(Group).filter_by(
+-   2  src/study_query_llm/pipeline/acquire.py
+      L81  session.query(  -- repo.session.query(CallArtifact).filter(CallArtifact.id == int(artifact_id)).first()
+      L120  session_scope()  -- with db_conn.session_scope() as session:
+-   1  src/study_query_llm/services/summarization_service.py
+      L15  session_scope()  -- with db.session_scope() as session:
+-   1  src/study_query_llm/services/study_service.py
+      L33  session_scope()  -- with db.session_scope() as session:
+-   1  src/study_query_llm/services/paraphraser_factory.py
+      L44  session_scope()  -- with db.session_scope() as session:
+-   1  src/study_query_llm/services/inference_service.py
+      L494  session.query(  -- all_batch_groups = self.repository.session.query(Group).filter(
+-   1  src/study_query_llm/services/embeddings/service.py
+      L12  session_scope()  -- with db.session_scope() as session:
+

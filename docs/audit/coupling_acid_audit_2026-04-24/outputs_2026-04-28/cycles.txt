@@ -1,0 +1,10 @@
+Modules: 146
+Edges:   465
+SCCs:    144 (true cycles size>1: 1)
+
+Import cycles (largest first):
+
+[1] size=3
+  - study_query_llm.services.embeddings
+  - study_query_llm.services.embeddings.helpers
+  - study_query_llm.services.embeddings.service

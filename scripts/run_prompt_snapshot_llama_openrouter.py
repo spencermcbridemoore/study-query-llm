@@ -103,7 +103,7 @@ MODEL_ROSTERS: Dict[str, List[str]] = {
 }
 
 PROMPT_RESPONSE_METHOD_NAME = "openrouter_prompt_only_responses"
-PROMPT_RESPONSE_METHOD_VERSION = "1.0"
+PROMPT_RESPONSE_METHOD_VERSION = "1.1"
 
 
 @dataclass(frozen=True)
@@ -400,7 +400,7 @@ async def _run_model_inference(
     model: str,
     prompts: Sequence[PromptRecord],
     concurrency: int,
-    temperature: float,
+    temperature: Optional[float],
     max_tokens: Optional[int],
     max_retries: int,
     initial_wait: float,
@@ -429,10 +429,12 @@ async def _run_model_inference(
         async with semaphore:
             started = time.perf_counter()
             try:
+                inference_kwargs: Dict[str, Any] = {"max_tokens": max_tokens}
+                if temperature is not None:
+                    inference_kwargs["temperature"] = float(temperature)
                 response = await service.run_inference(
                     rec.prompt,
-                    temperature=float(temperature),
-                    max_tokens=max_tokens,
+                    **inference_kwargs,
                 )
                 metadata = dict(response.get("metadata") or {})
                 row = {
@@ -491,7 +493,7 @@ async def _run_models_with_workers(
     prompts: Sequence[PromptRecord],
     model_concurrency: int,
     prompt_concurrency: int,
-    temperature: float,
+    temperature: Optional[float],
     max_tokens: Optional[int],
     max_retries: int,
     initial_wait: float,
@@ -521,7 +523,7 @@ async def _run_models_with_workers(
                 model=model,
                 prompts=prompts,
                 concurrency=int(prompt_concurrency),
-                temperature=float(temperature),
+                temperature=temperature,
                 max_tokens=max_tokens,
                 max_retries=int(max_retries),
                 initial_wait=float(initial_wait),
@@ -606,7 +608,8 @@ def _ensure_prompt_response_method(repo: RawCallRepository) -> int:
                 "properties": {
                     "provider": {"type": "string"},
                     "model": {"type": "string"},
-                    "temperature": {"type": "number"},
+                    "temperature": {"type": ["number", "null"]},
+                    "temperature_omitted": {"type": "boolean"},
                     "max_tokens": {"type": ["integer", "null"]},
                     "concurrency": {"type": "integer"},
                     "prompt_column": {"type": "string"},
@@ -684,6 +687,11 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Sampling temperature for chat inference.",
+    )
+    parser.add_argument(
+        "--omit-temperature",
+        action="store_true",
+        help="Omit temperature from provider request payload (use provider default).",
     )
     parser.add_argument(
         "--max-tokens",
@@ -774,6 +782,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     dataset_slug = str(args.dataset_slug or _default_dataset_slug(csv_path))
     database_url = _resolve_database_url(args.database_url)
     max_tokens = int(args.max_tokens) if int(args.max_tokens) > 0 else None
+    temperature: Optional[float] = (
+        None if bool(args.omit_temperature) else float(args.temperature)
+    )
 
     db_conn = DatabaseConnectionV2(
         database_url,
@@ -784,6 +795,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"[SETUP] csv={csv_path}", flush=True)
     print(f"[SETUP] dataset_slug={dataset_slug}", flush=True)
+    if temperature is None:
+        print("[SETUP] temperature=provider_default (omitted from payload)", flush=True)
+    else:
+        print(f"[SETUP] temperature={temperature}", flush=True)
 
     acquire_cfg = _build_local_csv_acquire_config(
         dataset_slug=dataset_slug,
@@ -894,6 +909,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "target_model_count": int(args.target_model_count),
                     "model_concurrency": int(args.model_concurrency),
                     "prompt_concurrency": int(args.concurrency),
+                    "temperature": temperature,
+                    "temperature_omitted": bool(temperature is None),
                     "prompt_count": len(prompts),
                     "created_at": run_started.isoformat(),
                 },
@@ -999,7 +1016,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "prompt_count": len(prompts),
                         "success_count": successes,
                         "failure_count": failures,
-                        "temperature": float(args.temperature),
+                        "temperature": temperature,
+                        "temperature_omitted": bool(temperature is None),
                         "max_tokens": max_tokens,
                         "prompt_column": str(args.prompt_column),
                         "source_id_column": str(args.source_id_column),
@@ -1067,7 +1085,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 config_json={
                     "provider": "openrouter",
                     "model": model,
-                    "temperature": float(args.temperature),
+                    "temperature": temperature,
+                    "temperature_omitted": bool(temperature is None),
                     "max_tokens": max_tokens,
                     "concurrency": int(args.concurrency),
                     "model_concurrency": int(args.model_concurrency),
@@ -1111,7 +1130,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             prompts=prompts,
             model_concurrency=int(args.model_concurrency),
             prompt_concurrency=int(args.concurrency),
-            temperature=float(args.temperature),
+            temperature=temperature,
             max_tokens=max_tokens,
             max_retries=int(args.max_retries),
             initial_wait=float(args.initial_wait_seconds),
@@ -1202,6 +1221,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "target_model_count": int(args.target_model_count),
         "model_concurrency": int(args.model_concurrency),
         "prompt_concurrency": int(args.concurrency),
+        "temperature": temperature,
+        "temperature_omitted": bool(temperature is None),
         "model_reports": model_reports,
         "combined_output_csv": str(output_csv),
         "started_at": run_started.isoformat(),

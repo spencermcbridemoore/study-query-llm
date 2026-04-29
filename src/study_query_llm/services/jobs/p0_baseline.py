@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from typing import Any, Dict, Iterable, List
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.db.models_v2 import OrchestrationJobDependency
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.experiments.sweep_request_types import get_sweep_type_adapter
@@ -210,7 +211,11 @@ def _build_normalization_examples() -> Dict[str, str]:
 
 def build_p0_baseline_snapshot() -> Dict[str, Any]:
     """Build deterministic baseline snapshot for PR0 parity checks."""
-    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db = DatabaseConnectionV2(
+        "sqlite:///:memory:",
+        enable_pgvector=False,
+        write_intent=WriteIntent.SANDBOX,
+    )
     db.init_db()
     with db.session_scope() as session:
         repo = RawCallRepository(session)

@@ -32,6 +32,8 @@ setup(
         "psycopg2-binary>=2.9.0",  # PostgreSQL driver
         "pandas>=2.0.0",  # Data analysis and DataFrames
         "pyarrow>=17.0.0",  # Parquet parsing for snapshot stage
+        "scikit-learn>=1.3.0",  # Clustering pipeline implementations
+        "openpyxl>=3.1.0",  # Excel parser/writer used by uncertainty dataset flows
         "sympy>=1.12",  # domain.representation_hierarchy
         "langchain>=0.3.0",
         "langgraph>=0.2.0",

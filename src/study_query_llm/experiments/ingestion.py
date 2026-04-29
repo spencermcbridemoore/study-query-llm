@@ -1,7 +1,7 @@
 """In-memory sweep result ingestion to database."""
 
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -125,7 +125,7 @@ def ingest_result_to_db(
                     metadata.get("sweep_config", {}).get("k_max", 20),
                 ],
                 "source": "digested_during_calculation",
-                "ingested_at": datetime.utcnow().isoformat(),
+                "ingested_at": datetime.now(timezone.utc).isoformat(),
                 **{k: v for k, v in metadata.items() if k not in ("sweep_config",)},
             }
             if snapshot_ids:

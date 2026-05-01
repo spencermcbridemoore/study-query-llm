@@ -40,7 +40,7 @@ from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.runner import StageIdentity, run_stage
 from study_query_llm.pipeline.types import StageResult
 from study_query_llm.services.artifact_service import ArtifactService
-from study_query_llm.services.method_service import MethodService
+from study_query_llm.services.method_service import MethodInputRequirements, MethodService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.provenanced_run_service import ProvenancedRunService
 
@@ -75,12 +75,23 @@ class AnalysisPayload:
     result_ref: str | None = None
 
 
-@dataclass(frozen=True)
-class MethodInputRequirements:
-    """Resolved input requirements for a method definition."""
+@dataclass
+class AnalyzeInputBundle:
+    """Prepared analyze-stage inputs for either embedding or snapshot mode."""
 
-    snapshot: bool = True
-    embedding_batch: bool = True
+    analysis_input_group_id: int
+    analysis_input_group_type: str
+    embedding_batch_group_id: int | None
+    embedding_metadata: dict[str, Any]
+    dataframe_group_id: int
+    resolved_positions: list[int]
+    analysis_embeddings: np.ndarray | None
+    analysis_texts: list[str]
+    representation: str
+    representation_meta: dict[str, Any]
+    stage_group_name: str
+    stage_group_description: str
+    stage_depends_on_ids: list[int]
 
 
 AnalysisRunner = Callable[..., AnalysisPayload | Mapping[str, Any]]
@@ -417,42 +428,165 @@ def _resolve_method_definition_id(
     return int(method_row.id)
 
 
-def _coerce_required_input_flag(value: Any, *, default: bool) -> bool:
-    """Parse input requirement flag values from JSON-like payloads."""
-    if isinstance(value, bool):
-        return value
-    return default
+def _resolve_snapshot_dataframe_and_slice(
+    session,
+    *,
+    snapshot_group_id: int,
+    artifact_dir: str,
+) -> tuple[int, list[int], list[str], list[int | None], list[str | None]]:
+    """Resolve snapshot dataframe identity + ordered text slice payload."""
+    snapshot_group = _require_group(
+        session,
+        int(snapshot_group_id),
+        expected_type="dataset_snapshot",
+    )
+    snapshot_metadata = dict(snapshot_group.metadata_json or {})
+    snapshot_df_id = int(snapshot_metadata.get("source_dataframe_group_id") or -1)
+    if snapshot_df_id <= 0:
+        raise ValueError("snapshot metadata must include source_dataframe_group_id")
+
+    snapshot_payload = _load_snapshot_subquery(
+        session,
+        snapshot_group_id=int(snapshot_group_id),
+        artifact_dir=artifact_dir,
+    )
+    resolved_index_raw = list(snapshot_payload.get("resolved_index") or [])
+    resolved_positions: list[int] = []
+    for item in resolved_index_raw:
+        if isinstance(item, (list, tuple)) and len(item) >= 1:
+            resolved_positions.append(int(item[0]))
+            continue
+        raise ValueError("resolved_index entries must be [position, source_id]")
+    if not resolved_positions:
+        raise ValueError("snapshot resolved_index is empty; nothing to analyze")
+
+    texts, labels, label_names = _load_dataframe_slice(
+        session,
+        dataframe_group_id=int(snapshot_df_id),
+        positions=resolved_positions,
+        artifact_dir=artifact_dir,
+    )
+    return snapshot_df_id, resolved_positions, texts, labels, label_names
 
 
-def _resolve_method_input_requirements(
-    method_service: MethodService,
+def _prepare_analyze_input_bundle(
+    session,
     *,
     method_name: str,
-    method_version: str | None,
-) -> MethodInputRequirements:
-    """Resolve required inputs from MethodDefinition.input_schema.
-
-    Contract (minimal):
-      input_schema.required_inputs.snapshot: bool (default true)
-      input_schema.required_inputs.embedding_batch: bool (default true)
-    """
-    method_row = method_service.get_method(method_name, version=method_version)
-    if method_row is None and method_version is None:
-        method_row = method_service.get_method(method_name)
-    input_schema = (
-        dict(method_row.input_schema)
-        if method_row is not None and isinstance(method_row.input_schema, Mapping)
-        else {}
+    method_input_requirements: MethodInputRequirements,
+    snapshot_group_id: int,
+    embedding_batch_group_id: int | None,
+    artifact_dir: str,
+    resolved_params: dict[str, Any],
+    run_key: str,
+) -> AnalyzeInputBundle:
+    """Prepare mode-specific analyze inputs with normalized metadata."""
+    (
+        snapshot_df_id,
+        resolved_positions,
+        texts,
+        labels,
+        label_names,
+    ) = _resolve_snapshot_dataframe_and_slice(
+        session,
+        snapshot_group_id=int(snapshot_group_id),
+        artifact_dir=artifact_dir,
     )
-    required_inputs = input_schema.get("required_inputs")
-    if not isinstance(required_inputs, Mapping):
-        return MethodInputRequirements()
-    return MethodInputRequirements(
-        snapshot=_coerce_required_input_flag(required_inputs.get("snapshot"), default=True),
-        embedding_batch=_coerce_required_input_flag(
-            required_inputs.get("embedding_batch"),
-            default=True,
+
+    if method_input_requirements.embedding_batch:
+        if embedding_batch_group_id is None:
+            raise ValueError(
+                f"analysis method {method_name!r} requires embedding_batch_group_id"
+            )
+        embedding_group = _require_group(
+            session,
+            int(embedding_batch_group_id),
+            expected_type="embedding_batch",
+        )
+        embedding_metadata = dict(embedding_group.metadata_json or {})
+        embedding_df_id = int(embedding_metadata.get("source_dataframe_group_id") or -1)
+        if embedding_df_id <= 0:
+            raise ValueError("embedding metadata must include source_dataframe_group_id")
+        if snapshot_df_id != embedding_df_id:
+            raise ValueError(
+                "snapshot and embedding batch reference different dataframe groups "
+                f"(snapshot={snapshot_df_id}, embedding={embedding_df_id})"
+            )
+
+        embedding_matrix = _load_embedding_matrix(
+            session,
+            embedding_batch_group_id=int(embedding_batch_group_id),
+            artifact_dir=artifact_dir,
+        )
+        max_pos = max(resolved_positions)
+        if max_pos >= int(embedding_matrix.shape[0]):
+            raise ValueError(
+                "snapshot resolved_index position exceeds embedding matrix bounds: "
+                f"max_position={max_pos} matrix_rows={embedding_matrix.shape[0]}"
+            )
+        sliced_embeddings = np.asarray(embedding_matrix[resolved_positions], dtype=np.float64)
+        if len(texts) != int(sliced_embeddings.shape[0]):
+            raise ValueError(
+                "text/vector alignment mismatch after resolved-index slicing: "
+                f"texts={len(texts)} vectors={sliced_embeddings.shape[0]}"
+            )
+
+        representation = _resolve_representation(resolved_params)
+        resolved_params.setdefault("representation_type", representation)
+        resolved_params.setdefault("embedding_representation", representation)
+        analysis_embeddings, analysis_texts, representation_meta = _derive_representation_view(
+            base_embeddings=sliced_embeddings,
+            texts=texts,
+            labels=labels,
+            label_names=label_names,
+            representation=representation,
+        )
+
+        return AnalyzeInputBundle(
+            analysis_input_group_id=int(embedding_batch_group_id),
+            analysis_input_group_type="embedding_batch",
+            embedding_batch_group_id=int(embedding_batch_group_id),
+            embedding_metadata=embedding_metadata,
+            dataframe_group_id=int(snapshot_df_id),
+            resolved_positions=resolved_positions,
+            analysis_embeddings=analysis_embeddings,
+            analysis_texts=analysis_texts,
+            representation=representation,
+            representation_meta=representation_meta,
+            stage_group_name=(
+                f"analyze:{method_name}:{int(embedding_batch_group_id)}:"
+                f"{int(snapshot_group_id)}:{run_key}"
+            ),
+            stage_group_description=(
+                f"Analysis run for {method_name} on embedding {int(embedding_batch_group_id)} "
+                f"and snapshot {int(snapshot_group_id)}"
+            ),
+            stage_depends_on_ids=[int(embedding_batch_group_id), int(snapshot_group_id)],
+        )
+
+    resolved_params["representation_type"] = REPRESENTATION_SNAPSHOT_ONLY
+    resolved_params["embedding_representation"] = REPRESENTATION_SNAPSHOT_ONLY
+    return AnalyzeInputBundle(
+        analysis_input_group_id=int(snapshot_group_id),
+        analysis_input_group_type="dataset_snapshot",
+        embedding_batch_group_id=None,
+        embedding_metadata={},
+        dataframe_group_id=int(snapshot_df_id),
+        resolved_positions=resolved_positions,
+        analysis_embeddings=None,
+        analysis_texts=texts,
+        representation=REPRESENTATION_SNAPSHOT_ONLY,
+        representation_meta={
+            "analysis_input_mode": ANALYSIS_INPUT_MODE_SNAPSHOT_ONLY,
+            "embedding_input_used": False,
+        },
+        stage_group_name=(
+            f"analyze:{method_name}:snapshot-only:{int(snapshot_group_id)}:{run_key}"
         ),
+        stage_group_description=(
+            f"Analysis run for {method_name} on snapshot {int(snapshot_group_id)} (snapshot-only)"
+        ),
+        stage_depends_on_ids=[int(snapshot_group_id)],
     )
 
 
@@ -709,137 +843,44 @@ def analyze(
         write_intent=write_intent,
     )
     snapshot_group_id_int = int(snapshot_group_id)
-    embedding_batch_input_group_id: int | None = (
+    requested_embedding_batch_group_id: int | None = (
         int(embedding_batch_group_id) if embedding_batch_group_id is not None else None
     )
-    analysis_input_group_id = snapshot_group_id_int
-    analysis_input_group_type = "dataset_snapshot"
-    stage_group_name = f"analyze:{method_name}:snapshot-only:{snapshot_group_id_int}:{run_key}"
-    stage_group_description = (
-        f"Analysis run for {method_name} on snapshot {snapshot_group_id_int} (snapshot-only)"
-    )
-    stage_group_metadata: dict[str, Any] = {}
-    stage_depends_on_ids = [snapshot_group_id_int]
     with db_conn.session_scope() as session:
         requirement_repo = RawCallRepository(session)
         requirement_method_service = MethodService(requirement_repo)
-        method_input_requirements = _resolve_method_input_requirements(
-            requirement_method_service,
-            method_name=method_name,
-            method_version=method_version,
+        method_input_requirements = requirement_method_service.resolve_method_input_requirements(
+            name=method_name,
+            version=method_version,
         )
         if not method_input_requirements.snapshot:
             raise ValueError(
                 f"analysis method {method_name!r} must require snapshot input "
                 "(required_inputs.snapshot cannot be false)"
             )
-        snapshot_group = _require_group(
+        input_bundle = _prepare_analyze_input_bundle(
             session,
-            snapshot_group_id_int,
-            expected_type="dataset_snapshot",
-        )
-        snapshot_metadata = dict(snapshot_group.metadata_json or {})
-        embedding_metadata: dict[str, Any] = {}
-        snapshot_df_id = int(snapshot_metadata.get("source_dataframe_group_id") or -1)
-        if snapshot_df_id <= 0:
-            raise ValueError(
-                "snapshot metadata must include source_dataframe_group_id"
-            )
-        dataframe_group_id = snapshot_df_id
-        if method_input_requirements.embedding_batch:
-            if embedding_batch_input_group_id is None:
-                raise ValueError(
-                    f"analysis method {method_name!r} requires embedding_batch_group_id"
-                )
-            embedding_group = _require_group(
-                session,
-                embedding_batch_input_group_id,
-                expected_type="embedding_batch",
-            )
-            embedding_metadata = dict(embedding_group.metadata_json or {})
-            embedding_df_id = int(embedding_metadata.get("source_dataframe_group_id") or -1)
-            if embedding_df_id <= 0:
-                raise ValueError(
-                    "embedding metadata must include source_dataframe_group_id"
-                )
-            if snapshot_df_id != embedding_df_id:
-                raise ValueError(
-                    "snapshot and embedding batch reference different dataframe groups "
-                    f"(snapshot={snapshot_df_id}, embedding={embedding_df_id})"
-                )
-            analysis_input_group_id = int(embedding_batch_input_group_id)
-            analysis_input_group_type = "embedding_batch"
-            stage_group_name = (
-                f"analyze:{method_name}:{embedding_batch_input_group_id}:"
-                f"{snapshot_group_id_int}:{run_key}"
-            )
-            stage_group_description = (
-                f"Analysis run for {method_name} on embedding {embedding_batch_input_group_id} "
-                f"and snapshot {snapshot_group_id_int}"
-            )
-            stage_depends_on_ids = [int(embedding_batch_input_group_id), snapshot_group_id_int]
-
-        snapshot_payload = _load_snapshot_subquery(
-            session,
+            method_name=method_name,
+            method_input_requirements=method_input_requirements,
             snapshot_group_id=snapshot_group_id_int,
+            embedding_batch_group_id=requested_embedding_batch_group_id,
             artifact_dir=artifact_dir,
+            resolved_params=resolved_params,
+            run_key=run_key,
         )
-        resolved_index_raw = list(snapshot_payload.get("resolved_index") or [])
-        resolved_positions: list[int] = []
-        for item in resolved_index_raw:
-            if isinstance(item, (list, tuple)) and len(item) >= 1:
-                resolved_positions.append(int(item[0]))
-                continue
-            raise ValueError("resolved_index entries must be [position, source_id]")
-        if not resolved_positions:
-            raise ValueError("snapshot resolved_index is empty; nothing to analyze")
-
-        texts, labels, label_names = _load_dataframe_slice(
-            session,
-            dataframe_group_id=int(dataframe_group_id),
-            positions=resolved_positions,
-            artifact_dir=artifact_dir,
-        )
-        if method_input_requirements.embedding_batch:
-            if embedding_batch_input_group_id is None:
-                raise RuntimeError("embedding_batch_group_id must be resolved for embedding mode")
-            embedding_matrix = _load_embedding_matrix(
-                session,
-                embedding_batch_group_id=embedding_batch_input_group_id,
-                artifact_dir=artifact_dir,
-            )
-            max_pos = max(resolved_positions)
-            if max_pos >= int(embedding_matrix.shape[0]):
-                raise ValueError(
-                    "snapshot resolved_index position exceeds embedding matrix bounds: "
-                    f"max_position={max_pos} matrix_rows={embedding_matrix.shape[0]}"
-                )
-            sliced_embeddings = np.asarray(embedding_matrix[resolved_positions], dtype=np.float64)
-            if len(texts) != int(sliced_embeddings.shape[0]):
-                raise ValueError(
-                    "text/vector alignment mismatch after resolved-index slicing: "
-                    f"texts={len(texts)} vectors={sliced_embeddings.shape[0]}"
-                )
-            representation = _resolve_representation(resolved_params)
-            resolved_params.setdefault("representation_type", representation)
-            resolved_params.setdefault("embedding_representation", representation)
-            analysis_embeddings, analysis_texts, representation_meta = _derive_representation_view(
-                base_embeddings=sliced_embeddings,
-                texts=texts,
-                labels=labels,
-                label_names=label_names,
-                representation=representation,
-            )
-        else:
-            representation = REPRESENTATION_SNAPSHOT_ONLY
-            resolved_params["representation_type"] = REPRESENTATION_SNAPSHOT_ONLY
-            resolved_params["embedding_representation"] = REPRESENTATION_SNAPSHOT_ONLY
-            analysis_embeddings = None
-            analysis_texts = texts
-            representation_meta = {
-                "analysis_input_mode": ANALYSIS_INPUT_MODE_SNAPSHOT_ONLY,
-                "embedding_input_used": False,
-            }
+        analysis_input_group_id = int(input_bundle.analysis_input_group_id)
+        analysis_input_group_type = str(input_bundle.analysis_input_group_type)
+        embedding_batch_input_group_id = input_bundle.embedding_batch_group_id
+        embedding_metadata = dict(input_bundle.embedding_metadata)
+        dataframe_group_id = int(input_bundle.dataframe_group_id)
+        resolved_positions = list(input_bundle.resolved_positions)
+        analysis_embeddings = input_bundle.analysis_embeddings
+        analysis_texts = list(input_bundle.analysis_texts)
+        representation = str(input_bundle.representation)
+        representation_meta = dict(input_bundle.representation_meta)
+        stage_group_name = str(input_bundle.stage_group_name)
+        stage_group_description = str(input_bundle.stage_group_description)
+        stage_depends_on_ids = [int(group_id) for group_id in input_bundle.stage_depends_on_ids]
         if is_v1_clustering_method(method_name):
             if analysis_embeddings is None:
                 raise ValueError(

@@ -21,6 +21,7 @@ from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
 from study_query_llm.pipeline.types import SnapshotRow, SubquerySpec
+from study_query_llm.services.method_service import MethodService
 
 
 def _db(tmp_path: Path) -> tuple[DatabaseConnectionV2, str]:
@@ -235,6 +236,110 @@ def test_analyze_auto_request_group_and_idempotent_reuse(tmp_path: Path, monkeyp
     with db.session_scope() as session:
         request_groups = session.query(Group).filter(Group.group_type == "analysis_request").all()
         assert len(request_groups) == 1
+
+
+def test_analyze_requires_embedding_by_default_when_contract_absent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, _embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    with pytest.raises(ValueError, match="requires embedding_batch_group_id"):
+        analyze(
+            snapshot_group_id,
+            None,
+            method_name="default_requires_embedding",
+            run_key="rk_missing_embedding",
+            db=db,
+            artifact_dir=artifact_dir,
+        )
+
+
+def test_analyze_snapshot_only_method_uses_snapshot_provenance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_snapshot_only")
+    with db.session_scope() as session:
+        method_service = MethodService(RawCallRepository(session))
+        method_service.register_method(
+            name="snapshot_only_fixture",
+            version="v1",
+            code_ref="tests.pipeline.test_analyze",
+            input_schema={
+                "required_inputs": {
+                    "snapshot": True,
+                    "embedding_batch": False,
+                }
+            },
+        )
+
+    def runner(**kwargs):
+        assert kwargs["input_group_id"] == snapshot_group_id
+        assert kwargs["input_group_type"] == "dataset_snapshot"
+        assert kwargs["embeddings"] is None
+        texts = list(kwargs["texts"])
+        return {
+            "scalar_results": {"row_count": float(len(texts))},
+            "structured_results": {"mode": "snapshot_only"},
+            "artifacts": {"snapshot_only.json": b'{"mode":"snapshot_only"}'},
+            "result_ref": "snapshot_only.json",
+        }
+
+    result = analyze(
+        snapshot_group_id,
+        None,
+        method_name="snapshot_only_fixture",
+        method_version="v1",
+        run_key="rk_snapshot_only",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        method_runner=runner,
+    )
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
+        assert run_row is not None
+        assert int(run_row.source_group_id or -1) == int(snapshot_group_id)
+        cfg = dict(run_row.config_json or {})
+        assert cfg["analysis_input_mode"] == "snapshot_only"
+        assert "embedding_batch_group_id" not in cfg
+
+        dep_snapshot = (
+            session.query(GroupLink)
+            .filter(
+                GroupLink.parent_group_id == result.group_id,
+                GroupLink.child_group_id == snapshot_group_id,
+                GroupLink.link_type == "depends_on",
+            )
+            .first()
+        )
+        dep_embedding = (
+            session.query(GroupLink)
+            .filter(
+                GroupLink.parent_group_id == result.group_id,
+                GroupLink.child_group_id == embedding_group_id,
+                GroupLink.link_type == "depends_on",
+            )
+            .first()
+        )
+        assert dep_snapshot is not None
+        assert dep_embedding is None
 
 
 def test_analyze_fingerprint_includes_snapshot_and_representation(

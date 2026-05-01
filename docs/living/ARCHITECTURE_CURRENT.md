@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-24
+Last reviewed: 2026-04-30
 
 ## System Shape
 
@@ -43,6 +43,7 @@ Legacy `scripts/run_*.py` files are compatibility wrappers where retained.
 
 - Canonical spec: [`docs/DATA_PIPELINE.md`](../DATA_PIPELINE.md).
 - Stage order: `acquire -> parse -> snapshot -> embed -> analyze`.
+- Analyze input contract is method-defined: snapshot is always required; embedding is required by default and can be disabled per method via `MethodDefinition.input_schema.required_inputs.embedding_batch=false`.
 - Runtime entrypoint: `python scripts/run_bank77_pipeline.py ...` for end-to-end execution.
 - Persistence contract: public stage functions persist through `run_stage` and are linted by `scripts/check_persistence_contract.py`.
 

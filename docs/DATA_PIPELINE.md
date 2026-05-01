@@ -2,7 +2,7 @@
 
 Status: living
 Owner: documentation-maintainers + pipeline maintainers  
-Last reviewed: 2026-04-21
+Last reviewed: 2026-04-30
 
 This document defines the implemented, canonical five-stage dataset pipeline and its persistence/idempotency contracts.
 
@@ -23,7 +23,7 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 
 - `embed` persists and reuses only dataframe-level `full` matrices.
 - Non-`full` representations (for example `label_centroid`) are derived inside `analyze` from snapshot-sliced full vectors.
-- `analyze` takes dual lineage inputs: `snapshot_group_id` and `embedding_batch_group_id`.
+- `analyze` always takes `snapshot_group_id`; `embedding_batch_group_id` is method-contract-driven (`MethodDefinition.input_schema.required_inputs.embedding_batch`) and defaults to required when unspecified.
 - Snapshot sampling is deterministic-only: `sample_n`/`sample_fraction` require `sampling_seed`.
 - Analysis fingerprinting includes explicit representation identity and `input_snapshot_group_id`.
 - HDBSCAN deterministic-defaults policy: `hdbscan_metric=cosine`, `hdbscan_random_state=0`, `hdbscan_core_dist_n_jobs=1`, `hdbscan_approx_min_span_tree=false` unless explicitly overridden.
@@ -75,12 +75,13 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 
 ### Stage 5: `analyze`
 
-- **Input:** `snapshot_group_id`, `embedding_batch_group_id`, method/config
+- **Input:** `snapshot_group_id`, optional `embedding_batch_group_id` (required when method contract declares `embedding_batch=true`), method/config
 - **Output group:** `analysis_run`
 - **Output artifacts:** method-defined analysis artifacts
 - **Persistence contract:** dual-write to canonical execution provenance (`provenanced_runs`) and analysis outputs (`analysis_results`)
 - **Fingerprint contract:** includes representation identity and `input_snapshot_group_id`
-- **Alignment rule:** embeddings and texts are sliced in identical resolved-index order
+- **Alignment rule:** in embedding-backed mode, embeddings and texts are sliced in identical resolved-index order
+- **Mode contract:** embedding methods keep dual lineage (`snapshot` + `embedding_batch`); snapshot-only methods skip embedding loads/dependencies and set `config_json.analysis_input_mode=snapshot_only`
 
 ## Core Data Structures
 
@@ -105,8 +106,8 @@ Expected `depends_on` links:
 - `dataset_dataframe -> dataset`
 - `dataset_snapshot -> dataset_dataframe`
 - `embedding_batch -> dataset_dataframe`
-- `analysis_run -> embedding_batch`
 - `analysis_run -> dataset_snapshot`
+- `analysis_run -> embedding_batch` (embedding-required methods only)
 
 ## Persistence Guardrails
 
@@ -126,7 +127,7 @@ Execution shape:
 2. `parse` into canonical dataframe
 3. `snapshot` with subquery spec
 4. `embed` dataframe `full` matrix
-5. `analyze` with dual input (`snapshot`, `embedding_batch`)
+5. `analyze` with dual input (`snapshot`, `embedding_batch`) for embedding-backed methods (current BANK77 path)
 
 The script supports:
 
@@ -153,6 +154,7 @@ The pipeline contract is healthy when:
 - same parse identity and data reuse `dataset_dataframe`;
 - same snapshot spec and resolved index reuse `dataset_snapshot`;
 - snapshots over same dataframe reuse the same dataframe-level `full` embedding matrix identity;
-- analyze shows aligned text/vector slicing for resolved indices;
+- embedding-backed analyze shows aligned text/vector slicing for resolved indices;
+- snapshot-only analyze can run without embedding dependencies when method contract declares `required_inputs.embedding_batch=false`;
 - representation changes yield distinct analysis fingerprints/runs;
 - persistence lint and tests pass.

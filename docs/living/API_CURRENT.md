@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-25
+Last reviewed: 2026-04-30
 
 ## Configuration
 
@@ -63,6 +63,10 @@ Notes:
 - CLI compatibility surfaces:
   - `python -m study_query_llm.cli sweep-worker --request-id <id>`
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)
+- Pipeline analyze surface:
+  - `study_query_llm.pipeline.analyze.analyze(snapshot_group_id, embedding_batch_group_id=None, ..., method_name=..., run_key=...)`
+  - Input requirements are resolved from `MethodDefinition.input_schema.required_inputs`; default behavior remains embedding-required when contract metadata is absent.
+  - Snapshot-only methods (`required_inputs.embedding_batch=false`) execute without embedding artifacts and persist `config_json.analysis_input_mode=snapshot_only` for explicit provenance/fingerprint mode identity.
 
 Embedding sweep runner (snapshot -> provider model sweep):
 

@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-26
+Last reviewed: 2026-04-30
 
 ## Scope
 
@@ -61,7 +61,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - `snapshot` is now declarative (`SubquerySpec`) and writes deterministic resolved-index artifacts (`dataset_subquery_spec`) keyed by `spec_hash` + `resolved_index_hash`; unseeded sampling requests are rejected; `category_filter` enables strict typed membership filtering against parser-emitted keys nested in `extra_json` while preserving legacy `spec_hash` behavior when unset.
 - `embed` now persists/reuses dataframe-level `full` matrices only (`dataset_key=dataframe:<id>:full`); non-full representations are intentionally deferred to analyze-time derivation.
 - `embed` forwards optional embedding runtime knobs (`chunk_worker_concurrency`, retry/backoff settings, singleflight settings, chunk circuit-breaker controls) to the helper/service chain with safe defaults preserving legacy behavior.
-- `analyze` now requires dual input lineage (`snapshot_group_id`, `embedding_batch_group_id`), slices text/vectors by the same resolved-index ordering, and includes representation identity plus `input_snapshot_group_id` in canonical run fingerprinting.
+- `analyze` now resolves method input requirements from `MethodDefinition.input_schema.required_inputs`; default behavior stays embedding-first dual lineage (`snapshot_group_id`, `embedding_batch_group_id`) for methods without an explicit contract, while snapshot-only methods (`embedding_batch=false`) run from snapshot lineage only and persist explicit `analysis_input_mode=snapshot_only` in execution config/metadata to keep provenance/fingerprints unambiguous.
 - BANK77 execution is scriptable via `scripts/run_bank77_pipeline.py` using the five-stage flow; idempotent reuse is verified in pipeline tests and full-suite regression runs.
 - Clustering provenance v1 is active in `analyze`: YAML-backed rule resolution (`config/rules/clustering/rules-v1.0.0.yaml`), pre-run and post-selection hard-constraint validation, and final effective-pipeline identity fields (`operation_type`, `operation_version`, `rule_set_version`, `rule_set_hash`, `rule_inputs`, `pipeline_declared`, `pipeline_resolved`, `pipeline_effective`, `pipeline_effective_hash`, `recipe_hash`) are persisted in analysis execution config + `structured_results.clustering_summary`.
 - Canonical clustering runners are active for `hdbscan`, `kmeans+silhouette+kneedle`, and `gmm+bic+argmin` (with selection evidence + selection-curve artifacts for sweep-and-select methods). HDBSCAN now writes `operation_type=cluster_pipeline` in summary payloads while preserving legacy reader shape compatibility.

@@ -1,0 +1,40 @@
+"""Tests for clustering runtime registry."""
+
+from __future__ import annotations
+
+from study_query_llm.pipeline.clustering.registry import (
+    get_algorithm_spec,
+    iter_algorithm_specs,
+    resolve_algorithm_runner,
+    resolve_registry_method_name,
+)
+
+
+def test_registry_contains_expected_builtin_methods() -> None:
+    names = {spec.method_name for spec in iter_algorithm_specs()}
+    assert names == {
+        "agglomerative+fixed-k",
+        "hdbscan",
+        "kmeans+silhouette+kneedle",
+        "gmm+bic+argmin",
+    }
+
+
+def test_registry_lookup_is_case_insensitive() -> None:
+    upper = get_algorithm_spec("HDBSCAN")
+    mixed = get_algorithm_spec("KMeans+Silhouette+Kneedle")
+    assert upper is not None
+    assert mixed is not None
+    assert upper.method_name == "hdbscan"
+    assert mixed.method_name == "kmeans+silhouette+kneedle"
+
+
+def test_registry_unknown_method_returns_none() -> None:
+    assert get_algorithm_spec("does_not_exist") is None
+    assert resolve_algorithm_runner("does_not_exist") is None
+
+
+def test_registry_alias_resolution_maps_to_canonical_method_name() -> None:
+    assert resolve_registry_method_name("kmeans_silhouette_kneedle") == "kmeans+silhouette+kneedle"
+    assert resolve_registry_method_name("gmm_bic_argmin") == "gmm+bic+argmin"
+    assert resolve_registry_method_name("hdbscan") == "hdbscan"

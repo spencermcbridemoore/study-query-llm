@@ -27,16 +27,15 @@ from study_query_llm.pipeline.parse import find_dataframe_parquet_uri
 from study_query_llm.pipeline.clustering import (
     build_effective_recipe_payload,
     build_pipeline_effective_hash,
-    is_v1_clustering_method,
+    get_algorithm_spec,
+    is_registry_v1_clustering_method,
     load_rule_set,
     resolve_clustering_resolution,
-    run_gmm_bic_argmin_analysis,
-    run_kmeans_silhouette_kneedle_analysis,
+    resolve_algorithm_runner,
     validate_identity_contract,
     validate_post_selection,
     validate_pre_run,
 )
-from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.runner import StageIdentity, run_stage
 from study_query_llm.pipeline.types import StageResult
 from study_query_llm.services.artifact_service import ArtifactService
@@ -391,6 +390,9 @@ def _resolve_method_definition_id(
 ) -> int:
     normalized_name = str(method_name).strip().lower()
     if normalized_name in COMPOSITE_RECIPES:
+        # Runtime runner dispatch now lives in clustering.registry. Composite
+        # recipe metadata remains in algorithms.recipes for MethodDefinition
+        # identity and DB registration until both registries are unified.
         register_clustering_components(method_service)
         composite_version = str(method_version or "1.0")
         return int(
@@ -642,14 +644,7 @@ def _default_method_runner(
 
 
 def _resolve_builtin_method_runner(method_name: str) -> AnalysisRunner | None:
-    normalized = str(method_name or "").strip().lower()
-    if normalized == "hdbscan":
-        return run_hdbscan_analysis
-    if normalized == "kmeans+silhouette+kneedle":
-        return run_kmeans_silhouette_kneedle_analysis
-    if normalized == "gmm+bic+argmin":
-        return run_gmm_bic_argmin_analysis
-    return None
+    return resolve_algorithm_runner(method_name)
 
 
 def _extract_selection_evidence(payload: AnalysisPayload) -> dict[str, Any] | None:
@@ -881,7 +876,8 @@ def analyze(
         stage_group_name = str(input_bundle.stage_group_name)
         stage_group_description = str(input_bundle.stage_group_description)
         stage_depends_on_ids = [int(group_id) for group_id in input_bundle.stage_depends_on_ids]
-        if is_v1_clustering_method(method_name):
+        algorithm_spec = get_algorithm_spec(method_name)
+        if is_registry_v1_clustering_method(method_name):
             if analysis_embeddings is None:
                 raise ValueError(
                     f"v1 clustering method {method_name!r} requires embedding input"
@@ -906,6 +902,14 @@ def analyze(
                     resolved_params["determinism_class"] = "pseudo_deterministic"
                 else:
                     resolved_params["determinism_class"] = "non_deterministic"
+        elif (
+            resolved_params.get("determinism_class") is None
+            and algorithm_spec is not None
+            and str(algorithm_spec.method_name) == "agglomerative+fixed-k"
+        ):
+            resolved_params["determinism_class"] = str(
+                algorithm_spec.default_determinism_class
+            )
 
         repo = RawCallRepository(session)
         resolved_request_group_id = _resolve_request_group_id(
@@ -982,6 +986,9 @@ def analyze(
                 raise RuntimeError("ArtifactService requires repository for analyze stage writes")
             runner_parameters = dict(resolved_params)
             if clustering_resolution_pre is not None:
+                # Runner input contract (v1 envelope only): runners may consume
+                # these private keys to replay the pre-resolved effective
+                # pipeline and rule-input context without recomputing it.
                 runner_parameters["_v1_pipeline_resolved"] = [
                     dict(entry) for entry in clustering_resolution_pre.pipeline_resolved
                 ]
@@ -1138,6 +1145,15 @@ def analyze(
                 "snapshot_group_id": int(snapshot_group_id_int),
                 "representation_type": representation,
             }
+            composite_recipe = COMPOSITE_RECIPES.get(str(method_name).strip().lower())
+            if composite_recipe is not None:
+                # TODO(clustering-registry-followup): Resolve runtime mismatch for
+                # cosine_kllmeans_no_pca by wiring a dedicated runner or formally
+                # deprecating/removing it from analyze runtime paths.
+                canonical_config.setdefault(
+                    "recipe_hash",
+                    canonical_recipe_hash(dict(composite_recipe)),
+                )
             if embedding_batch_input_group_id is not None:
                 canonical_config["embedding_batch_group_id"] = int(
                     embedding_batch_input_group_id

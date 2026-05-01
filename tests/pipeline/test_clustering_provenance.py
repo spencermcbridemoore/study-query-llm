@@ -7,8 +7,10 @@ import pytest
 
 from study_query_llm.algorithms.recipes import canonical_recipe_hash
 from study_query_llm.pipeline.clustering import (
+    V1_CLUSTERING_METHODS,
     build_effective_recipe_payload,
     build_pipeline_effective_hash,
+    is_v1_clustering_method,
     load_rule_set,
     resolve_clustering_resolution,
     run_gmm_bic_argmin_analysis,
@@ -42,6 +44,25 @@ def _toy_embeddings() -> np.ndarray:
         dtype=np.float64,
     )
     return np.vstack([cluster_a, cluster_b])
+
+
+def test_agglomerative_method_is_outside_v1_envelope() -> None:
+    assert not is_v1_clustering_method("agglomerative+fixed-k")
+    assert "agglomerative+fixed-k" not in V1_CLUSTERING_METHODS
+    assert {"hdbscan", "kmeans+silhouette+kneedle", "gmm+bic+argmin"}.issubset(
+        V1_CLUSTERING_METHODS
+    )
+
+
+def test_resolver_rejects_non_v1_agglomerative_method() -> None:
+    rule_set = load_rule_set()
+    with pytest.raises(ValueError, match="Unsupported clustering method"):
+        resolve_clustering_resolution(
+            method_name="agglomerative+fixed-k",
+            parameters={"k": 2},
+            rule_set=rule_set,
+            context={"embedding_dim": 2, "n_samples": 10},
+        )
 
 
 def test_resolver_deterministic_for_identical_inputs() -> None:

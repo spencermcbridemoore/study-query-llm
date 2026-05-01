@@ -105,6 +105,22 @@ def test_canonical_run_fingerprint_different_method_different_hash():
     assert h1 != h2
 
 
+def test_canonical_run_fingerprint_agglomerative_k_change_changes_hash():
+    _, h_k2 = canonical_run_fingerprint(
+        method_name="agglomerative+fixed-k",
+        method_version="1.0",
+        config_json={"k": 2, "linkage": "ward", "metric": "euclidean"},
+        determinism_class="deterministic",
+    )
+    _, h_k3 = canonical_run_fingerprint(
+        method_name="agglomerative+fixed-k",
+        method_version="1.0",
+        config_json={"k": 3, "linkage": "ward", "metric": "euclidean"},
+        determinism_class="deterministic",
+    )
+    assert h_k2 != h_k3
+
+
 def test_canonical_run_fingerprint_different_snapshot_different_hash():
     _, h1 = canonical_run_fingerprint(
         method_name="knn", input_snapshot_group_id=1

@@ -68,6 +68,9 @@ Notes:
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)
 - Pipeline analyze surface:
   - `study_query_llm.pipeline.analyze.analyze(snapshot_group_id, embedding_batch_group_id=None, ..., method_name=..., run_key=...)`
+  - Built-in clustering runner dispatch is registry-driven via `study_query_llm.pipeline.clustering.registry` (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`, `agglomerative+fixed-k`).
+  - v1 clustering provenance envelope (`rules-v1.0.0.yaml` resolver/validators + clustering summary identity fields) applies only to registry methods marked `provenance_envelope=clustering_v1` (currently `hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`).
+  - `agglomerative+fixed-k` executes outside the v1 resolver/validator envelope (`provenance_envelope=none`).
   - Input requirements are resolved from `MethodDefinition.input_schema.required_inputs`; default behavior remains embedding-required when contract metadata is absent.
   - Snapshot-only methods (`required_inputs.embedding_batch=false`) execute without embedding artifacts and persist `config_json.analysis_input_mode=snapshot_only` for explicit provenance/fingerprint mode identity.
 

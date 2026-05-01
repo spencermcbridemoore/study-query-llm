@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from study_query_llm.algorithms.recipes import COMPOSITE_RECIPES, canonical_recipe_hash
 from study_query_llm.datasets.acquisition import FileFetchSpec
 from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
@@ -16,6 +17,10 @@ from study_query_llm.db.models_v2 import AnalysisResult, Group, GroupLink
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
+from study_query_llm.pipeline.clustering import (
+    run_gmm_bic_argmin_analysis,
+    run_kmeans_silhouette_kneedle_analysis,
+)
 from study_query_llm.pipeline.embed import embed
 from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.parse import parse
@@ -687,3 +692,214 @@ def test_analyze_v1_gmm_writes_clustering_summary_and_identity(
         cfg = dict(run_row.config_json or {})
         assert cfg["operation_type"] == "cluster_pipeline"
         assert cfg["recipe_hash"] == cfg["pipeline_effective_hash"]
+
+
+@pytest.mark.parametrize(
+    ("method_name", "explicit_runner", "parameters"),
+    [
+        (
+            "hdbscan",
+            run_hdbscan_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "hdbscan_min_cluster_size": 2,
+                "hdbscan_min_samples": 1,
+            },
+        ),
+        (
+            "kmeans+silhouette+kneedle",
+            run_kmeans_silhouette_kneedle_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+            },
+        ),
+        (
+            "gmm+bic+argmin",
+            run_gmm_bic_argmin_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+            },
+        ),
+    ],
+)
+def test_analyze_registry_dispatch_matches_explicit_runner_fingerprint(
+    method_name: str,
+    explicit_runner,
+    parameters: dict[str, object],
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    if method_name == "hdbscan":
+        class _FakeHDBSCAN:
+            def __init__(self, **kwargs):
+                self._kwargs = dict(kwargs)
+
+            def fit_predict(self, matrix):
+                rows = int(np.asarray(matrix).shape[0])
+                self.probabilities_ = np.ones(rows, dtype=np.float64)
+                self.outlier_scores_ = np.zeros(rows, dtype=np.float64)
+                return np.asarray([0, 0, 1, 1], dtype=np.int64)
+
+        monkeypatch.setitem(
+            sys.modules,
+            "hdbscan",
+            types.SimpleNamespace(HDBSCAN=_FakeHDBSCAN),
+        )
+
+    request_group_id = _create_request_group(db, f"request_registry_parity_{method_name}")
+    via_registry = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name=method_name,
+        run_key=f"rk_registry_{method_name}",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        parameters=parameters,
+        method_runner=None,
+    )
+    via_explicit = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name=method_name,
+        run_key=f"rk_explicit_{method_name}",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        parameters=parameters,
+        method_runner=explicit_runner,
+    )
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_registry = repo.get_provenanced_run_by_id(int(via_registry.run_id or 0))
+        run_explicit = repo.get_provenanced_run_by_id(int(via_explicit.run_id or 0))
+        assert run_registry is not None
+        assert run_explicit is not None
+        assert run_registry.fingerprint_hash == run_explicit.fingerprint_hash
+
+
+def test_analyze_cosine_kllmeans_falls_back_to_default_runner_and_records_recipe_hash(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_cosine_kllmeans_default")
+    result = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name="cosine_kllmeans_no_pca",
+        run_key="rk_cosine_kllmeans_default",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        parameters={
+            "dataset_slug": "analyze_fixture",
+            "representation_type": "full",
+            "embedding_provider": "test-provider",
+            "embedding_deployment": "test-embedding-model",
+        },
+    )
+
+    assert "analysis_summary.json" in result.artifact_uris
+    assert "clustering_summary.json" not in result.artifact_uris
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
+        assert run_row is not None
+        cfg = dict(run_row.config_json or {})
+        expected_recipe_hash = canonical_recipe_hash(
+            dict(COMPOSITE_RECIPES["cosine_kllmeans_no_pca"])
+        )
+        assert cfg.get("recipe_hash") == expected_recipe_hash
+        assert "operation_type" not in cfg
+        summary_result = (
+            session.query(AnalysisResult)
+            .filter(
+                AnalysisResult.analysis_group_id == int(result.group_id),
+                AnalysisResult.result_key == "summary",
+            )
+            .first()
+        )
+        assert summary_result is not None
+
+
+def test_analyze_agglomerative_fixed_k_runs_outside_v1_envelope(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_agglomerative_fixed_k")
+    result = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name="agglomerative+fixed-k",
+        run_key="rk_agglomerative_fixed_k",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        parameters={
+            "k": 2,
+            "dataset_slug": "analyze_fixture",
+            "representation_type": "full",
+            "embedding_provider": "test-provider",
+            "embedding_deployment": "test-embedding-model",
+        },
+        method_runner=None,
+    )
+
+    assert "agglomerative_summary.json" in result.artifact_uris
+    assert "agglomerative_labels.json" in result.artifact_uris
+    assert "clustering_summary.json" not in result.artifact_uris
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
+        assert run_row is not None
+        assert run_row.determinism_class == "deterministic"
+        cfg = dict(run_row.config_json or {})
+        assert "operation_type" not in cfg
+        assert "rule_set_hash" not in cfg
+        assert cfg.get("recipe_hash") is None
+
+        summary_result = (
+            session.query(AnalysisResult)
+            .filter(
+                AnalysisResult.analysis_group_id == int(result.group_id),
+                AnalysisResult.result_key == "clustering_summary",
+            )
+            .first()
+        )
+        assert summary_result is not None
+        summary_value = dict(summary_result.result_json or {}).get("value") or {}
+        assert summary_value.get("base_algorithm") == "agglomerative"

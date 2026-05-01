@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-30
+Last reviewed: 2026-05-01
 
 ## Scope
 
@@ -64,7 +64,10 @@ This document is the canonical "what exists and works now" summary for the repos
 - `analyze` now resolves method input requirements from `MethodDefinition.input_schema.required_inputs`; default behavior stays embedding-first dual lineage (`snapshot_group_id`, `embedding_batch_group_id`) for methods without an explicit contract, while snapshot-only methods (`embedding_batch=false`) run from snapshot lineage only and persist explicit `analysis_input_mode=snapshot_only` in execution config/metadata to keep provenance/fingerprints unambiguous.
 - BANK77 execution is scriptable via `scripts/run_bank77_pipeline.py` using the five-stage flow; idempotent reuse is verified in pipeline tests and full-suite regression runs.
 - Clustering provenance v1 is active in `analyze`: YAML-backed rule resolution (`config/rules/clustering/rules-v1.0.0.yaml`), pre-run and post-selection hard-constraint validation, and final effective-pipeline identity fields (`operation_type`, `operation_version`, `rule_set_version`, `rule_set_hash`, `rule_inputs`, `pipeline_declared`, `pipeline_resolved`, `pipeline_effective`, `pipeline_effective_hash`, `recipe_hash`) are persisted in analysis execution config + `structured_results.clustering_summary`.
+- Clustering analyze dispatch is registry-driven (`src/study_query_llm/pipeline/clustering/registry.py`) for built-ins: `hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`, and `agglomerative+fixed-k`.
 - Canonical clustering runners are active for `hdbscan`, `kmeans+silhouette+kneedle`, and `gmm+bic+argmin` (with selection evidence + selection-curve artifacts for sweep-and-select methods). HDBSCAN now writes `operation_type=cluster_pipeline` in summary payloads while preserving legacy reader shape compatibility.
+- `agglomerative+fixed-k` is active as a single-fit clustering runner outside the v1 YAML resolver/validator envelope (`provenance_envelope=none`) with deterministic fixed-`k` behavior.
+- BANK77 script strategy mapping now resolves through registry aliases (`hdbscan`, `kmeans_silhouette_kneedle`, `gmm_bic_argmin`) instead of a script-local hardcoded runner map.
 - Reader/write compatibility during forward-write cutover is maintained: legacy HDBSCAN `structured_results.*.parameters` remains readable, while new v1 envelope fields are written alongside legacy keys; sweep serialization and metrics readers tolerate both legacy (`labels`) and forward-shape (`cluster_labels`) key variants.
 - Dataset source specs remain in `src/study_query_llm/datasets/source_specs/` (including `banking77.py` with pinned HuggingFace resolve URLs, `estela.py` with a pinned repository pickle for uncategorized prompts (parser `v2` emits the full prompt dictionary; the legacy `10 < len(text) <= 1000` window is now applied by `estela_research_subquery_spec()` at snapshot time), and `twenty_newsgroups.py` with a pinned full train+test archive plus parser-emitted top-level keys in parsed `extra_json` (for example `newsgroup` / `split`) for snapshot-time category slicing, parser `v2` (no in-parser length filter; `extra.text_len_chars` is surfaced for introspection), the canonical `twenty_newsgroups_6cat_subquery_spec()` factory that materializes the literature-convention 6-category subset (`TWENTY_NEWSGROUPS_6CAT`, `label_mode='labeled'`) so independent callers reuse the same `dataset_snapshot` group, and the `twenty_newsgroups_research_subquery_spec()` factory that re-imposes the literature-convention `10 < len(text) <= 1000` window at snapshot time and optionally composes with the 6-category subset via `newsgroups=TWENTY_NEWSGROUPS_6CAT`); "Layer 0 / Layer 1" terminology is retired in favor of stage names.
 - `sources_uncertainty_qc` has a default parser plus PM-only parser variant; parser identities/versioning are explicit and feed parse-stage idempotency and lineage.

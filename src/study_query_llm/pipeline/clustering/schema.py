@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .registry import get_algorithm_spec, iter_algorithm_specs
+
 CLUSTER_PIPELINE_OPERATION_TYPE = "cluster_pipeline"
 CLUSTER_PIPELINE_OPERATION_VERSION = "v1"
 
@@ -13,11 +15,9 @@ METHOD_KMEANS_SILHOUETTE_KNEEDLE = "kmeans+silhouette+kneedle"
 METHOD_GMM_BIC_ARGMIN = "gmm+bic+argmin"
 
 V1_CLUSTERING_METHODS = frozenset(
-    {
-        METHOD_HDBSCAN,
-        METHOD_KMEANS_SILHOUETTE_KNEEDLE,
-        METHOD_GMM_BIC_ARGMIN,
-    }
+    spec.method_name
+    for spec in iter_algorithm_specs()
+    if spec.provenance_envelope == "clustering_v1"
 )
 
 STAGE_VOCABULARY_V1 = frozenset(
@@ -35,18 +35,16 @@ STAGE_VOCABULARY_V1 = frozenset(
 
 def is_v1_clustering_method(method_name: str) -> bool:
     """Return True when ``method_name`` is in v1 clustering scope."""
-    return str(method_name or "").strip().lower() in V1_CLUSTERING_METHODS
+    spec = get_algorithm_spec(method_name)
+    return bool(spec is not None and spec.provenance_envelope == "clustering_v1")
 
 
 def base_algorithm_for_method(method_name: str) -> str:
     """Return terminal/base algorithm name for a v1 clustering method."""
     normalized = str(method_name or "").strip().lower()
-    if normalized == METHOD_HDBSCAN:
-        return "hdbscan"
-    if normalized == METHOD_KMEANS_SILHOUETTE_KNEEDLE:
-        return "kmeans"
-    if normalized == METHOD_GMM_BIC_ARGMIN:
-        return "gmm"
+    spec = get_algorithm_spec(normalized)
+    if spec is not None and spec.provenance_envelope == "clustering_v1":
+        return str(spec.base_algorithm)
     return normalized
 
 

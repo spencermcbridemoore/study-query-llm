@@ -20,12 +20,8 @@ from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
-from study_query_llm.pipeline.clustering import (
-    run_gmm_bic_argmin_analysis,
-    run_kmeans_silhouette_kneedle_analysis,
-)
+from study_query_llm.pipeline.clustering import get_algorithm_spec, resolve_registry_method_name
 from study_query_llm.pipeline.embed import embed
-from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
 
@@ -213,7 +209,7 @@ def _canonical_embedding_representation(value: str) -> str:
 def _validate_embedding_representation_for_analysis(args: argparse.Namespace) -> None:
     strategy = str(args.analysis_strategy).strip().lower()
     representation = _canonical_embedding_representation(args.embedding_representation)
-    if strategy in {"hdbscan", "kmeans_silhouette_kneedle", "gmm_bic_argmin"} and representation != "full":
+    if strategy != "default" and resolve_registry_method_name(strategy) and representation != "full":
         raise ValueError(
             "--analysis-strategy for canonical clustering runners requires "
             "--embedding-representation full; "
@@ -223,14 +219,11 @@ def _validate_embedding_representation_for_analysis(args: argparse.Namespace) ->
 
 def _resolve_analysis_method_name(args: argparse.Namespace) -> str:
     method_name = str(args.analysis_method).strip()
-    strategy = str(args.analysis_strategy)
+    strategy = str(args.analysis_strategy).strip().lower()
     if method_name == "bank77_structural_summary":
-        if strategy == "hdbscan":
-            return "hdbscan"
-        if strategy == "kmeans_silhouette_kneedle":
-            return "kmeans+silhouette+kneedle"
-        if strategy == "gmm_bic_argmin":
-            return "gmm+bic+argmin"
+        resolved = resolve_registry_method_name(strategy)
+        if resolved is not None:
+            return resolved
     return method_name
 
 
@@ -309,13 +302,14 @@ def _resolve_run_key(
 
 
 def _resolve_method_runner(args: argparse.Namespace):
-    strategy = str(args.analysis_strategy)
-    if strategy == "hdbscan":
-        return run_hdbscan_analysis
-    if strategy == "kmeans_silhouette_kneedle":
-        return run_kmeans_silhouette_kneedle_analysis
-    if strategy == "gmm_bic_argmin":
-        return run_gmm_bic_argmin_analysis
+    strategy = str(args.analysis_strategy).strip().lower()
+    resolved_method_name = resolve_registry_method_name(strategy)
+    if resolved_method_name is None:
+        return None
+    spec = get_algorithm_spec(resolved_method_name)
+    if spec is None:
+        return None
+    return spec.runner
     return None
 
 

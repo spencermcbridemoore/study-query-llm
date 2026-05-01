@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-24
+Last reviewed: 2026-05-01
 
 ## Purpose
 
@@ -143,6 +143,11 @@ Stage-5 `analyze` also enforces recipe presence for v1 clustering composite
 methods (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`) and
 persists matching `recipe_hash`/`pipeline_effective_hash` in analysis
 execution config.
+
+For composite methods that run outside the v1 clustering provenance envelope
+(for example `cosine_kllmeans_no_pca` on the default analyze-runner path),
+`analyze` still persists the canonical composite `recipe_hash` in execution
+config for fingerprint identity, without v1 resolver/envelope fields.
 
 ## Adding a new composite
 

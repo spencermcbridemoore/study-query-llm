@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-30
+Last reviewed: 2026-05-01
 
 ## Configuration
 
@@ -35,6 +35,9 @@ Notes:
 - Analytics:
   - `StudyService(repository=RawCallRepository(...))`
   - `get_summary_stats()`, `get_provider_comparison()`, `get_recent_inferences()` (optional `modality` / `status` filters; default remains text+success; pass `None` for both to list all `raw_calls` rows in limit order)
+- Method contract helpers:
+  - `MethodService.resolve_method_input_requirements(name, version=None)` normalizes `input_schema.required_inputs` with backward-compatible defaults (`snapshot=true`, `embedding_batch=true` when absent/malformed).
+  - `MethodService.register_method(..., input_schema=...)` validates `input_schema.required_inputs` on new writes (`required_inputs` must be an object; `snapshot` and `embedding_batch` must be booleans when present).
 
 ## Database Access (Canonical)
 

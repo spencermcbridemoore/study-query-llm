@@ -166,6 +166,10 @@ def test_analyze_claims_running_and_preserves_text_vector_alignment(
         run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
         assert run_row is not None
         assert run_row.run_status == "completed"
+        assert int(run_row.source_group_id or -1) == int(embedding_group_id)
+        cfg = dict(run_row.config_json or {})
+        assert int(cfg.get("embedding_batch_group_id") or -1) == int(embedding_group_id)
+        assert "analysis_input_mode" not in cfg
 
         dep_embedding = (
             session.query(GroupLink)
@@ -256,6 +260,52 @@ def test_analyze_requires_embedding_by_default_when_contract_absent(
             None,
             method_name="default_requires_embedding",
             run_key="rk_missing_embedding",
+            db=db,
+            artifact_dir=artifact_dir,
+        )
+
+
+def test_analyze_malformed_required_inputs_defaults_to_embedding_required(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, _embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    with db.session_scope() as session:
+        method_service = MethodService(RawCallRepository(session))
+        method_service.register_method(
+            name="legacy_malformed_contract",
+            version="v1",
+            code_ref="tests.pipeline.test_analyze",
+            input_schema={
+                "required_inputs": {
+                    "snapshot": True,
+                    "embedding_batch": True,
+                }
+            },
+        )
+        method_row = method_service.get_method("legacy_malformed_contract", version="v1")
+        assert method_row is not None
+        method_row.input_schema = {
+            "required_inputs": {
+                "snapshot": "true",
+                "embedding_batch": "false",
+            }
+        }
+        session.flush()
+
+    with pytest.raises(ValueError, match="requires embedding_batch_group_id"):
+        analyze(
+            snapshot_group_id,
+            None,
+            method_name="legacy_malformed_contract",
+            method_version="v1",
+            run_key="rk_legacy_malformed_contract",
             db=db,
             artifact_dir=artifact_dir,
         )

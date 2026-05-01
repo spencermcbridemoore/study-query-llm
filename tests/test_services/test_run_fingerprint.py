@@ -66,6 +66,32 @@ def test_canonical_run_fingerprint_strips_scheduling_keys():
     assert fp_with == fp_without
 
 
+def test_canonical_run_fingerprint_analysis_input_mode_affects_hash():
+    base_config = {
+        "snapshot_group_id": 42,
+        "representation_type": "snapshot_only",
+        "parameters": {"alpha": 1.0},
+    }
+    _, hash_without_mode = canonical_run_fingerprint(
+        method_name="snapshot_method",
+        method_version="1.0",
+        config_json=base_config,
+        input_snapshot_group_id=42,
+        determinism_class="deterministic",
+    )
+    _, hash_with_mode = canonical_run_fingerprint(
+        method_name="snapshot_method",
+        method_version="1.0",
+        config_json={
+            **base_config,
+            "analysis_input_mode": "snapshot_only",
+        },
+        input_snapshot_group_id=42,
+        determinism_class="deterministic",
+    )
+    assert hash_without_mode != hash_with_mode
+
+
 def test_p0_baseline_fingerprint_canary_matches():
     snapshot = build_p0_baseline_snapshot()
     canary = dict(snapshot.get("fingerprint_canary") or {})

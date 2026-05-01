@@ -65,7 +65,7 @@ docs/audit/coupling_acid_audit_2026-04-24/
 ├── db_touchpoint_scan.py
 ├── protocol_inventory.py
 ├── outputs/
-│   ├── import_graph.json        (gitignored — see Reproducing below)
+│   ├── import_graph.json        (tracked audit artifact — see Reproducing below)
 │   ├── module_metrics.txt
 │   ├── cycles.txt
 │   ├── db_touchpoints.txt
@@ -96,9 +96,10 @@ python docs/audit/coupling_acid_audit_2026-04-24/protocol_inventory.py
 ```
 
 Each script writes its primary artifact under `outputs/`. The
-`outputs/import_graph.json` is gitignored (matches the global `*.json` rule)
-because it is a large intermediate; re-run `import_graph.py` to regenerate.
-`outputs/cycles.txt` is the human-readable summary that is committed.
+`outputs/import_graph.json` is intentionally committed (via a path-scoped
+`.gitignore` exception) so audit metrics are reproducible from repository state.
+It remains regenerable; re-run `import_graph.py` to refresh it.
+`outputs/cycles.txt` is the human-readable summary that is also committed.
 
 ## Lessons Learned (audit-tooling)
 

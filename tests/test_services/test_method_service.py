@@ -171,3 +171,108 @@ def test_get_method_nonexistent(db_connection):
 
         assert method_svc.get_method("nonexistent") is None
         assert method_svc.get_method("extract_ari", version="99") is None
+
+
+def test_resolve_method_input_requirements_defaults_to_embedding_required(db_connection):
+    """Absent input contract should keep embedding-backed defaults."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_svc = MethodService(repo)
+        method_svc.register_method(
+            name="requirements_default",
+            version="1",
+        )
+
+        requirements = method_svc.resolve_method_input_requirements("requirements_default")
+        assert requirements.snapshot is True
+        assert requirements.embedding_batch is True
+
+
+def test_resolve_method_input_requirements_snapshot_only_contract(db_connection):
+    """Explicit contract should allow snapshot-only execution."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_svc = MethodService(repo)
+        method_svc.register_method(
+            name="requirements_snapshot_only",
+            version="1",
+            input_schema={
+                "required_inputs": {
+                    "snapshot": True,
+                    "embedding_batch": False,
+                }
+            },
+        )
+
+        requirements = method_svc.resolve_method_input_requirements(
+            "requirements_snapshot_only",
+            version="1",
+        )
+        assert requirements.snapshot is True
+        assert requirements.embedding_batch is False
+
+
+def test_resolve_method_input_requirements_normalizes_malformed_read_values(db_connection):
+    """Legacy malformed contract values should normalize to safe defaults on read."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_svc = MethodService(repo)
+        method_svc.register_method(
+            name="requirements_malformed_read",
+            version="1",
+            input_schema={
+                "required_inputs": {
+                    "snapshot": True,
+                    "embedding_batch": True,
+                }
+            },
+        )
+        method_row = method_svc.get_method("requirements_malformed_read", version="1")
+        assert method_row is not None
+        method_row.input_schema = {
+            "required_inputs": {
+                "snapshot": "yes",
+                "embedding_batch": "no",
+            }
+        }
+        session.flush()
+
+        requirements = method_svc.resolve_method_input_requirements(
+            "requirements_malformed_read",
+            version="1",
+        )
+        assert requirements.snapshot is True
+        assert requirements.embedding_batch is True
+
+
+def test_register_method_rejects_invalid_required_inputs_shape(db_connection):
+    """New registrations should reject clearly invalid required_inputs shapes."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_svc = MethodService(repo)
+
+        with pytest.raises(ValueError, match="required_inputs must be a JSON object"):
+            method_svc.register_method(
+                name="requirements_invalid_shape",
+                version="1",
+                input_schema={"required_inputs": "snapshot_only"},
+            )
+
+
+def test_register_method_rejects_non_boolean_required_inputs_flags(db_connection):
+    """New registrations should reject non-boolean required_inputs flags."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_svc = MethodService(repo)
+
+        with pytest.raises(ValueError, match="snapshot must be a boolean"):
+            method_svc.register_method(
+                name="requirements_invalid_snapshot_flag",
+                version="1",
+                input_schema={
+                    "required_inputs": {
+                        "snapshot": "true",
+                        "embedding_batch": True,
+                    }
+                },
+            )

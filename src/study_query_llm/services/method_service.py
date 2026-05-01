@@ -42,8 +42,8 @@ Usage:
         )
 """
 
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any, TYPE_CHECKING, Mapping
 
 from ..utils.logging_config import get_logger
 
@@ -51,6 +51,14 @@ if TYPE_CHECKING:
     from ..db.raw_call_repository import RawCallRepository
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class MethodInputRequirements:
+    """Normalized required-input contract for an analysis method."""
+
+    snapshot: bool = True
+    embedding_batch: bool = True
 
 
 class MethodService:
@@ -69,6 +77,80 @@ class MethodService:
             repository: RawCallRepository instance for database access
         """
         self.repository = repository
+
+    @staticmethod
+    def _coerce_required_input_flag(value: Any, *, default: bool) -> bool:
+        """Coerce required-input flags from persisted JSON-like payloads."""
+        if isinstance(value, bool):
+            return value
+        return default
+
+    @classmethod
+    def resolve_input_requirements_from_schema(
+        cls,
+        input_schema: Mapping[str, Any] | None,
+    ) -> MethodInputRequirements:
+        """Resolve input requirements from a method definition input schema.
+
+        Read behavior is intentionally backward-compatible:
+        - absent/invalid schema -> default requirements
+        - absent/invalid required_inputs -> default requirements
+        - non-boolean flags -> default per field
+        """
+        schema = dict(input_schema) if isinstance(input_schema, Mapping) else {}
+        required_inputs = schema.get("required_inputs")
+        if not isinstance(required_inputs, Mapping):
+            return MethodInputRequirements()
+        return MethodInputRequirements(
+            snapshot=cls._coerce_required_input_flag(
+                required_inputs.get("snapshot"),
+                default=True,
+            ),
+            embedding_batch=cls._coerce_required_input_flag(
+                required_inputs.get("embedding_batch"),
+                default=True,
+            ),
+        )
+
+    def resolve_method_input_requirements(
+        self,
+        name: str,
+        version: Optional[str] = None,
+    ) -> MethodInputRequirements:
+        """Resolve normalized input requirements for a registered method."""
+        method = self.get_method(name, version=version)
+        if method is None and version is None:
+            method = self.get_method(name)
+        input_schema = (
+            method.input_schema
+            if method is not None and isinstance(method.input_schema, Mapping)
+            else None
+        )
+        return self.resolve_input_requirements_from_schema(input_schema)
+
+    @staticmethod
+    def _validate_input_schema_for_registration(
+        input_schema: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Validate required-input contract shape on new/updated registrations."""
+        if input_schema is None:
+            return None
+        if not isinstance(input_schema, Mapping):
+            raise ValueError("input_schema must be a JSON object when provided")
+        normalized_input_schema = dict(input_schema)
+        required_inputs = normalized_input_schema.get("required_inputs")
+        if required_inputs is None:
+            return normalized_input_schema
+        if not isinstance(required_inputs, Mapping):
+            raise ValueError("input_schema.required_inputs must be a JSON object")
+        required_inputs_dict = dict(required_inputs)
+        for key in ("snapshot", "embedding_batch"):
+            if key in required_inputs_dict and not isinstance(required_inputs_dict[key], bool):
+                raise ValueError(
+                    f"input_schema.required_inputs.{key} must be a boolean when provided"
+                )
+        normalized_input_schema["required_inputs"] = required_inputs_dict
+        return normalized_input_schema
 
     def register_method(
         self,
@@ -110,6 +192,7 @@ class MethodService:
         from ..db.models_v2 import MethodDefinition
 
         session = self.repository.session
+        validated_input_schema = self._validate_input_schema_for_registration(input_schema)
 
         # Deactivate previous active version with same name
         existing = (
@@ -130,7 +213,7 @@ class MethodService:
             description=description,
             code_ref=code_ref,
             code_commit=code_commit,
-            input_schema=input_schema,
+            input_schema=validated_input_schema,
             output_schema=output_schema,
             parameters_schema=parameters_schema,
             recipe_json=recipe_json,

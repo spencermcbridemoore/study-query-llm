@@ -124,7 +124,10 @@ def main() -> int:
                         "k_range": {"type": "array", "items": {"type": "integer"}},
                         "selection_metric": {"type": "string"},
                         "selection_rule": {"type": "string"},
+                        "pca_n_components": {"type": "integer"},
+                        "hdbscan_metric": {"type": "string"},
                         "hdbscan_min_cluster_size": {"type": "integer"},
+                        "hdbscan_min_samples": {"type": "integer"},
                     },
                 },
             )

@@ -68,9 +68,10 @@ Notes:
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)
 - Pipeline analyze surface:
   - `study_query_llm.pipeline.analyze.analyze(snapshot_group_id, embedding_batch_group_id=None, ..., method_name=..., run_key=...)`
-  - Built-in clustering runner dispatch is registry-driven via `study_query_llm.pipeline.clustering.registry` (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`, `agglomerative+fixed-k`).
-  - v1 clustering provenance envelope (`rules-v1.0.0.yaml` resolver/validators + clustering summary identity fields) applies only to registry methods marked `provenance_envelope=clustering_v1` (currently `hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`).
-  - `agglomerative+fixed-k` executes outside the v1 resolver/validator envelope (`provenance_envelope=none`).
+  - Built-in clustering runner dispatch is registry-driven via `study_query_llm.pipeline.clustering.registry`. Registered methods after Slice 1.5: `agglomerative+fixed-k`, `hdbscan+fixed`, `kmeans+normalize+pca+sweep`, `gmm+normalize+pca+sweep`. All ship with `provenance_envelope="none"`; the `clustering_v1` envelope literal was retired.
+  - The legacy method names (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`) are pinned in `DEPRECATED_LEGACY_CLUSTERING_METHODS` and rejected at the top of `analyze()` by `raise_if_deprecated_clustering_method`. The guard fires *before* runner resolution so explicit `method_runner` injection cannot bypass it; historical `provenanced_runs` rows under those names remain queryable.
+  - BANK77 strategy CLI tokens (`hdbscan`, `kmeans_silhouette_kneedle`, `gmm_bic_argmin`) are kept stable for operator continuity by attaching them as `strategy_aliases` on the bundled-grammar specs in the registry; the alias index resolves them to the bundled-grammar method names.
+  - The bundled `kmeans+normalize+pca+sweep` and `gmm+normalize+pca+sweep` methods always include `normalize -> pca -> <algorithm>` in the effective pipeline (the legacy `<= 200` PCA-skip branch was dropped). `pca_n_components` is a method parameter (default 100, clamped at runtime); `kmeans_distance_metric` defaults to `cosine` and `gmm_covariance_type` defaults to `full`.
   - Input requirements are resolved from `MethodDefinition.input_schema.required_inputs`; default behavior remains embedding-required when contract metadata is absent.
   - Snapshot-only methods (`required_inputs.embedding_batch=false`) execute without embedding artifacts and persist `config_json.analysis_input_mode=snapshot_only` for explicit provenance/fingerprint mode identity.
 

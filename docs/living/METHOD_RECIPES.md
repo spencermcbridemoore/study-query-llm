@@ -27,8 +27,9 @@ This document is the v0 spec.
 - **Descriptive, not executable.** This phase does not introduce a runtime
   recipe executor. `run_sweep` continues to run the pipeline monolithically.
 - **Clustering family only (for now).** Registered clustering composites are
-  `cosine_kllmeans_no_pca`, `hdbscan`, `kmeans+silhouette+kneedle`, and
-  `gmm+bic+argmin`. Adding more composites is additive.
+  `cosine_kllmeans_no_pca`, `hdbscan+fixed`,
+  `kmeans+normalize+pca+sweep`, and `gmm+normalize+pca+sweep`. Adding
+  more composites is additive.
 - **No fingerprint tuple shape change.** The recipe hash enters the
   canonical run fingerprint via `config_json["recipe_hash"]`, which
   `canonical_run_fingerprint` already hashes (minus scheduling-only keys).
@@ -92,10 +93,39 @@ This document is the v0 spec.
   separate explicitly scoped design and is out of scope for the current
   bundled clustering rollout.
 
-The grammar above is forward-looking for methods registered after this
-subsystem definition. Existing names `hdbscan`, `kmeans+silhouette+kneedle`,
-and `gmm+bic+argmin` predate this grammar and are not renamed in this slice;
-`agglomerative+fixed-k` already conforms.
+### Legacy names retired in Slice 1.5
+
+The pre-grammar names `hdbscan`, `kmeans+silhouette+kneedle`, and
+`gmm+bic+argmin` were re-registered under the bundled grammar in Slice 1.5
+with algorithmic identity preserved (the runner functions did not change):
+
+| Legacy name (deprecated)       | Bundled-grammar name (current)  |
+|--------------------------------|---------------------------------|
+| `hdbscan`                      | `hdbscan+fixed`                 |
+| `kmeans+silhouette+kneedle`    | `kmeans+normalize+pca+sweep`    |
+| `gmm+bic+argmin`               | `gmm+normalize+pca+sweep`       |
+
+A loud-fail deprecation guard
+(`raise_if_deprecated_clustering_method` in
+`pipeline/clustering/registry.py`) rejects the legacy names at the top of
+`pipeline.analyze()` so neither explicit `method_runner` injection nor
+notebook scripts can land new rows under deprecated names; the guard fires
+*before* runner resolution. Historical `provenanced_runs` rows under the
+legacy names remain queryable; only new write paths are blocked.
+
+BANK77 strategy CLI tokens (`hdbscan`, `kmeans_silhouette_kneedle`,
+`gmm_bic_argmin`) are kept stable for operator continuity by attaching
+them as `strategy_aliases` on the new bundled-grammar specs in the
+registry; the alias index resolves them to the bundled-grammar method
+names. `agglomerative+fixed-k` already conformed to the grammar before
+Slice 1.5 and is unchanged.
+
+The bundled `kmeans+normalize+pca+sweep` and `gmm+normalize+pca+sweep`
+methods always include `normalize -> pca -> <algorithm>` in the effective
+pipeline; the legacy `<= 200` embedding-dim PCA-skip branch from the
+retired YAML resolver was dropped as part of the rename. `pca_n_components`
+is a method parameter (default 100, clamped at runtime to
+`max(1, min(value, embedding_dim, max(1, n_samples - 1)))`).
 
 ## Storage
 
@@ -153,10 +183,21 @@ Canonical definitions live in
 - Canonical clustering composite recipes:
   - `COSINE_KLLMEANS_NO_PCA_RECIPE` (3 ordered stages:
     `mean_pool_tokens` -> `kmeanspp_init` -> `k_llmmeans`)
-  - `HDBSCAN_V1_RECIPE`
-  - `KMEANS_SILHOUETTE_KNEEDLE_RECIPE`
-  - `GMM_BIC_ARGMIN_RECIPE`
-- `COMPOSITE_RECIPES` — name → recipe registry.
+  - `HDBSCAN_FIXED_RECIPE` (registered under `hdbscan+fixed`).
+  - `KMEANS_NORMALIZE_PCA_SWEEP_RECIPE` (registered under
+    `kmeans+normalize+pca+sweep`).
+  - `GMM_NORMALIZE_PCA_SWEEP_RECIPE` (registered under
+    `gmm+normalize+pca+sweep`).
+  - Legacy constants `HDBSCAN_V1_RECIPE`,
+    `KMEANS_SILHOUETTE_KNEEDLE_RECIPE`, `GMM_BIC_ARGMIN_RECIPE` are
+    intentionally preserved at module scope as inputs to the permanent
+    CONSTANT-vs-CONSTANT recipe-hash regression
+    (`tests/test_services/test_recipe.py::test_bundled_recipe_constants_match_legacy_constants`)
+    but are no longer registered in `COMPOSITE_RECIPES`; resolution under
+    the legacy names raises `KeyError`.
+- `COMPOSITE_RECIPES` — name → recipe registry. After Slice 1.5 it holds
+  `cosine_kllmeans_no_pca`, `hdbscan+fixed`, `kmeans+normalize+pca+sweep`,
+  and `gmm+normalize+pca+sweep`.
 - `build_composite_recipe(name)` — returns a deep copy.
 - `register_clustering_components(method_service)` — idempotent component
   registration.
@@ -202,15 +243,15 @@ From then on, `ingest_result_to_db` for composite methods will:
 - Inject `recipe_hash` into the run's `config_json` before recording the
   `provenanced_runs` row.
 
-Stage-5 `analyze` also enforces recipe presence for v1 clustering composite
-methods (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`) and
-persists matching `recipe_hash`/`pipeline_effective_hash` in analysis
-execution config.
-
-For composite methods that run outside the v1 clustering provenance envelope
-(for example `cosine_kllmeans_no_pca` on the default analyze-runner path),
-`analyze` still persists the canonical composite `recipe_hash` in execution
-config for fingerprint identity, without v1 resolver/envelope fields.
+Stage-5 `analyze` persists the canonical composite `recipe_hash` in
+analysis execution `config_json` for every composite method registered in
+`COMPOSITE_RECIPES`, including the bundled-grammar clustering methods
+(`hdbscan+fixed`, `kmeans+normalize+pca+sweep`,
+`gmm+normalize+pca+sweep`). All bundled clustering specs ship with
+`provenance_envelope="none"`; the legacy v1 envelope (and its
+resolver/validators/identity decoration in `clustering_summary`) was
+retired in Slice 1.5, so no v1 envelope fields land in `config_json` for
+new write paths.
 
 ## Adding a new composite
 

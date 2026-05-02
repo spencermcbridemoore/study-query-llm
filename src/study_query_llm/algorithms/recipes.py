@@ -269,12 +269,25 @@ HDBSCAN_V1_RECIPE: Dict[str, Any] = {
     "notes": "Canonical v1 single-fit recipe for hdbscan.",
 }
 
+# Slice 1.5 bundled-grammar recipes. Initialized as deep copies of the legacy
+# v1-envelope recipes so canonical_recipe_hash matches by construction; the
+# permanent CONSTANT-vs-CONSTANT regression test in test_recipe.py asserts this
+# equivalence and survives the PR3 removal of legacy COMPOSITE_RECIPES entries.
+HDBSCAN_FIXED_RECIPE: Dict[str, Any] = copy.deepcopy(HDBSCAN_V1_RECIPE)
+KMEANS_NORMALIZE_PCA_SWEEP_RECIPE: Dict[str, Any] = copy.deepcopy(
+    KMEANS_SILHOUETTE_KNEEDLE_RECIPE
+)
+GMM_NORMALIZE_PCA_SWEEP_RECIPE: Dict[str, Any] = copy.deepcopy(GMM_BIC_ARGMIN_RECIPE)
+
 
 COMPOSITE_RECIPES: Dict[str, Dict[str, Any]] = {
     "cosine_kllmeans_no_pca": COSINE_KLLMEANS_NO_PCA_RECIPE,
     "kmeans+silhouette+kneedle": KMEANS_SILHOUETTE_KNEEDLE_RECIPE,
     "gmm+bic+argmin": GMM_BIC_ARGMIN_RECIPE,
     "hdbscan": HDBSCAN_V1_RECIPE,
+    "hdbscan+fixed": HDBSCAN_FIXED_RECIPE,
+    "kmeans+normalize+pca+sweep": KMEANS_NORMALIZE_PCA_SWEEP_RECIPE,
+    "gmm+normalize+pca+sweep": GMM_NORMALIZE_PCA_SWEEP_RECIPE,
 }
 
 

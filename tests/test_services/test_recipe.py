@@ -11,6 +11,12 @@ from study_query_llm.algorithms.recipes import (
     COMPOSITE_RECIPES,
     CLUSTERING_COMPONENT_METHODS,
     COSINE_KLLMEANS_NO_PCA_RECIPE,
+    GMM_BIC_ARGMIN_RECIPE,
+    GMM_NORMALIZE_PCA_SWEEP_RECIPE,
+    HDBSCAN_FIXED_RECIPE,
+    HDBSCAN_V1_RECIPE,
+    KMEANS_NORMALIZE_PCA_SWEEP_RECIPE,
+    KMEANS_SILHOUETTE_KNEEDLE_RECIPE,
     build_composite_recipe,
     canonical_recipe_hash,
     ensure_composite_recipe,
@@ -116,6 +122,9 @@ def test_build_composite_recipe_unknown_raises():
         "hdbscan",
         "kmeans+silhouette+kneedle",
         "gmm+bic+argmin",
+        "hdbscan+fixed",
+        "kmeans+normalize+pca+sweep",
+        "gmm+normalize+pca+sweep",
     ],
 )
 def test_build_composite_recipe_v1_clustering_methods(composite_name: str):
@@ -123,6 +132,37 @@ def test_build_composite_recipe_v1_clustering_methods(composite_name: str):
     assert recipe["recipe_version"] == "v0"
     assert isinstance(recipe.get("stages"), list)
     assert recipe["stages"]
+
+
+def test_new_bundled_methods_have_same_recipe_hash_as_legacy():
+    """Slice 1.5: new bundled-grammar names canonicalize to the same recipe hash
+    as their legacy v1-envelope counterparts.
+
+    Algorithmic identity is preserved: the new method names dispatch the same
+    runner functions with the same recipe shape, so the recipe hash entering
+    the canonical run fingerprint via ``config_json["recipe_hash"]`` is
+    byte-identical between the two name pairs by construction.
+
+    PR3 converts this test to a permanent CONSTANT-vs-CONSTANT regression
+    (``test_bundled_recipe_constants_match_legacy_constants``) that survives
+    the removal of the legacy entries from COMPOSITE_RECIPES.
+    """
+    assert canonical_recipe_hash(
+        build_composite_recipe("hdbscan+fixed")
+    ) == canonical_recipe_hash(build_composite_recipe("hdbscan"))
+    assert canonical_recipe_hash(
+        build_composite_recipe("kmeans+normalize+pca+sweep")
+    ) == canonical_recipe_hash(build_composite_recipe("kmeans+silhouette+kneedle"))
+    assert canonical_recipe_hash(
+        build_composite_recipe("gmm+normalize+pca+sweep")
+    ) == canonical_recipe_hash(build_composite_recipe("gmm+bic+argmin"))
+
+    # Sanity: the constants themselves are independent objects (deep-copied at
+    # module load), so future divergence of one will not silently mutate the
+    # other.
+    assert HDBSCAN_FIXED_RECIPE is not HDBSCAN_V1_RECIPE
+    assert KMEANS_NORMALIZE_PCA_SWEEP_RECIPE is not KMEANS_SILHOUETTE_KNEEDLE_RECIPE
+    assert GMM_NORMALIZE_PCA_SWEEP_RECIPE is not GMM_BIC_ARGMIN_RECIPE
 
 
 # ---------------------------------------------------------------------------

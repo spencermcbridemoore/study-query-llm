@@ -52,6 +52,49 @@ def normalize_method_name(method_name: str) -> str:
     return str(method_name or "").strip().lower()
 
 
+# Slice 1.5 deprecation guard. The legacy v1-envelope method names are kept in
+# the registry through PR2 (so the BANK77 e2e overlap window stays green) and
+# physically removed in PR3 (chunk J). The guard fires from analyze() at the
+# top of the dispatch flow so an explicit ``method_runner`` injection cannot
+# bypass it; historical DB rows under these names remain queryable but no new
+# write paths can land. The mapping below is the canonical "legacy -> new"
+# rename used in the guard's error message.
+DEPRECATED_LEGACY_CLUSTERING_METHODS: frozenset[str] = frozenset(
+    {
+        "hdbscan",
+        "kmeans+silhouette+kneedle",
+        "gmm+bic+argmin",
+    }
+)
+
+_LEGACY_TO_BUNDLED_RENAME: dict[str, str] = {
+    "hdbscan": "hdbscan+fixed",
+    "kmeans+silhouette+kneedle": "kmeans+normalize+pca+sweep",
+    "gmm+bic+argmin": "gmm+normalize+pca+sweep",
+}
+
+
+def raise_if_deprecated_clustering_method(method_name: str) -> None:
+    """Raise ``ValueError`` for legacy v1-envelope method names.
+
+    Slice 1.5 retired the v1-envelope/resolver/validators machinery and renamed
+    the three sweep methods under the bundled-grammar (`<algorithm>+<chain>`).
+    The guard is loud-by-design so misconfigured BANK77 overrides, replayed
+    sweep requests, or notebook scripts cannot silently land new rows under
+    deprecated names. Historical ``provenanced_runs`` rows under these names
+    remain queryable; this guard only blocks new write paths.
+    """
+    normalized = normalize_method_name(method_name)
+    if normalized not in DEPRECATED_LEGACY_CLUSTERING_METHODS:
+        return
+    new_name = _LEGACY_TO_BUNDLED_RENAME.get(normalized, "")
+    raise ValueError(
+        f"Method {normalized!r} was deprecated in Slice 1.5. "
+        f"Use {new_name!r} instead. Historical runs remain queryable via DB; "
+        "this guard only blocks new write paths."
+    )
+
+
 _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
     "hdbscan": AlgorithmSpec(
         method_name="hdbscan",
@@ -202,6 +245,7 @@ def resolve_registry_method_name(token: str) -> str | None:
 
 __all__ = [
     "AlgorithmSpec",
+    "DEPRECATED_LEGACY_CLUSTERING_METHODS",
     "FitMode",
     "ProvenanceEnvelope",
     "REPRESENTATION_FULL",
@@ -210,6 +254,7 @@ __all__ = [
     "is_registry_v1_clustering_method",
     "iter_algorithm_specs",
     "normalize_method_name",
+    "raise_if_deprecated_clustering_method",
     "resolve_algorithm_runner",
     "resolve_registry_method_name",
 ]

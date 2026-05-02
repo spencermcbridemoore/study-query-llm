@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from study_query_llm.pipeline.clustering.registry import (
+    DEPRECATED_LEGACY_CLUSTERING_METHODS,
     get_algorithm_spec,
     iter_algorithm_specs,
+    raise_if_deprecated_clustering_method,
     resolve_algorithm_runner,
     resolve_registry_method_name,
 )
@@ -35,6 +39,57 @@ def test_registry_lookup_is_case_insensitive() -> None:
 def test_registry_unknown_method_returns_none() -> None:
     assert get_algorithm_spec("does_not_exist") is None
     assert resolve_algorithm_runner("does_not_exist") is None
+
+
+def test_deprecated_legacy_clustering_methods_set_matches_registry_history() -> None:
+    """Slice 1.5: the deprecation guard set is the canonical legacy-name list.
+
+    The frozenset is the single source of truth for which method names the
+    Slice 1.5 guard rejects. Pinning the set here so a future contributor
+    cannot silently drop or extend it without an explicit, intentional change.
+    """
+    assert DEPRECATED_LEGACY_CLUSTERING_METHODS == frozenset(
+        {"hdbscan", "kmeans+silhouette+kneedle", "gmm+bic+argmin"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("legacy_name", "new_name"),
+    [
+        ("hdbscan", "hdbscan+fixed"),
+        ("kmeans+silhouette+kneedle", "kmeans+normalize+pca+sweep"),
+        ("gmm+bic+argmin", "gmm+normalize+pca+sweep"),
+    ],
+)
+def test_raise_if_deprecated_clustering_method_rejects_legacy_names(
+    legacy_name: str,
+    new_name: str,
+) -> None:
+    """The guard raises ValueError for each legacy name with a message that
+    mentions Slice 1.5 and the corresponding bundled-grammar replacement."""
+    with pytest.raises(ValueError) as excinfo:
+        raise_if_deprecated_clustering_method(legacy_name)
+    message = str(excinfo.value)
+    assert "Slice 1.5" in message
+    assert new_name in message
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "hdbscan+fixed",
+        "kmeans+normalize+pca+sweep",
+        "gmm+normalize+pca+sweep",
+        "agglomerative+fixed-k",
+        "some_custom_method",
+    ],
+)
+def test_raise_if_deprecated_clustering_method_no_op_for_non_legacy_names(
+    name: str,
+) -> None:
+    """The guard is a no-op for any name not in the legacy set, including
+    bundled-grammar names and arbitrary external method names."""
+    raise_if_deprecated_clustering_method(name)
 
 
 def test_registry_alias_resolution_maps_to_canonical_method_name() -> None:

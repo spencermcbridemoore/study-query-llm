@@ -31,10 +31,12 @@ from .kmeans_runner import run_kmeans_silhouette_kneedle_analysis
 from .gmm_runner import run_gmm_bic_argmin_analysis
 from .registry import (
     AlgorithmSpec,
+    DEPRECATED_LEGACY_CLUSTERING_METHODS,
     get_algorithm_spec,
     is_registry_v1_clustering_method,
     iter_algorithm_specs,
     normalize_method_name,
+    raise_if_deprecated_clustering_method,
     resolve_algorithm_runner,
     resolve_registry_method_name,
 )
@@ -42,6 +44,7 @@ from .registry import (
 __all__ = [
     "CLUSTER_PIPELINE_OPERATION_TYPE",
     "CLUSTER_PIPELINE_OPERATION_VERSION",
+    "DEPRECATED_LEGACY_CLUSTERING_METHODS",
     "V1_CLUSTERING_METHODS",
     "ClusteringResolution",
     "AlgorithmSpec",
@@ -54,6 +57,7 @@ __all__ = [
     "is_v1_clustering_method",
     "kneedle_choice",
     "load_rule_set",
+    "raise_if_deprecated_clustering_method",
     "resolve_clustering_resolution",
     "run_gmm_bic_argmin_analysis",
     "run_kmeans_silhouette_kneedle_analysis",

@@ -24,7 +24,10 @@ from .gmm_runner import run_gmm_bic_argmin_analysis
 from .kmeans_runner import run_kmeans_silhouette_kneedle_analysis
 
 FitMode = Literal["single_fit", "sweep_select"]
-ProvenanceEnvelope = Literal["clustering_v1", "none"]
+# Slice 1.5 retired the ``clustering_v1`` envelope. ``ProvenanceEnvelope`` now
+# tracks the single ``"none"`` value the bundled subsystem ships; the literal
+# is preserved as an evolution seam for future provenance modes.
+ProvenanceEnvelope = Literal["none"]
 AlgorithmRunner = Callable[..., object]
 
 REPRESENTATION_FULL = "full"
@@ -95,47 +98,14 @@ def raise_if_deprecated_clustering_method(method_name: str) -> None:
     )
 
 
+# Slice 1.5 bundled-grammar registry. The legacy v1-envelope specs (``hdbscan``,
+# ``kmeans+silhouette+kneedle``, ``gmm+bic+argmin``) were physically removed
+# here; the names live on only in ``DEPRECATED_LEGACY_CLUSTERING_METHODS`` and
+# in the loud-fail guard ``raise_if_deprecated_clustering_method``. Strategy
+# aliases (``hdbscan``, ``kmeans_silhouette_kneedle``, ``gmm_bic_argmin``) are
+# carried on the new bundled-grammar specs so the BANK77 strategy CLI keeps
+# operator-facing tokens stable while routing to the new method names.
 _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
-    "hdbscan": AlgorithmSpec(
-        method_name="hdbscan",
-        runner=run_hdbscan_analysis,
-        fit_mode="single_fit",
-        requires_embeddings=True,
-        supports_snapshot_only=False,
-        allowed_representations=frozenset({REPRESENTATION_FULL}),
-        provenance_envelope="clustering_v1",
-        base_algorithm="hdbscan",
-        default_determinism_class="non_deterministic",
-        strategy_aliases=(),
-    ),
-    "kmeans+silhouette+kneedle": AlgorithmSpec(
-        method_name="kmeans+silhouette+kneedle",
-        runner=run_kmeans_silhouette_kneedle_analysis,
-        fit_mode="sweep_select",
-        requires_embeddings=True,
-        supports_snapshot_only=False,
-        allowed_representations=frozenset(
-            {REPRESENTATION_FULL, REPRESENTATION_LABEL_CENTROID}
-        ),
-        provenance_envelope="clustering_v1",
-        base_algorithm="kmeans",
-        default_determinism_class="pseudo_deterministic",
-        strategy_aliases=(),
-    ),
-    "gmm+bic+argmin": AlgorithmSpec(
-        method_name="gmm+bic+argmin",
-        runner=run_gmm_bic_argmin_analysis,
-        fit_mode="sweep_select",
-        requires_embeddings=True,
-        supports_snapshot_only=False,
-        allowed_representations=frozenset(
-            {REPRESENTATION_FULL, REPRESENTATION_LABEL_CENTROID}
-        ),
-        provenance_envelope="clustering_v1",
-        base_algorithm="gmm",
-        default_determinism_class="pseudo_deterministic",
-        strategy_aliases=(),
-    ),
     "agglomerative+fixed-k": AlgorithmSpec(
         method_name="agglomerative+fixed-k",
         runner=run_agglomerative_fixed_k_analysis,
@@ -150,11 +120,6 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         default_determinism_class="deterministic",
         strategy_aliases=(),
     ),
-    # Slice 1.5 bundled-grammar replacements for the legacy v1-envelope methods.
-    # Algorithmic identity is preserved (same runner functions); only the method
-    # name and provenance envelope change. Strategy aliases live here so the
-    # BANK77 strategy CLI maps the existing strategy tokens (kept stable for
-    # operator continuity) to the new bundled-grammar method names.
     "hdbscan+fixed": AlgorithmSpec(
         method_name="hdbscan+fixed",
         runner=run_hdbscan_analysis,
@@ -232,12 +197,6 @@ def resolve_algorithm_runner(method_name: str) -> AlgorithmRunner | None:
     return spec.runner
 
 
-def is_registry_v1_clustering_method(method_name: str) -> bool:
-    """Return True when registry metadata marks method as v1 envelope."""
-    spec = get_algorithm_spec(method_name)
-    return bool(spec is not None and spec.provenance_envelope == "clustering_v1")
-
-
 def resolve_registry_method_name(token: str) -> str | None:
     """Resolve strategy token or method name to canonical method name."""
     return _ALIAS_INDEX.get(normalize_method_name(token))
@@ -251,7 +210,6 @@ __all__ = [
     "REPRESENTATION_FULL",
     "REPRESENTATION_LABEL_CENTROID",
     "get_algorithm_spec",
-    "is_registry_v1_clustering_method",
     "iter_algorithm_specs",
     "normalize_method_name",
     "raise_if_deprecated_clustering_method",

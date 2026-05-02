@@ -119,43 +119,59 @@ def test_build_composite_recipe_unknown_raises():
 @pytest.mark.parametrize(
     "composite_name",
     [
-        "hdbscan",
-        "kmeans+silhouette+kneedle",
-        "gmm+bic+argmin",
         "hdbscan+fixed",
         "kmeans+normalize+pca+sweep",
         "gmm+normalize+pca+sweep",
     ],
 )
-def test_build_composite_recipe_v1_clustering_methods(composite_name: str):
+def test_build_composite_recipe_bundled_clustering_methods(composite_name: str):
+    """Bundled-grammar sweep methods register a non-empty v0 recipe."""
     recipe = build_composite_recipe(composite_name)
     assert recipe["recipe_version"] == "v0"
     assert isinstance(recipe.get("stages"), list)
     assert recipe["stages"]
 
 
-def test_new_bundled_methods_have_same_recipe_hash_as_legacy():
-    """Slice 1.5: new bundled-grammar names canonicalize to the same recipe hash
-    as their legacy v1-envelope counterparts.
+@pytest.mark.parametrize(
+    "legacy_name",
+    [
+        "hdbscan",
+        "kmeans+silhouette+kneedle",
+        "gmm+bic+argmin",
+    ],
+)
+def test_legacy_clustering_method_names_no_longer_in_composite_recipes(
+    legacy_name: str,
+) -> None:
+    """Slice 1.5 retired the legacy v1-envelope method names from
+    :data:`COMPOSITE_RECIPES`; resolution under the legacy names must
+    KeyError so callers cannot persist a recipe under a deprecated name."""
+    assert legacy_name not in COMPOSITE_RECIPES
+    with pytest.raises(KeyError):
+        build_composite_recipe(legacy_name)
 
-    Algorithmic identity is preserved: the new method names dispatch the same
-    runner functions with the same recipe shape, so the recipe hash entering
-    the canonical run fingerprint via ``config_json["recipe_hash"]`` is
-    byte-identical between the two name pairs by construction.
 
-    PR3 converts this test to a permanent CONSTANT-vs-CONSTANT regression
-    (``test_bundled_recipe_constants_match_legacy_constants``) that survives
-    the removal of the legacy entries from COMPOSITE_RECIPES.
+def test_bundled_recipe_constants_match_legacy_constants() -> None:
+    """Permanent CONSTANT-vs-CONSTANT regression: the bundled-grammar recipe
+    constants canonicalize to the same recipe hash as the legacy v1-envelope
+    constants, even after the legacy method names were dropped from
+    :data:`COMPOSITE_RECIPES`.
+
+    This test pins the algorithmic-identity invariant from Slice 1.5: the
+    new method names dispatch the same runner functions with the same recipe
+    shape, so the recipe hash entering the canonical run fingerprint via
+    ``config_json["recipe_hash"]`` stays byte-identical between the two name
+    pairs.
     """
+    assert canonical_recipe_hash(HDBSCAN_FIXED_RECIPE) == canonical_recipe_hash(
+        HDBSCAN_V1_RECIPE
+    )
     assert canonical_recipe_hash(
-        build_composite_recipe("hdbscan+fixed")
-    ) == canonical_recipe_hash(build_composite_recipe("hdbscan"))
-    assert canonical_recipe_hash(
-        build_composite_recipe("kmeans+normalize+pca+sweep")
-    ) == canonical_recipe_hash(build_composite_recipe("kmeans+silhouette+kneedle"))
-    assert canonical_recipe_hash(
-        build_composite_recipe("gmm+normalize+pca+sweep")
-    ) == canonical_recipe_hash(build_composite_recipe("gmm+bic+argmin"))
+        KMEANS_NORMALIZE_PCA_SWEEP_RECIPE
+    ) == canonical_recipe_hash(KMEANS_SILHOUETTE_KNEEDLE_RECIPE)
+    assert canonical_recipe_hash(GMM_NORMALIZE_PCA_SWEEP_RECIPE) == canonical_recipe_hash(
+        GMM_BIC_ARGMIN_RECIPE
+    )
 
     # Sanity: the constants themselves are independent objects (deep-copied at
     # module load), so future divergence of one will not silently mutate the

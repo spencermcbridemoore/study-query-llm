@@ -1,25 +1,22 @@
-"""Tests for clustering provenance resolver, hashing, and canonical runners."""
+"""Tests for canonical clustering runners and registry envelope invariants.
+
+Slice 1.5 retired the ``clustering_v1`` provenance envelope and renamed the
+three sweep methods under the bundled-grammar (`<algorithm>+<chain>`). The
+v1 resolver/validators/hashing/schema modules and ``rules-v1.0.0.yaml`` were
+deleted, so this file no longer exercises any v1 envelope paths. Reproducibility
+of the sweep runners is now verified by feeding the runner a literal
+``_v1_pipeline_{resolved,effective}`` payload (the same shape the analyze
+dispatcher injects via ``_synthesize_v1_pipeline_for_bundled_method``).
+"""
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
-from study_query_llm.algorithms.recipes import canonical_recipe_hash
-from study_query_llm.pipeline.analyze import (
-    _synthesize_v1_pipeline_for_bundled_method,
-)
 from study_query_llm.pipeline.clustering import (
-    V1_CLUSTERING_METHODS,
-    build_effective_recipe_payload,
-    build_pipeline_effective_hash,
-    is_v1_clustering_method,
-    load_rule_set,
-    resolve_clustering_resolution,
+    iter_algorithm_specs,
     run_gmm_bic_argmin_analysis,
     run_kmeans_silhouette_kneedle_analysis,
-    validate_identity_contract,
-    validate_post_selection,
 )
 
 
@@ -49,138 +46,88 @@ def _toy_embeddings() -> np.ndarray:
     return np.vstack([cluster_a, cluster_b])
 
 
-def test_agglomerative_method_is_outside_v1_envelope() -> None:
-    assert not is_v1_clustering_method("agglomerative+fixed-k")
-    assert "agglomerative+fixed-k" not in V1_CLUSTERING_METHODS
-    assert {"hdbscan", "kmeans+silhouette+kneedle", "gmm+bic+argmin"}.issubset(
-        V1_CLUSTERING_METHODS
-    )
-
-
-def test_resolver_rejects_non_v1_agglomerative_method() -> None:
-    rule_set = load_rule_set()
-    with pytest.raises(ValueError, match="Unsupported clustering method"):
-        resolve_clustering_resolution(
-            method_name="agglomerative+fixed-k",
-            parameters={"k": 2},
-            rule_set=rule_set,
-            context={"embedding_dim": 2, "n_samples": 10},
-        )
-
-
-def test_resolver_deterministic_for_identical_inputs() -> None:
-    rule_set = load_rule_set()
-    context = {"embedding_dim": 768, "n_samples": 128}
-    params = {"dataset_slug": "twenty_newsgroups_6cat_research"}
-    first = resolve_clustering_resolution(
-        method_name="kmeans+silhouette+kneedle",
-        parameters=params,
-        rule_set=rule_set,
-        context=context,
-    )
-    second = resolve_clustering_resolution(
-        method_name="kmeans+silhouette+kneedle",
-        parameters=params,
-        rule_set=rule_set,
-        context=context,
-    )
-    assert first.rule_set_hash == second.rule_set_hash
-    assert first.pipeline_declared == second.pipeline_declared
-    assert first.pipeline_resolved == second.pipeline_resolved
-    assert first.pipeline_effective == second.pipeline_effective
-
-
-def test_resolver_missing_context_raises() -> None:
-    rule_set = load_rule_set()
-    with pytest.raises(ValueError, match="Missing required rule input"):
-        resolve_clustering_resolution(
-            method_name="kmeans+silhouette+kneedle",
-            parameters={},
-            rule_set=rule_set,
-            context={"embedding_dim": 768},
-        )
-
-
-def test_resolver_aliases_when_pca_is_skipped() -> None:
-    rule_set = load_rule_set()
-    context = {"embedding_dim": 128, "n_samples": 200}
-    with_pca = resolve_clustering_resolution(
-        method_name="kmeans+silhouette+kneedle",
-        parameters={},
-        rule_set=rule_set,
-        context=context,
-    )
-    without_pca = resolve_clustering_resolution(
-        method_name="kmeans+silhouette+kneedle",
-        parameters={"pipeline_declared": ["embed", "normalize", "kmeans"]},
-        rule_set=rule_set,
-        context=context,
-    )
-    assert with_pca.pipeline_effective == without_pca.pipeline_effective
-
-
-def test_pipeline_hash_matches_effective_recipe_hash() -> None:
-    rule_set = load_rule_set()
-    resolution = resolve_clustering_resolution(
-        method_name="kmeans+silhouette+kneedle",
-        parameters={},
-        rule_set=rule_set,
-        context={"embedding_dim": 768, "n_samples": 256},
-    )
-    for entry in resolution.pipeline_resolved:
-        if entry["stage"] == "kmeans":
-            entry["params"]["k"] = 10
-            break
-    pipeline_hash = build_pipeline_effective_hash(
-        resolution.pipeline_resolved,
-        resolution.pipeline_effective,
-    )
-    recipe_payload = build_effective_recipe_payload(
-        resolution.pipeline_resolved,
-        resolution.pipeline_effective,
-    )
-    recipe_hash = canonical_recipe_hash(recipe_payload)
-    assert pipeline_hash == recipe_hash
-    validate_identity_contract(
-        pipeline_effective_hash=pipeline_hash,
-        recipe_hash=recipe_hash,
-    )
-
-
-def test_validate_post_selection_rejects_out_of_range_choice() -> None:
-    rule_set = load_rule_set()
-    resolution = resolve_clustering_resolution(
-        method_name="kmeans+silhouette+kneedle",
-        parameters={},
-        rule_set=rule_set,
-        context={"embedding_dim": 768, "n_samples": 200},
-    )
-    with pytest.raises(ValueError, match="must be in sweep range"):
-        validate_post_selection(
-            resolution,
-            selection_evidence={
-                "sweep_range": [2, 3, 4],
-                "chosen_k": 10,
-                "selection_curve_artifact_ref": "curve.json",
+def _kmeans_pipeline_payload(matrix: np.ndarray) -> dict[str, object]:
+    """Mirror the synthesizer payload used by the bundled-grammar dispatcher."""
+    pca_components = max(1, min(100, int(matrix.shape[1]), max(1, int(matrix.shape[0]) - 1)))
+    pipeline_resolved: list[dict[str, object]] = [
+        {"stage": "embed", "params": {}},
+        {"stage": "normalize", "params": {}},
+        {
+            "stage": "pca",
+            "params": {"random_state": 42, "n_components": pca_components},
+        },
+        {
+            "stage": "kmeans",
+            "params": {
+                "n_init": 20,
+                "max_iter": 300,
+                "init": "k-means++",
+                "random_state": 42,
+                "distance_metric": "cosine",
+                "k_range": [2, 3, 5, 8, 10, 15, 20, 30, 50],
+                "selection_metric": "silhouette",
+                "selection_rule": "kneedle",
             },
+        },
+    ]
+    return {
+        "_v1_pipeline_resolved": pipeline_resolved,
+        "_v1_pipeline_effective": ["embed", "normalize", "pca", "kmeans"],
+    }
+
+
+def _gmm_pipeline_payload(matrix: np.ndarray) -> dict[str, object]:
+    pca_components = max(1, min(100, int(matrix.shape[1]), max(1, int(matrix.shape[0]) - 1)))
+    pipeline_resolved: list[dict[str, object]] = [
+        {"stage": "embed", "params": {}},
+        {"stage": "normalize", "params": {}},
+        {
+            "stage": "pca",
+            "params": {"random_state": 42, "n_components": pca_components},
+        },
+        {
+            "stage": "gmm",
+            "params": {
+                "reg_covar": 1.0e-6,
+                "n_init": 10,
+                "max_iter": 200,
+                "random_state": 42,
+                "covariance_type": "full",
+                "k_range": [2, 3, 5, 8, 10, 15, 20, 30, 50],
+                "selection_metric": "bic",
+                "selection_rule": "argmin",
+            },
+        },
+    ]
+    return {
+        "_v1_pipeline_resolved": pipeline_resolved,
+        "_v1_pipeline_effective": ["embed", "normalize", "pca", "gmm"],
+    }
+
+
+def test_all_registry_methods_are_envelope_none() -> None:
+    """Slice 1.5 invariant: every spec in the runtime registry ships with
+    ``provenance_envelope == "none"``. The ``clustering_v1`` envelope value
+    was removed alongside the v1 resolver/validators; only ``"none"`` remains
+    in the ``ProvenanceEnvelope`` literal.
+    """
+    specs = iter_algorithm_specs()
+    assert specs, "registry should expose at least one algorithm spec"
+    for spec in specs:
+        assert spec.provenance_envelope == "none", (
+            f"{spec.method_name!r} carried envelope={spec.provenance_envelope!r}; "
+            "all registry methods must be envelope=none after Slice 1.5."
         )
 
 
 def test_kmeans_runner_reproducible_selection() -> None:
+    """Two identical calls to the kmeans runner with a literal
+    ``_v1_pipeline_{resolved,effective}`` payload must produce the same
+    ``chosen_k`` and the same selection curve artifact."""
     matrix = _toy_embeddings()
-    rule_set = load_rule_set()
-    resolution = resolve_clustering_resolution(
-        method_name="kmeans+silhouette+kneedle",
-        parameters={},
-        rule_set=rule_set,
-        context={"embedding_dim": int(matrix.shape[1]), "n_samples": int(matrix.shape[0])},
-    )
-    params = {
-        "_v1_pipeline_resolved": resolution.pipeline_resolved,
-        "_v1_pipeline_effective": resolution.pipeline_effective,
-    }
+    params = _kmeans_pipeline_payload(matrix)
     first = run_kmeans_silhouette_kneedle_analysis(
-        method_name="kmeans+silhouette+kneedle",
+        method_name="kmeans+normalize+pca+sweep",
         input_group_id=1,
         input_group_type="embedding_batch",
         input_group_metadata={},
@@ -189,7 +136,7 @@ def test_kmeans_runner_reproducible_selection() -> None:
         parameters=params,
     )
     second = run_kmeans_silhouette_kneedle_analysis(
-        method_name="kmeans+silhouette+kneedle",
+        method_name="kmeans+normalize+pca+sweep",
         input_group_id=1,
         input_group_type="embedding_batch",
         input_group_metadata={},
@@ -205,20 +152,11 @@ def test_kmeans_runner_reproducible_selection() -> None:
 
 
 def test_gmm_runner_reproducible_selection() -> None:
+    """GMM counterpart of ``test_kmeans_runner_reproducible_selection``."""
     matrix = _toy_embeddings()
-    rule_set = load_rule_set()
-    resolution = resolve_clustering_resolution(
-        method_name="gmm+bic+argmin",
-        parameters={},
-        rule_set=rule_set,
-        context={"embedding_dim": int(matrix.shape[1]), "n_samples": int(matrix.shape[0])},
-    )
-    params = {
-        "_v1_pipeline_resolved": resolution.pipeline_resolved,
-        "_v1_pipeline_effective": resolution.pipeline_effective,
-    }
+    params = _gmm_pipeline_payload(matrix)
     first = run_gmm_bic_argmin_analysis(
-        method_name="gmm+bic+argmin",
+        method_name="gmm+normalize+pca+sweep",
         input_group_id=1,
         input_group_type="embedding_batch",
         input_group_metadata={},
@@ -227,7 +165,7 @@ def test_gmm_runner_reproducible_selection() -> None:
         parameters=params,
     )
     second = run_gmm_bic_argmin_analysis(
-        method_name="gmm+bic+argmin",
+        method_name="gmm+normalize+pca+sweep",
         input_group_id=1,
         input_group_type="embedding_batch",
         input_group_metadata={},
@@ -240,246 +178,3 @@ def test_gmm_runner_reproducible_selection() -> None:
     assert first_sel["chosen_k"] == second_sel["chosen_k"]
     assert first_sel["chosen_k"] in first_sel["sweep_range"]
     assert "gmm_selection_curve.json" in first["artifacts"]
-
-
-# ---------------------------------------------------------------------------
-# Slice 1.5 PR2 one-shot runtime parity gates (deleted in PR3 with the legacy
-# specs). These prove byte-level algorithmic identity between the legacy
-# v1-envelope methods and the new bundled-grammar methods by comparing the
-# runner-input payloads (resolver-built vs synthesizer-built) and asserting
-# that the runner produces identical labels/metrics for both paths on a
-# high-dim toy fixture. The dispatcher's "elif synthetic_v1_pipeline is not
-# None" branch in analyze.py is a thin dict-assignment whose correctness is
-# verified by code review + the per-PR baseline tests; the substantive
-# property is "does the synthesized payload match the resolver payload, and
-# does the runner produce the same output for both?"
-# ---------------------------------------------------------------------------
-
-
-def _high_dim_toy_embeddings(
-    *, n_samples: int = 64, embedding_dim: int = 768, seed: int = 7
-) -> np.ndarray:
-    """Build n_samples x embedding_dim embeddings with two well-separated
-    clusters so that selection rules produce a stable chosen_k."""
-    rng = np.random.default_rng(seed)
-    half = n_samples // 2
-    cluster_a = 0.1 * rng.normal(size=(half, embedding_dim))
-    cluster_b = np.full((n_samples - half, embedding_dim), 5.0) + 0.1 * rng.normal(
-        size=(n_samples - half, embedding_dim)
-    )
-    return np.vstack([cluster_a, cluster_b]).astype(np.float64)
-
-
-def _kmeans_runner_outputs(
-    *,
-    method_name: str,
-    pipeline_resolved: list[dict[str, object]],
-    pipeline_effective: list[str],
-    matrix: np.ndarray,
-) -> dict[str, object]:
-    return run_kmeans_silhouette_kneedle_analysis(
-        method_name=method_name,
-        input_group_id=1,
-        input_group_type="embedding_batch",
-        input_group_metadata={},
-        embeddings=matrix,
-        texts=[f"t{i}" for i in range(int(matrix.shape[0]))],
-        parameters={
-            "_v1_pipeline_resolved": pipeline_resolved,
-            "_v1_pipeline_effective": pipeline_effective,
-        },
-    )
-
-
-def _gmm_runner_outputs(
-    *,
-    method_name: str,
-    pipeline_resolved: list[dict[str, object]],
-    pipeline_effective: list[str],
-    matrix: np.ndarray,
-) -> dict[str, object]:
-    return run_gmm_bic_argmin_analysis(
-        method_name=method_name,
-        input_group_id=1,
-        input_group_type="embedding_batch",
-        input_group_metadata={},
-        embeddings=matrix,
-        texts=[f"t{i}" for i in range(int(matrix.shape[0]))],
-        parameters={
-            "_v1_pipeline_resolved": pipeline_resolved,
-            "_v1_pipeline_effective": pipeline_effective,
-        },
-    )
-
-
-def _resolver_payload(
-    *,
-    method_name: str,
-    parameters: dict[str, object],
-    embedding_dim: int,
-    n_samples: int,
-) -> tuple[list[dict[str, object]], list[str]]:
-    rule_set = load_rule_set()
-    resolution = resolve_clustering_resolution(
-        method_name=method_name,
-        parameters=parameters,
-        rule_set=rule_set,
-        context={"embedding_dim": int(embedding_dim), "n_samples": int(n_samples)},
-    )
-    return (
-        [dict(entry) for entry in resolution.pipeline_resolved],
-        list(resolution.pipeline_effective),
-    )
-
-
-def _synth_payload(
-    *,
-    method_name: str,
-    parameters: dict[str, object],
-    embedding_dim: int,
-    n_samples: int,
-) -> tuple[list[dict[str, object]], list[str]]:
-    payload = _synthesize_v1_pipeline_for_bundled_method(
-        method_name=method_name,
-        parameters=parameters,
-        embedding_dim=int(embedding_dim),
-        n_samples=int(n_samples),
-    )
-    return (
-        [dict(entry) for entry in payload["pipeline_resolved"]],
-        list(payload["pipeline_effective"]),
-    )
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {},
-        {"pca_n_components": 64},
-        {"kmeans_distance_metric": "euclidean"},
-    ],
-    ids=["defaults", "pca_n_components_override", "distance_metric_override"],
-)
-def test_kmeans_runtime_parity_old_vs_new(overrides: dict[str, object]) -> None:
-    """Slice 1.5 PR2 one-shot gate: byte-level algorithmic identity between
-    legacy ``kmeans+silhouette+kneedle`` (YAML resolver builds the pipeline)
-    and new ``kmeans+normalize+pca+sweep`` (synthesizer builds the pipeline).
-    Deleted in PR3 with the legacy spec."""
-    matrix = _high_dim_toy_embeddings(n_samples=64, embedding_dim=768)
-
-    legacy_resolved, legacy_effective = _resolver_payload(
-        method_name="kmeans+silhouette+kneedle",
-        parameters=dict(overrides),
-        embedding_dim=int(matrix.shape[1]),
-        n_samples=int(matrix.shape[0]),
-    )
-    new_resolved, new_effective = _synth_payload(
-        method_name="kmeans+normalize+pca+sweep",
-        parameters=dict(overrides),
-        embedding_dim=int(matrix.shape[1]),
-        n_samples=int(matrix.shape[0]),
-    )
-
-    assert legacy_effective == new_effective
-    assert [
-        (entry["stage"], dict(entry.get("params") or {})) for entry in legacy_resolved
-    ] == [
-        (entry["stage"], dict(entry.get("params") or {})) for entry in new_resolved
-    ]
-
-    legacy_result = _kmeans_runner_outputs(
-        method_name="kmeans+silhouette+kneedle",
-        pipeline_resolved=legacy_resolved,
-        pipeline_effective=legacy_effective,
-        matrix=matrix,
-    )
-    new_result = _kmeans_runner_outputs(
-        method_name="kmeans+normalize+pca+sweep",
-        pipeline_resolved=new_resolved,
-        pipeline_effective=new_effective,
-        matrix=matrix,
-    )
-
-    legacy_labels = legacy_result["structured_results"]["clustering_labels"]
-    new_labels = new_result["structured_results"]["clustering_labels"]
-    assert legacy_labels["cluster_labels"] == new_labels["cluster_labels"]
-    assert legacy_labels["cluster_ids"] == new_labels["cluster_ids"]
-    assert legacy_labels["cluster_sizes"] == new_labels["cluster_sizes"]
-
-    legacy_sel = legacy_result["structured_results"]["selection_evidence"]
-    new_sel = new_result["structured_results"]["selection_evidence"]
-    assert legacy_sel["chosen_k"] == new_sel["chosen_k"]
-    assert legacy_sel["sweep_range"] == new_sel["sweep_range"]
-
-    legacy_summary = legacy_result["structured_results"]["clustering_summary"]
-    new_summary = new_result["structured_results"]["clustering_summary"]
-    assert legacy_summary["cluster_count"] == new_summary["cluster_count"]
-    assert legacy_summary["cluster_sizes"] == new_summary["cluster_sizes"]
-    assert legacy_summary["objective"]["inertia"] == new_summary["objective"]["inertia"]
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {},
-        {"pca_n_components": 64},
-        {"gmm_covariance_type": "diag"},
-    ],
-    ids=["defaults", "pca_n_components_override", "covariance_type_override"],
-)
-def test_gmm_runtime_parity_old_vs_new(overrides: dict[str, object]) -> None:
-    """Slice 1.5 PR2 one-shot gate: byte-level algorithmic identity between
-    legacy ``gmm+bic+argmin`` (YAML resolver builds the pipeline) and new
-    ``gmm+normalize+pca+sweep`` (synthesizer builds the pipeline). Deleted
-    in PR3 with the legacy spec."""
-    matrix = _high_dim_toy_embeddings(n_samples=64, embedding_dim=768)
-
-    legacy_resolved, legacy_effective = _resolver_payload(
-        method_name="gmm+bic+argmin",
-        parameters=dict(overrides),
-        embedding_dim=int(matrix.shape[1]),
-        n_samples=int(matrix.shape[0]),
-    )
-    new_resolved, new_effective = _synth_payload(
-        method_name="gmm+normalize+pca+sweep",
-        parameters=dict(overrides),
-        embedding_dim=int(matrix.shape[1]),
-        n_samples=int(matrix.shape[0]),
-    )
-
-    assert legacy_effective == new_effective
-    assert [
-        (entry["stage"], dict(entry.get("params") or {})) for entry in legacy_resolved
-    ] == [
-        (entry["stage"], dict(entry.get("params") or {})) for entry in new_resolved
-    ]
-
-    legacy_result = _gmm_runner_outputs(
-        method_name="gmm+bic+argmin",
-        pipeline_resolved=legacy_resolved,
-        pipeline_effective=legacy_effective,
-        matrix=matrix,
-    )
-    new_result = _gmm_runner_outputs(
-        method_name="gmm+normalize+pca+sweep",
-        pipeline_resolved=new_resolved,
-        pipeline_effective=new_effective,
-        matrix=matrix,
-    )
-
-    legacy_labels = legacy_result["structured_results"]["clustering_labels"]
-    new_labels = new_result["structured_results"]["clustering_labels"]
-    assert legacy_labels["cluster_labels"] == new_labels["cluster_labels"]
-    assert legacy_labels["cluster_ids"] == new_labels["cluster_ids"]
-    assert legacy_labels["cluster_sizes"] == new_labels["cluster_sizes"]
-
-    legacy_sel = legacy_result["structured_results"]["selection_evidence"]
-    new_sel = new_result["structured_results"]["selection_evidence"]
-    assert legacy_sel["chosen_k"] == new_sel["chosen_k"]
-    assert legacy_sel["sweep_range"] == new_sel["sweep_range"]
-
-    legacy_summary = legacy_result["structured_results"]["clustering_summary"]
-    new_summary = new_result["structured_results"]["clustering_summary"]
-    assert legacy_summary["cluster_count"] == new_summary["cluster_count"]
-    assert legacy_summary["cluster_sizes"] == new_summary["cluster_sizes"]
-    assert legacy_summary["objective"]["bic"] == new_summary["objective"]["bic"]

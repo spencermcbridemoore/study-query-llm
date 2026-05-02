@@ -15,12 +15,15 @@ from study_query_llm.pipeline.clustering.registry import (
 
 
 def test_registry_contains_expected_builtin_methods() -> None:
+    """Slice 1.5: the registry holds only bundled-grammar (envelope=none)
+    specs after the legacy v1-envelope methods (``hdbscan``,
+    ``kmeans+silhouette+kneedle``, ``gmm+bic+argmin``) were removed from the
+    spec table. Their legacy names are reachable only via
+    ``DEPRECATED_LEGACY_CLUSTERING_METHODS`` + ``raise_if_deprecated_clustering_method``.
+    """
     names = {spec.method_name for spec in iter_algorithm_specs()}
     assert names == {
         "agglomerative+fixed-k",
-        "hdbscan",
-        "kmeans+silhouette+kneedle",
-        "gmm+bic+argmin",
         "hdbscan+fixed",
         "kmeans+normalize+pca+sweep",
         "gmm+normalize+pca+sweep",
@@ -28,17 +31,29 @@ def test_registry_contains_expected_builtin_methods() -> None:
 
 
 def test_registry_lookup_is_case_insensitive() -> None:
-    upper = get_algorithm_spec("HDBSCAN")
-    mixed = get_algorithm_spec("KMeans+Silhouette+Kneedle")
+    upper = get_algorithm_spec("HDBSCAN+FIXED")
+    mixed = get_algorithm_spec("KMeans+Normalize+PCA+Sweep")
     assert upper is not None
     assert mixed is not None
-    assert upper.method_name == "hdbscan"
-    assert mixed.method_name == "kmeans+silhouette+kneedle"
+    assert upper.method_name == "hdbscan+fixed"
+    assert mixed.method_name == "kmeans+normalize+pca+sweep"
 
 
 def test_registry_unknown_method_returns_none() -> None:
     assert get_algorithm_spec("does_not_exist") is None
     assert resolve_algorithm_runner("does_not_exist") is None
+
+
+def test_registry_legacy_method_names_no_longer_resolve() -> None:
+    """Slice 1.5: legacy method names are physically absent from the registry;
+    direct ``get_algorithm_spec`` lookup returns ``None`` so callers cannot
+    bypass the deprecation guard via the registry.
+    """
+    for legacy_name in ("hdbscan", "kmeans+silhouette+kneedle", "gmm+bic+argmin"):
+        assert get_algorithm_spec(legacy_name) is None, (
+            f"legacy method {legacy_name!r} should not have a registry spec "
+            "after the Slice 1.5 cleanup"
+        )
 
 
 def test_deprecated_legacy_clustering_methods_set_matches_registry_history() -> None:
@@ -93,18 +108,10 @@ def test_raise_if_deprecated_clustering_method_no_op_for_non_legacy_names(
 
 
 def test_registry_alias_resolution_maps_to_canonical_method_name() -> None:
-    """Slice 1.5: strategy aliases now resolve to the bundled-grammar method
-    names (the aliases moved off the legacy v1-envelope specs and onto the new
-    specs in PR2 so BANK77 strategy tokens continue to work but dispatch to
-    the envelope=none paths).
-
-    The literal token "hdbscan" is BOTH the canonical name of the legacy spec
-    AND a strategy alias on the new "hdbscan+fixed" spec. The alias index is
-    built by iteration order: legacy is inserted first, then the new spec
-    overwrites the alias entry, so resolve_registry_method_name("hdbscan")
-    returns "hdbscan+fixed". Direct registry lookup via get_algorithm_spec
-    still returns the legacy spec when called with "hdbscan" (until PR3
-    removes the legacy spec entirely).
+    """Slice 1.5: strategy aliases live on the bundled-grammar specs so the
+    BANK77 strategy CLI keeps the operator-facing tokens
+    (``hdbscan``/``kmeans_silhouette_kneedle``/``gmm_bic_argmin``) stable
+    while routing dispatch to the envelope=none method names.
     """
     assert resolve_registry_method_name("kmeans_silhouette_kneedle") == "kmeans+normalize+pca+sweep"
     assert resolve_registry_method_name("gmm_bic_argmin") == "gmm+normalize+pca+sweep"

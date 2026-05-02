@@ -270,9 +270,12 @@ HDBSCAN_V1_RECIPE: Dict[str, Any] = {
 }
 
 # Slice 1.5 bundled-grammar recipes. Initialized as deep copies of the legacy
-# v1-envelope recipes so canonical_recipe_hash matches by construction; the
-# permanent CONSTANT-vs-CONSTANT regression test in test_recipe.py asserts this
-# equivalence and survives the PR3 removal of legacy COMPOSITE_RECIPES entries.
+# v1-envelope recipe constants so ``canonical_recipe_hash`` matches by
+# construction; the permanent CONSTANT-vs-CONSTANT regression test in
+# ``tests/test_services/test_recipe.py`` (`test_new_bundled_methods_have_same_
+# recipe_hash_as_legacy`) pins this equivalence so the legacy constants stay
+# in sync with the bundled-grammar constants even though the legacy method
+# names are no longer registered in :data:`COMPOSITE_RECIPES`.
 HDBSCAN_FIXED_RECIPE: Dict[str, Any] = copy.deepcopy(HDBSCAN_V1_RECIPE)
 KMEANS_NORMALIZE_PCA_SWEEP_RECIPE: Dict[str, Any] = copy.deepcopy(
     KMEANS_SILHOUETTE_KNEEDLE_RECIPE
@@ -280,11 +283,13 @@ KMEANS_NORMALIZE_PCA_SWEEP_RECIPE: Dict[str, Any] = copy.deepcopy(
 GMM_NORMALIZE_PCA_SWEEP_RECIPE: Dict[str, Any] = copy.deepcopy(GMM_BIC_ARGMIN_RECIPE)
 
 
+# Slice 1.5 retired the legacy v1-envelope method names from this registry.
+# The legacy *constants* above are intentionally preserved (they back the
+# permanent recipe-hash equivalence regression test); only the *registry
+# entries* under those names are dropped, so ``build_composite_recipe`` and
+# ``ensure_composite_recipe`` will correctly KeyError on the deprecated names.
 COMPOSITE_RECIPES: Dict[str, Dict[str, Any]] = {
     "cosine_kllmeans_no_pca": COSINE_KLLMEANS_NO_PCA_RECIPE,
-    "kmeans+silhouette+kneedle": KMEANS_SILHOUETTE_KNEEDLE_RECIPE,
-    "gmm+bic+argmin": GMM_BIC_ARGMIN_RECIPE,
-    "hdbscan": HDBSCAN_V1_RECIPE,
     "hdbscan+fixed": HDBSCAN_FIXED_RECIPE,
     "kmeans+normalize+pca+sweep": KMEANS_NORMALIZE_PCA_SWEEP_RECIPE,
     "gmm+normalize+pca+sweep": GMM_NORMALIZE_PCA_SWEEP_RECIPE,

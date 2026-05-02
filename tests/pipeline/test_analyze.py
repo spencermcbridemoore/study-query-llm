@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
+from typing import Any, Mapping
 
 import numpy as np
 import pytest
@@ -27,6 +28,32 @@ from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
 from study_query_llm.pipeline.types import SnapshotRow, SubquerySpec
 from study_query_llm.services.method_service import MethodService
+
+
+_V1_ENVELOPE_FIELDS: tuple[str, ...] = (
+    "rule_set_hash",
+    "rule_set_version",
+    "rule_inputs",
+    "pipeline_declared",
+    "pipeline_resolved",
+    "pipeline_effective",
+    "pipeline_effective_hash",
+    "operation_type",
+    "operation_version",
+)
+
+
+def _assert_no_v1_envelope_fields(config_json: Mapping[str, Any]) -> None:
+    """Slice 1.5 invariant: bundled-grammar methods emit zero v1-envelope fields.
+
+    The deprecation+removal pass dropped the ``cluster_pipeline`` envelope; new
+    write paths must not leak the legacy provenance keys into ``config_json``
+    on ``provenanced_runs``. Used by the rewritten v1-envelope integration
+    tests to pin the simplified single-envelope model.
+    """
+    cfg = dict(config_json or {})
+    leaked = [field for field in _V1_ENVELOPE_FIELDS if field in cfg]
+    assert not leaked, f"v1 envelope fields leaked into config_json: {leaked}"
 
 
 def _db(tmp_path: Path) -> tuple[DatabaseConnectionV2, str]:
@@ -600,10 +627,13 @@ def test_hdbscan_runner_rejects_zero_core_dist_jobs(monkeypatch) -> None:
         )
 
 
-def test_analyze_v1_kmeans_writes_clustering_summary_and_identity(
+def test_analyze_kmeans_normalize_pca_sweep_writes_clustering_summary_no_v1_fields(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """Slice 1.5: the bundled-grammar kmeans method emits the runner's own
+    summary/labels/selection-evidence rows; no v1-envelope provenance fields
+    leak into config_json or the AnalysisResult value."""
     monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
     db, _database_url = _db(tmp_path)
     artifact_dir = str((tmp_path / "artifacts").resolve())
@@ -611,13 +641,13 @@ def test_analyze_v1_kmeans_writes_clustering_summary_and_identity(
         db=db,
         artifact_dir=artifact_dir,
     )
-    request_group_id = _create_request_group(db, "request_v1_kmeans")
+    request_group_id = _create_request_group(db, "request_kmeans_normalize_pca_sweep")
 
     result = analyze(
         snapshot_group_id,
         embedding_group_id,
-        method_name="kmeans+silhouette+kneedle",
-        run_key="rk_v1_kmeans",
+        method_name="kmeans+normalize+pca+sweep",
+        run_key="rk_kmeans_normalize_pca_sweep",
         request_group_id=request_group_id,
         db=db,
         artifact_dir=artifact_dir,
@@ -628,17 +658,19 @@ def test_analyze_v1_kmeans_writes_clustering_summary_and_identity(
             "embedding_deployment": "test-embedding-model",
         },
     )
-    assert "clustering_summary.json" in result.artifact_uris
+    assert "kmeans_summary.json" in result.artifact_uris
+    assert "kmeans_labels.json" in result.artifact_uris
 
+    expected_recipe_hash = canonical_recipe_hash(
+        dict(COMPOSITE_RECIPES["kmeans+normalize+pca+sweep"])
+    )
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
         assert run_row is not None
         cfg = dict(run_row.config_json or {})
-        assert cfg["operation_type"] == "cluster_pipeline"
-        assert cfg["operation_version"] == "v1"
-        assert cfg["rule_set_hash"]
-        assert cfg["recipe_hash"] == cfg["pipeline_effective_hash"]
+        _assert_no_v1_envelope_fields(cfg)
+        assert cfg.get("recipe_hash") == expected_recipe_hash
 
         summary_result = (
             session.query(AnalysisResult)
@@ -650,15 +682,27 @@ def test_analyze_v1_kmeans_writes_clustering_summary_and_identity(
         )
         assert summary_result is not None
         value = dict(summary_result.result_json or {}).get("value") or {}
-        assert value["operation_type"] == "cluster_pipeline"
-        assert value["pipeline_effective_hash"] == value["recipe_hash"]
-        assert "pipeline_resolved" in value
+        assert int(value["n_samples"]) == 4
+        assert int(value["cluster_count"]) >= 1
+        assert int(value["parameters"]["chosen_k"]) in value["parameters"]["k_range"]
+        # No v1 envelope leakage in the runner's summary either.
+        for legacy_field in (
+            "operation_type",
+            "operation_version",
+            "rule_set_hash",
+            "pipeline_resolved",
+            "pipeline_effective_hash",
+        ):
+            assert legacy_field not in value
 
 
-def test_analyze_v1_gmm_writes_clustering_summary_and_identity(
+def test_analyze_gmm_normalize_pca_sweep_writes_clustering_summary_no_v1_fields(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """Slice 1.5: the bundled-grammar gmm method emits the runner's own
+    summary/labels/selection-evidence rows; no v1-envelope provenance fields
+    leak into config_json or the AnalysisResult value."""
     monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
     db, _database_url = _db(tmp_path)
     artifact_dir = str((tmp_path / "artifacts").resolve())
@@ -666,13 +710,13 @@ def test_analyze_v1_gmm_writes_clustering_summary_and_identity(
         db=db,
         artifact_dir=artifact_dir,
     )
-    request_group_id = _create_request_group(db, "request_v1_gmm")
+    request_group_id = _create_request_group(db, "request_gmm_normalize_pca_sweep")
 
     result = analyze(
         snapshot_group_id,
         embedding_group_id,
-        method_name="gmm+bic+argmin",
-        run_key="rk_v1_gmm",
+        method_name="gmm+normalize+pca+sweep",
+        run_key="rk_gmm_normalize_pca_sweep",
         request_group_id=request_group_id,
         db=db,
         artifact_dir=artifact_dir,
@@ -683,22 +727,26 @@ def test_analyze_v1_gmm_writes_clustering_summary_and_identity(
             "embedding_deployment": "test-embedding-model",
         },
     )
-    assert "clustering_summary.json" in result.artifact_uris
+    assert "gmm_summary.json" in result.artifact_uris
+    assert "gmm_labels.json" in result.artifact_uris
 
+    expected_recipe_hash = canonical_recipe_hash(
+        dict(COMPOSITE_RECIPES["gmm+normalize+pca+sweep"])
+    )
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         run_row = repo.get_provenanced_run_by_id(int(result.run_id or 0))
         assert run_row is not None
         cfg = dict(run_row.config_json or {})
-        assert cfg["operation_type"] == "cluster_pipeline"
-        assert cfg["recipe_hash"] == cfg["pipeline_effective_hash"]
+        _assert_no_v1_envelope_fields(cfg)
+        assert cfg.get("recipe_hash") == expected_recipe_hash
 
 
 @pytest.mark.parametrize(
     ("method_name", "explicit_runner", "parameters"),
     [
         (
-            "hdbscan",
+            "hdbscan+fixed",
             run_hdbscan_analysis,
             {
                 "dataset_slug": "analyze_fixture",
@@ -710,7 +758,7 @@ def test_analyze_v1_gmm_writes_clustering_summary_and_identity(
             },
         ),
         (
-            "kmeans+silhouette+kneedle",
+            "kmeans+normalize+pca+sweep",
             run_kmeans_silhouette_kneedle_analysis,
             {
                 "dataset_slug": "analyze_fixture",
@@ -720,7 +768,7 @@ def test_analyze_v1_gmm_writes_clustering_summary_and_identity(
             },
         ),
         (
-            "gmm+bic+argmin",
+            "gmm+normalize+pca+sweep",
             run_gmm_bic_argmin_analysis,
             {
                 "dataset_slug": "analyze_fixture",
@@ -746,7 +794,7 @@ def test_analyze_registry_dispatch_matches_explicit_runner_fingerprint(
         artifact_dir=artifact_dir,
     )
 
-    if method_name == "hdbscan":
+    if method_name == "hdbscan+fixed":
         class _FakeHDBSCAN:
             def __init__(self, **kwargs):
                 self._kwargs = dict(kwargs)
@@ -848,10 +896,13 @@ def test_analyze_cosine_kllmeans_falls_back_to_default_runner_and_records_recipe
         assert summary_result is not None
 
 
-def test_analyze_agglomerative_fixed_k_runs_outside_v1_envelope(
+def test_analyze_agglomerative_fixed_k_runs_with_envelope_none(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """Slice 1.5: ``agglomerative+fixed-k`` is one of four bundled-grammar
+    methods that all share ``provenance_envelope=none`` after the v1 envelope
+    retirement; the prior 'outside v1' framing no longer applies."""
     monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
     db, _database_url = _db(tmp_path)
     artifact_dir = str((tmp_path / "artifacts").resolve())
@@ -903,3 +954,52 @@ def test_analyze_agglomerative_fixed_k_runs_outside_v1_envelope(
         assert summary_result is not None
         summary_value = dict(summary_result.result_json or {}).get("value") or {}
         assert summary_value.get("base_algorithm") == "agglomerative"
+
+
+@pytest.mark.parametrize(
+    "deprecated_name",
+    ["hdbscan", "kmeans+silhouette+kneedle", "gmm+bic+argmin"],
+)
+def test_deprecated_method_name_rejected_even_with_explicit_method_runner(
+    deprecated_name: str,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Slice 1.5: the deprecation guard fires before runner resolution so an
+    explicit ``method_runner`` injection cannot bypass it. The stub runner
+    here would raise ``AssertionError`` if the guard let it through; the
+    test passes only if the guard's ``ValueError`` is raised first.
+    """
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(
+        db, f"request_deprecated_guard_{deprecated_name}"
+    )
+
+    def _stub_runner(**_kwargs):
+        raise AssertionError(
+            "runner must not be called when method_name is deprecated"
+        )
+
+    with pytest.raises(ValueError, match="deprecated in Slice 1.5"):
+        analyze(
+            snapshot_group_id,
+            embedding_group_id,
+            method_name=deprecated_name,
+            run_key=f"rk_deprecated_{deprecated_name}",
+            request_group_id=request_group_id,
+            db=db,
+            artifact_dir=artifact_dir,
+            parameters={
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+            },
+            method_runner=_stub_runner,
+        )

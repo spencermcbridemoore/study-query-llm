@@ -30,6 +30,7 @@ from study_query_llm.pipeline.clustering import (
     get_algorithm_spec,
     is_registry_v1_clustering_method,
     load_rule_set,
+    raise_if_deprecated_clustering_method,
     resolve_clustering_resolution,
     resolve_algorithm_runner,
     validate_identity_contract,
@@ -926,6 +927,10 @@ def analyze(
     method_runner: AnalysisRunner | None = None,
 ) -> StageResult:
     """Execute analysis stage with snapshot input and optional embedding batch."""
+    # Deprecation guard fires before runner resolution so explicit method_runner
+    # injection cannot bypass it. Slice 1.5 retired the v1-envelope sweep
+    # methods; legacy names are loud-rejected here with migration guidance.
+    raise_if_deprecated_clustering_method(method_name)
     resolved_params = dict(parameters or {})
     clustering_resolution_pre = None
     clustering_rule_set = None

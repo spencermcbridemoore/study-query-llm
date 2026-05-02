@@ -41,9 +41,12 @@ ARTIFACT_TYPE_SUBQUERY_SPEC = "dataset_subquery_spec"
 ARTIFACT_TYPE_ANALYSIS_RESULT_JSON = "analysis_result_json"
 ARTIFACT_TYPE_ANALYSIS_RESULT_BLOB = "analysis_result_blob"
 REPRESENTATION_FULL = "full"
-REPRESENTATION_LABEL_CENTROID = "label_centroid"
-REPRESENTATION_LEGACY_INTENT_MEAN = "intent_mean"
 REPRESENTATION_SNAPSHOT_ONLY = "snapshot_only"
+_SLICE16_RETIRED_REPRESENTATION_MSG = (
+    "representation_type 'label_centroid' (alias 'intent_mean') was retired in Slice 1.6. "
+    "Per-label aggregate vectors are not a meaningful clustering input; centroid math is "
+    "legitimate only as an algorithm's internal mechanism."
+)
 ANALYSIS_INPUT_MODE_SNAPSHOT_ONLY = "snapshot_only"
 
 _ANALYZE_LOCK_GUARD = threading.Lock()
@@ -255,48 +258,23 @@ def _load_dataframe_slice(
     dataframe_group_id: int,
     positions: list[int],
     artifact_dir: str,
-) -> tuple[list[str], list[int | None], list[str | None]]:
+) -> list[str]:
     parquet_uri = find_dataframe_parquet_uri(session, int(dataframe_group_id))
     artifact_service = ArtifactService(artifact_dir=artifact_dir)
     payload = artifact_service.storage.read_from_uri(parquet_uri)
     table = pq.read_table(
         io.BytesIO(payload),
-        columns=["position", "text", "label", "label_name"],
+        columns=["position", "text"],
     )
     frame = table.to_pandas().set_index("position", drop=False)
     texts: list[str] = []
-    labels: list[int | None] = []
-    label_names: list[str | None] = []
-
-    def _as_optional_int(value: Any) -> int | None:
-        if value is None:
-            return None
-        try:
-            if bool(np.isnan(value)):
-                return None
-        except Exception:
-            pass
-        return int(value)
-
-    def _as_optional_str(value: Any) -> str | None:
-        if value is None:
-            return None
-        try:
-            if bool(np.isnan(value)):
-                return None
-        except Exception:
-            pass
-        text = str(value).strip()
-        return text or None
 
     for pos in positions:
         if pos not in frame.index:
             raise ValueError(f"snapshot resolved position {pos} not found in dataframe")
         row = frame.loc[pos]
         texts.append(str(row["text"]))
-        labels.append(_as_optional_int(row["label"]))
-        label_names.append(_as_optional_str(row["label_name"]))
-    return texts, labels, label_names
+    return texts
 
 
 def _resolve_representation(parameters: Mapping[str, Any]) -> str:
@@ -305,8 +283,8 @@ def _resolve_representation(parameters: Mapping[str, Any]) -> str:
         or parameters.get("embedding_representation")
         or REPRESENTATION_FULL
     ).strip().lower()
-    if raw == REPRESENTATION_LEGACY_INTENT_MEAN:
-        return REPRESENTATION_LABEL_CENTROID
+    if raw in ("label_centroid", "intent_mean"):
+        raise ValueError(_SLICE16_RETIRED_REPRESENTATION_MSG)
     return raw
 
 
@@ -314,40 +292,11 @@ def _derive_representation_view(
     *,
     base_embeddings: np.ndarray,
     texts: list[str],
-    labels: list[int | None],
-    label_names: list[str | None],
     representation: str,
 ) -> tuple[np.ndarray, list[str], dict[str, Any]]:
     if representation == REPRESENTATION_FULL:
         return base_embeddings, texts, {}
-    if representation != REPRESENTATION_LABEL_CENTROID:
-        raise ValueError(f"unsupported analysis representation {representation!r}")
-
-    buckets: dict[int, list[np.ndarray]] = {}
-    name_by_label: dict[int, str] = {}
-    for idx, label in enumerate(labels):
-        if label is None:
-            continue
-        label_int = int(label)
-        buckets.setdefault(label_int, []).append(base_embeddings[idx])
-        if label_int not in name_by_label:
-            preferred = label_names[idx]
-            name_by_label[label_int] = preferred or f"label_{label_int}"
-    if not buckets:
-        raise ValueError("label_centroid representation requires at least one labeled row")
-    ordered_labels = sorted(buckets.keys())
-    pooled = np.vstack(
-        [
-            np.mean(np.asarray(buckets[label], dtype=np.float64), axis=0)
-            for label in ordered_labels
-        ]
-    )
-    pooled_texts = [name_by_label[label] for label in ordered_labels]
-    meta = {
-        "pooled_labels": ordered_labels,
-        "pooled_label_count": len(ordered_labels),
-    }
-    return pooled, pooled_texts, meta
+    raise ValueError(f"unsupported analysis representation {representation!r}")
 
 
 def _resolve_request_group_id(
@@ -421,7 +370,7 @@ def _resolve_snapshot_dataframe_and_slice(
     *,
     snapshot_group_id: int,
     artifact_dir: str,
-) -> tuple[int, list[int], list[str], list[int | None], list[str | None]]:
+) -> tuple[int, list[int], list[str]]:
     """Resolve snapshot dataframe identity + ordered text slice payload."""
     snapshot_group = _require_group(
         session,
@@ -448,13 +397,13 @@ def _resolve_snapshot_dataframe_and_slice(
     if not resolved_positions:
         raise ValueError("snapshot resolved_index is empty; nothing to analyze")
 
-    texts, labels, label_names = _load_dataframe_slice(
+    texts = _load_dataframe_slice(
         session,
         dataframe_group_id=int(snapshot_df_id),
         positions=resolved_positions,
         artifact_dir=artifact_dir,
     )
-    return snapshot_df_id, resolved_positions, texts, labels, label_names
+    return snapshot_df_id, resolved_positions, texts
 
 
 def _prepare_analyze_input_bundle(
@@ -473,8 +422,6 @@ def _prepare_analyze_input_bundle(
         snapshot_df_id,
         resolved_positions,
         texts,
-        labels,
-        label_names,
     ) = _resolve_snapshot_dataframe_and_slice(
         session,
         snapshot_group_id=int(snapshot_group_id),
@@ -525,8 +472,6 @@ def _prepare_analyze_input_bundle(
         analysis_embeddings, analysis_texts, representation_meta = _derive_representation_view(
             base_embeddings=sliced_embeddings,
             texts=texts,
-            labels=labels,
-            label_names=label_names,
             representation=representation,
         )
 

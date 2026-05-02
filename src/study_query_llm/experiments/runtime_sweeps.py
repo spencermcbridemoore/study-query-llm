@@ -22,7 +22,7 @@ from study_query_llm.algorithms import SweepConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import SweepRunClaim
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.db.write_intent import WriteIntent
+from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.experiments.datasets import load_dbpedia_full, load_yahoo_answers_full
 from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 from study_query_llm.experiments.sweep_io import get_output_dir, save_single_sweep_result as save_pkl
@@ -306,7 +306,7 @@ async def main_bigrun_300_sweep(
     db = DatabaseConnectionV2(
         database_url,
         enable_pgvector=use_pgvector,
-        write_intent=WriteIntent.CANONICAL,
+        write_intent=default_write_intent_for_connection(database_url),
     )
     db.init_db()
 

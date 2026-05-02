@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-01
+Last reviewed: 2026-05-02
 
 ## Configuration
 
@@ -68,6 +68,7 @@ Notes:
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)
 - Pipeline analyze surface:
   - `study_query_llm.pipeline.analyze.analyze(snapshot_group_id, embedding_batch_group_id=None, ..., method_name=..., run_key=...)`
+  - Embedding-backed runs normalize `parameters["representation_type"]` / `parameters["embedding_representation"]` (either key may be set). Accepted clustering input is **`full` only**. Values `label_centroid` and legacy alias `intent_mean` raise `ValueError` with migration text beginning `representation_type 'label_centroid' (alias 'intent_mean') was retired in Slice 1.6.` Snapshot-only methods continue to overwrite user-supplied representation keys to `snapshot_only` for fingerprint/provenance mode identity (unchanged).
   - Built-in clustering runner dispatch is registry-driven via `study_query_llm.pipeline.clustering.registry`. Registered methods after Slice 1.5: `agglomerative+fixed-k`, `hdbscan+fixed`, `kmeans+normalize+pca+sweep`, `gmm+normalize+pca+sweep`. All ship with `provenance_envelope="none"`; the `clustering_v1` envelope literal was retired.
   - The legacy method names (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`) are pinned in `DEPRECATED_LEGACY_CLUSTERING_METHODS` and rejected at the top of `analyze()` by `raise_if_deprecated_clustering_method`. The guard fires *before* runner resolution so explicit `method_runner` injection cannot bypass it; historical `provenanced_runs` rows under those names remain queryable.
   - BANK77 strategy CLI tokens (`hdbscan`, `kmeans_silhouette_kneedle`, `gmm_bic_argmin`) are kept stable for operator continuity by attaching them as `strategy_aliases` on the bundled-grammar specs in the registry; the alias index resolves them to the bundled-grammar method names.

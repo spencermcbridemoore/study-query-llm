@@ -25,10 +25,6 @@ from study_query_llm.pipeline.embed import embed
 from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
 
-EMBEDDING_REPRESENTATION_ALIAS: dict[str, str] = {
-    "intent_mean": "label_centroid",
-}
-
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -67,12 +63,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--embedding-representation",
         type=str,
-        choices=["full", "label_centroid", "intent_mean"],
+        choices=["full"],
         default="full",
-        help=(
-            "Representation used by stage 5 analysis (embed stage is always full). "
-            "Legacy alias: intent_mean -> label_centroid."
-        ),
+        help="Representation used by stage 5 analyze (embedding stage is always full).",
     )
     parser.add_argument(
         "--embedding-chunk-size",
@@ -201,22 +194,6 @@ def _safe_token(value: str) -> str:
     return cleaned.strip("_") or "value"
 
 
-def _canonical_embedding_representation(value: str) -> str:
-    normalized = str(value).strip().lower()
-    return EMBEDDING_REPRESENTATION_ALIAS.get(normalized, normalized)
-
-
-def _validate_embedding_representation_for_analysis(args: argparse.Namespace) -> None:
-    strategy = str(args.analysis_strategy).strip().lower()
-    representation = _canonical_embedding_representation(args.embedding_representation)
-    if strategy != "default" and resolve_registry_method_name(strategy) and representation != "full":
-        raise ValueError(
-            "--analysis-strategy for canonical clustering runners requires "
-            "--embedding-representation full; "
-            f"got {representation!r}"
-        )
-
-
 def _resolve_analysis_method_name(args: argparse.Namespace) -> str:
     method_name = str(args.analysis_method).strip()
     strategy = str(args.analysis_strategy).strip().lower()
@@ -228,11 +205,11 @@ def _resolve_analysis_method_name(args: argparse.Namespace) -> str:
 
 
 def _build_analysis_parameters(args: argparse.Namespace) -> dict[str, object]:
-    canonical_representation = _canonical_embedding_representation(args.embedding_representation)
+    representation = str(args.embedding_representation).strip().lower()
     params: dict[str, object] = {
         "dataset_slug": str(args.dataset_slug),
-        "representation_type": canonical_representation,
-        "embedding_representation": canonical_representation,
+        "representation_type": representation,
+        "embedding_representation": representation,
         "embedding_deployment": str(args.embedding_deployment),
         "embedding_provider": str(args.embedding_provider),
         "analysis_strategy": str(args.analysis_strategy),
@@ -310,7 +287,6 @@ def _resolve_method_runner(args: argparse.Namespace):
     if spec is None:
         return None
     return spec.runner
-    return None
 
 
 def main() -> None:
@@ -323,11 +299,6 @@ def main() -> None:
     if acquire_spec is None:
         known = ", ".join(sorted(ACQUIRE_REGISTRY.keys()))
         raise ValueError(f"Unknown dataset slug {args.dataset_slug!r}. Known: {known}")
-    args.embedding_representation = _canonical_embedding_representation(
-        str(args.embedding_representation)
-    )
-    _validate_embedding_representation_for_analysis(args)
-
     db = DatabaseConnectionV2(
         database_url,
         enable_pgvector=False,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -89,18 +90,28 @@ def test_explicit_method_name_is_not_overridden_by_strategy() -> None:
     assert _BANK77_MODULE._resolve_analysis_method_name(args) == "my_custom_method"
 
 
-def test_non_full_representation_rejected_for_registry_mapped_strategy() -> None:
-    args = _args(
-        analysis_strategy="hdbscan",
-        embedding_representation="label_centroid",
+@pytest.mark.parametrize("bad_rep", ["label_centroid", "intent_mean"])
+def test_parse_args_rejects_retired_embedding_representations(
+    bad_rep: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_bank77_pipeline", "--embedding-representation", bad_rep],
     )
-    with pytest.raises(ValueError, match="requires .* full"):
-        _BANK77_MODULE._validate_embedding_representation_for_analysis(args)
+    with pytest.raises(SystemExit):
+        _BANK77_MODULE._parse_args()
 
 
-def test_non_full_representation_allowed_for_default_strategy() -> None:
+def test_build_analysis_parameters_uses_full_representation() -> None:
     args = _args(
+        dataset_slug="banking77",
+        embedding_deployment="text-embedding-3-large",
+        embedding_provider="azure",
         analysis_strategy="default",
-        embedding_representation="label_centroid",
+        embedding_representation="full",
     )
-    _BANK77_MODULE._validate_embedding_representation_for_analysis(args)
+    params = _BANK77_MODULE._build_analysis_parameters(args)
+    assert params["representation_type"] == "full"
+    assert params["embedding_representation"] == "full"

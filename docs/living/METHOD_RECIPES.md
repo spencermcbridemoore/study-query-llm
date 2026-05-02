@@ -48,6 +48,11 @@ This document is the v0 spec.
   non-cluster-label artifacts (for example transformed embeddings) do not
   belong in this subsystem.
 
+### Embedding representation (Slice 1.6)
+
+- Bundled registry specs declare `allowed_representations=frozenset({"full"})` only.
+- The analyze stage rejects `representation_type` / `embedding_representation` values `label_centroid` and `intent_mean` with a migration `ValueError` (per-label aggregate vectors are not used as clustering inputs).
+
 ### Naming grammar (locked)
 
 - **Pattern:** `<algorithm>+<preprocessing-chain-tokens>+<fit-mode>`.

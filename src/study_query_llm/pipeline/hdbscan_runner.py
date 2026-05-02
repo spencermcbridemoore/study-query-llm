@@ -109,8 +109,6 @@ def run_hdbscan_analysis(
         or params.get("representation_type")
         or "full"
     ).strip().lower()
-    if resolved_representation == "intent_mean":
-        resolved_representation = "label_centroid"
     if resolved_representation != "full":
         raise ValueError(
             "HDBSCAN analysis requires embedding representation 'full' "

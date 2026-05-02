@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import Group, GroupLink
 from study_query_llm.db.raw_call_repository import RawCallRepository
-from study_query_llm.db.write_intent import WriteIntent
+from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.services.provenance_service import (
     GROUP_TYPE_CLUSTERING_RUN,
     GROUP_TYPE_DATASET_SNAPSHOT,
@@ -112,7 +112,7 @@ def main() -> None:
     db = DatabaseConnectionV2(
         db_url,
         enable_pgvector=False,
-        write_intent=WriteIntent.CANONICAL,
+        write_intent=default_write_intent_for_connection(db_url),
     )
     db.init_db()
 

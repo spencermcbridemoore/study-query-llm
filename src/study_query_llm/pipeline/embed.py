@@ -23,7 +23,6 @@ from study_query_llm.services.embeddings.helpers import fetch_embeddings_async
 
 ARTIFACT_TYPE_EMBEDDING_MATRIX = "embedding_matrix"
 REPRESENTATION_FULL = "full"
-LEGACY_NON_FULL_ALIASES = {"intent_mean": "label_centroid"}
 
 EmbeddingFetcher = Callable[..., np.ndarray]
 
@@ -126,11 +125,11 @@ def _default_embedding_fetcher(
 
 
 def _normalize_representation(representation: str) -> str:
-    canonical = LEGACY_NON_FULL_ALIASES.get(str(representation).strip().lower(), str(representation).strip().lower())
+    canonical = str(representation).strip().lower()
     if canonical != REPRESENTATION_FULL:
         raise ValueError(
-            "embed only supports representation='full'. Non-full representations "
-            "must be derived in analyze from snapshot-sliced full vectors."
+            "embed only supports representation='full'. "
+            "Analyze likewise accepts representation_type='full' only (Slice 1.6)."
         )
     return canonical
 

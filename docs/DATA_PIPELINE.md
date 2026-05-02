@@ -2,7 +2,7 @@
 
 Status: living
 Owner: documentation-maintainers + pipeline maintainers  
-Last reviewed: 2026-04-30
+Last reviewed: 2026-05-02
 
 This document defines the implemented, canonical five-stage dataset pipeline and its persistence/idempotency contracts.
 
@@ -22,7 +22,7 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 ## Locked Contract Decisions
 
 - `embed` persists and reuses only dataframe-level `full` matrices.
-- Non-`full` representations (for example `label_centroid`) are derived inside `analyze` from snapshot-sliced full vectors.
+- Slice 1.6: embedding-backed `analyze` accepts `representation_type` / `embedding_representation` **`full` only** for clustering input; `label_centroid` and legacy alias `intent_mean` raise a migration error early in `analyze` (per-label aggregate vectors are not clustering inputs).
 - `analyze` always takes `snapshot_group_id`; `embedding_batch_group_id` is method-contract-driven (`MethodDefinition.input_schema.required_inputs.embedding_batch`) and defaults to required when unspecified.
 - Snapshot sampling is deterministic-only: `sample_n`/`sample_fraction` require `sampling_seed`.
 - Analysis fingerprinting includes explicit representation identity and `input_snapshot_group_id`.
@@ -133,7 +133,7 @@ The script supports:
 
 - deterministic `run_key` generation for HDBSCAN-style analyses,
 - idempotent stage reuse controls (`--force-*` flags),
-- analysis representation selection at analyze-time (`full` / `label_centroid` alias `intent_mean`).
+- analyze-time representation for embedding-backed clustering is **`full` only** (`scripts/run_bank77_pipeline.py` `--embedding-representation` accepts only `full`).
 
 ## Operator Cutover Runbook (Destructive)
 
@@ -156,5 +156,5 @@ The pipeline contract is healthy when:
 - snapshots over same dataframe reuse the same dataframe-level `full` embedding matrix identity;
 - embedding-backed analyze shows aligned text/vector slicing for resolved indices;
 - snapshot-only analyze can run without embedding dependencies when method contract declares `required_inputs.embedding_batch=false`;
-- representation changes yield distinct analysis fingerprints/runs;
+- contracted analyze configuration differences (including representation identity when applicable) yield distinct analysis fingerprints/runs;
 - persistence lint and tests pass.

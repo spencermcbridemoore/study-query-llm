@@ -457,34 +457,31 @@ def test_analyze_fingerprint_includes_snapshot_and_representation(
         method_runner=runner,
         parameters={"representation_type": "full"},
     )
-    centroid = analyze(
-        snapshot_group_id,
-        embedding_group_id,
-        method_name="fp_method",
-        run_key="rk_fp_centroid",
-        request_group_id=request_group_id,
-        db=db,
-        artifact_dir=artifact_dir,
-        method_runner=runner,
-        parameters={"representation_type": "label_centroid"},
-    )
-    assert full.group_id != centroid.group_id
+    with pytest.raises(ValueError, match=r"retired in Slice 1\.6"):
+        analyze(
+            snapshot_group_id,
+            embedding_group_id,
+            method_name="fp_method",
+            run_key="rk_fp_centroid",
+            request_group_id=request_group_id,
+            db=db,
+            artifact_dir=artifact_dir,
+            method_runner=runner,
+            parameters={"representation_type": "label_centroid"},
+        )
 
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         run_full = repo.get_provenanced_run_by_id(int(full.run_id or 0))
-        run_centroid = repo.get_provenanced_run_by_id(int(centroid.run_id or 0))
         assert run_full is not None
-        assert run_centroid is not None
         assert run_full.input_snapshot_group_id == snapshot_group_id
-        assert run_centroid.input_snapshot_group_id == snapshot_group_id
-        assert run_full.fingerprint_hash != run_centroid.fingerprint_hash
 
 
-def test_analyze_hdbscan_runner_rejects_non_full_representation(
+def test_analyze_hdbscan_migration_error_fires_before_runner_non_full_check(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """Slice 1.6: label_centroid raises in analyze before HDBSCAN runner sees embeddings."""
     monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
     db, _database_url = _db(tmp_path)
     artifact_dir = str((tmp_path / "artifacts").resolve())
@@ -494,7 +491,7 @@ def test_analyze_hdbscan_runner_rejects_non_full_representation(
     )
     request_group_id = _create_request_group(db, "request_hdbscan_non_full")
 
-    with pytest.raises(ValueError, match="requires embedding representation 'full'"):
+    with pytest.raises(ValueError, match=r"retired in Slice 1\.6"):
         analyze(
             snapshot_group_id,
             embedding_group_id,
@@ -513,6 +510,46 @@ def test_analyze_hdbscan_runner_rejects_non_full_representation(
                 "hdbscan_min_samples": 1,
             },
         )
+
+
+def test_analyze_label_centroid_loud_rejects_with_migration_message(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_slice16_migration")
+
+    def runner(**kwargs):
+        embeddings = np.asarray(kwargs["embeddings"], dtype=np.float64)
+        return {
+            "scalar_results": {"row_count": float(embeddings.shape[0])},
+            "structured_results": {"ok": True},
+            "artifacts": {"out.json": b"{}"},
+            "result_ref": "out.json",
+        }
+
+    for rep in ("label_centroid", "intent_mean"):
+        with pytest.raises(ValueError) as excinfo:
+            analyze(
+                snapshot_group_id,
+                embedding_group_id,
+                method_name="slice16_migration",
+                run_key=f"rk_{rep}",
+                request_group_id=request_group_id,
+                db=db,
+                artifact_dir=artifact_dir,
+                method_runner=runner,
+                parameters={"representation_type": rep},
+            )
+        msg = str(excinfo.value)
+        assert "label_centroid" in msg
+        assert "retired in Slice 1.6" in msg
 
 
 def test_hdbscan_runner_uses_deterministic_defaults_and_echoes_parameters(

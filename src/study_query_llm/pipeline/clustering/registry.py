@@ -31,7 +31,6 @@ ProvenanceEnvelope = Literal["none"]
 AlgorithmRunner = Callable[..., object]
 
 REPRESENTATION_FULL = "full"
-REPRESENTATION_LABEL_CENTROID = "label_centroid"
 
 
 @dataclass(frozen=True)
@@ -112,9 +111,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         fit_mode="single_fit",
         requires_embeddings=True,
         supports_snapshot_only=False,
-        allowed_representations=frozenset(
-            {REPRESENTATION_FULL, REPRESENTATION_LABEL_CENTROID}
-        ),
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
         provenance_envelope="none",
         base_algorithm="agglomerative",
         default_determinism_class="deterministic",
@@ -138,9 +135,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         fit_mode="sweep_select",
         requires_embeddings=True,
         supports_snapshot_only=False,
-        allowed_representations=frozenset(
-            {REPRESENTATION_FULL, REPRESENTATION_LABEL_CENTROID}
-        ),
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
         provenance_envelope="none",
         base_algorithm="kmeans",
         default_determinism_class="pseudo_deterministic",
@@ -152,9 +147,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         fit_mode="sweep_select",
         requires_embeddings=True,
         supports_snapshot_only=False,
-        allowed_representations=frozenset(
-            {REPRESENTATION_FULL, REPRESENTATION_LABEL_CENTROID}
-        ),
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
         provenance_envelope="none",
         base_algorithm="gmm",
         default_determinism_class="pseudo_deterministic",
@@ -208,7 +201,6 @@ __all__ = [
     "FitMode",
     "ProvenanceEnvelope",
     "REPRESENTATION_FULL",
-    "REPRESENTATION_LABEL_CENTROID",
     "get_algorithm_spec",
     "iter_algorithm_specs",
     "normalize_method_name",

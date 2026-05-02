@@ -38,6 +38,19 @@ def test_registry_unknown_method_returns_none() -> None:
 
 
 def test_registry_alias_resolution_maps_to_canonical_method_name() -> None:
-    assert resolve_registry_method_name("kmeans_silhouette_kneedle") == "kmeans+silhouette+kneedle"
-    assert resolve_registry_method_name("gmm_bic_argmin") == "gmm+bic+argmin"
-    assert resolve_registry_method_name("hdbscan") == "hdbscan"
+    """Slice 1.5: strategy aliases now resolve to the bundled-grammar method
+    names (the aliases moved off the legacy v1-envelope specs and onto the new
+    specs in PR2 so BANK77 strategy tokens continue to work but dispatch to
+    the envelope=none paths).
+
+    The literal token "hdbscan" is BOTH the canonical name of the legacy spec
+    AND a strategy alias on the new "hdbscan+fixed" spec. The alias index is
+    built by iteration order: legacy is inserted first, then the new spec
+    overwrites the alias entry, so resolve_registry_method_name("hdbscan")
+    returns "hdbscan+fixed". Direct registry lookup via get_algorithm_spec
+    still returns the legacy spec when called with "hdbscan" (until PR3
+    removes the legacy spec entirely).
+    """
+    assert resolve_registry_method_name("kmeans_silhouette_kneedle") == "kmeans+normalize+pca+sweep"
+    assert resolve_registry_method_name("gmm_bic_argmin") == "gmm+normalize+pca+sweep"
+    assert resolve_registry_method_name("hdbscan") == "hdbscan+fixed"

@@ -63,7 +63,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         provenance_envelope="clustering_v1",
         base_algorithm="hdbscan",
         default_determinism_class="non_deterministic",
-        strategy_aliases=("hdbscan",),
+        strategy_aliases=(),
     ),
     "kmeans+silhouette+kneedle": AlgorithmSpec(
         method_name="kmeans+silhouette+kneedle",
@@ -77,7 +77,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         provenance_envelope="clustering_v1",
         base_algorithm="kmeans",
         default_determinism_class="pseudo_deterministic",
-        strategy_aliases=("kmeans_silhouette_kneedle",),
+        strategy_aliases=(),
     ),
     "gmm+bic+argmin": AlgorithmSpec(
         method_name="gmm+bic+argmin",
@@ -91,7 +91,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         provenance_envelope="clustering_v1",
         base_algorithm="gmm",
         default_determinism_class="pseudo_deterministic",
-        strategy_aliases=("gmm_bic_argmin",),
+        strategy_aliases=(),
     ),
     "agglomerative+fixed-k": AlgorithmSpec(
         method_name="agglomerative+fixed-k",
@@ -109,8 +109,9 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
     ),
     # Slice 1.5 bundled-grammar replacements for the legacy v1-envelope methods.
     # Algorithmic identity is preserved (same runner functions); only the method
-    # name and provenance envelope change. Strategy aliases stay on the legacy
-    # specs in PR1 and move here in PR2 once the dispatcher branch is wired.
+    # name and provenance envelope change. Strategy aliases live here so the
+    # BANK77 strategy CLI maps the existing strategy tokens (kept stable for
+    # operator continuity) to the new bundled-grammar method names.
     "hdbscan+fixed": AlgorithmSpec(
         method_name="hdbscan+fixed",
         runner=run_hdbscan_analysis,
@@ -121,7 +122,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         provenance_envelope="none",
         base_algorithm="hdbscan",
         default_determinism_class="non_deterministic",
-        strategy_aliases=(),
+        strategy_aliases=("hdbscan",),
     ),
     "kmeans+normalize+pca+sweep": AlgorithmSpec(
         method_name="kmeans+normalize+pca+sweep",
@@ -135,7 +136,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         provenance_envelope="none",
         base_algorithm="kmeans",
         default_determinism_class="pseudo_deterministic",
-        strategy_aliases=(),
+        strategy_aliases=("kmeans_silhouette_kneedle",),
     ),
     "gmm+normalize+pca+sweep": AlgorithmSpec(
         method_name="gmm+normalize+pca+sweep",
@@ -149,7 +150,7 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         provenance_envelope="none",
         base_algorithm="gmm",
         default_determinism_class="pseudo_deterministic",
-        strategy_aliases=(),
+        strategy_aliases=("gmm_bic_argmin",),
     ),
 }
 

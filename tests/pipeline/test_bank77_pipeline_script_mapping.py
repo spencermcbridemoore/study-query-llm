@@ -34,15 +34,21 @@ def test_default_strategy_keeps_default_method_name_and_runner_none() -> None:
 @pytest.mark.parametrize(
     ("strategy", "expected_method"),
     [
-        ("hdbscan", "hdbscan"),
-        ("kmeans_silhouette_kneedle", "kmeans+silhouette+kneedle"),
-        ("gmm_bic_argmin", "gmm+bic+argmin"),
+        ("hdbscan", "hdbscan+fixed"),
+        ("kmeans_silhouette_kneedle", "kmeans+normalize+pca+sweep"),
+        ("gmm_bic_argmin", "gmm+normalize+pca+sweep"),
     ],
 )
 def test_strategy_maps_to_expected_registry_method_name(
     strategy: str,
     expected_method: str,
 ) -> None:
+    """Slice 1.5: BANK77 strategy tokens map to bundled-grammar method names.
+
+    Strategy tokens are kept stable for operator continuity; they now resolve
+    to the new envelope=none specs registered in PR1 with strategy_aliases
+    moved off the legacy v1-envelope specs and onto the new specs in PR2.
+    """
     args = _args(
         analysis_method="bank77_structural_summary",
         analysis_strategy=strategy,
@@ -53,15 +59,18 @@ def test_strategy_maps_to_expected_registry_method_name(
 @pytest.mark.parametrize(
     ("strategy", "expected_method"),
     [
-        ("hdbscan", "hdbscan"),
-        ("kmeans_silhouette_kneedle", "kmeans+silhouette+kneedle"),
-        ("gmm_bic_argmin", "gmm+bic+argmin"),
+        ("hdbscan", "hdbscan+fixed"),
+        ("kmeans_silhouette_kneedle", "kmeans+normalize+pca+sweep"),
+        ("gmm_bic_argmin", "gmm+normalize+pca+sweep"),
     ],
 )
 def test_strategy_maps_to_registry_runner(
     strategy: str,
     expected_method: str,
 ) -> None:
+    """Slice 1.5: the bundled-grammar specs reuse the legacy runner functions
+    (algorithmic identity preserved); the strategy resolves to the same runner
+    function reference as the legacy spec for the corresponding name pair."""
     args = _args(
         analysis_method="bank77_structural_summary",
         analysis_strategy=strategy,

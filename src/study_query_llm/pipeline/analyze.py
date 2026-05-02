@@ -723,6 +723,103 @@ def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+_BUNDLED_SWEEP_METHODS: frozenset[str] = frozenset(
+    {
+        "kmeans+normalize+pca+sweep",
+        "gmm+normalize+pca+sweep",
+    }
+)
+
+
+def _synthesize_v1_pipeline_for_bundled_method(
+    *,
+    method_name: str,
+    parameters: Mapping[str, Any],
+    embedding_dim: int,
+    n_samples: int,
+) -> dict[str, Any]:
+    """Build the synthetic ``_v1_pipeline_{resolved,effective}`` payload for the
+    bundled-grammar replacements of the legacy v1-envelope sweep methods.
+
+    The kmeans/gmm runner contract requires ``parameters["_v1_pipeline_resolved"]``
+    and ``parameters["_v1_pipeline_effective"]`` to drive preprocessing
+    (``preprocess_for_effective_pipeline``) and to source terminal-stage knobs
+    (``_terminal_params``). Slice 1.5 keeps that contract intact and synthesizes
+    the payload here instead of going through the YAML resolver, so the runner
+    code stays unchanged across the legacy and bundled name pairs.
+
+    Algorithmic identity with the legacy v1 path is preserved per the locked
+    decision (Option A): PCA is always part of the effective pipeline (the
+    legacy ``<=200``-dim PCA-skip branch is dropped), and ``pca_n_components``
+    becomes a method parameter. Override parity with the legacy resolver:
+
+    * ``pca_n_components``: defaults to 100; clamped at runtime to
+      ``max(1, min(value, embedding_dim, max(1, n_samples - 1)))``.
+    * ``kmeans_distance_metric``: defaults to ``"cosine"`` because ``normalize``
+      is always upstream (matching the legacy ``has_normalize`` branch).
+    * ``gmm_covariance_type``: defaults to ``"full"`` (matching the legacy
+      ``setdefault("covariance_type", "full")``).
+    """
+    normalized = str(method_name).strip().lower()
+    if normalized not in _BUNDLED_SWEEP_METHODS:
+        raise ValueError(
+            "_synthesize_v1_pipeline_for_bundled_method does not support "
+            f"{method_name!r}; supported methods: {sorted(_BUNDLED_SWEEP_METHODS)}"
+        )
+
+    base_algorithm = (
+        "kmeans" if normalized == "kmeans+normalize+pca+sweep" else "gmm"
+    )
+    pca_requested = int(parameters.get("pca_n_components") or 100)
+    pca_clamped = max(
+        1,
+        min(pca_requested, int(embedding_dim), max(1, int(n_samples) - 1)),
+    )
+    pipeline_resolved: list[dict[str, Any]] = [
+        {"stage": "embed", "params": {}},
+        {"stage": "normalize", "params": {}},
+        {
+            "stage": "pca",
+            "params": {"random_state": 42, "n_components": int(pca_clamped)},
+        },
+    ]
+
+    if base_algorithm == "kmeans":
+        terminal_params: dict[str, Any] = {
+            "n_init": 20,
+            "max_iter": 300,
+            "init": "k-means++",
+            "random_state": 42,
+            "distance_metric": str(
+                parameters.get("kmeans_distance_metric") or "cosine"
+            ),
+            "k_range": [2, 3, 5, 8, 10, 15, 20, 30, 50],
+            "selection_metric": "silhouette",
+            "selection_rule": "kneedle",
+        }
+    else:
+        terminal_params = {
+            "reg_covar": 1.0e-6,
+            "n_init": 10,
+            "max_iter": 200,
+            "random_state": 42,
+            "covariance_type": str(
+                parameters.get("gmm_covariance_type") or "full"
+            ),
+            "k_range": [2, 3, 5, 8, 10, 15, 20, 30, 50],
+            "selection_metric": "bic",
+            "selection_rule": "argmin",
+        }
+
+    pipeline_resolved.append({"stage": base_algorithm, "params": terminal_params})
+    pipeline_effective = ["embed", "normalize", "pca", base_algorithm]
+
+    return {
+        "pipeline_resolved": pipeline_resolved,
+        "pipeline_effective": pipeline_effective,
+    }
+
+
 def _attach_v1_clustering_provenance(
     *,
     resolution_pre: Any,
@@ -832,6 +929,7 @@ def analyze(
     resolved_params = dict(parameters or {})
     clustering_resolution_pre = None
     clustering_rule_set = None
+    synthetic_v1_pipeline: dict[str, Any] | None = None
     db_conn, _owned_db = _resolve_db(
         db=db,
         database_url=database_url,
@@ -877,6 +975,7 @@ def analyze(
         stage_group_description = str(input_bundle.stage_group_description)
         stage_depends_on_ids = [int(group_id) for group_id in input_bundle.stage_depends_on_ids]
         algorithm_spec = get_algorithm_spec(method_name)
+        normalized_method = str(method_name).strip().lower()
         if is_registry_v1_clustering_method(method_name):
             if analysis_embeddings is None:
                 raise ValueError(
@@ -897,15 +996,35 @@ def analyze(
                 allowed_context_keys=clustering_rule_set.context_keys,
             )
             if resolved_params.get("determinism_class") is None:
-                normalized_method = str(method_name).strip().lower()
                 if normalized_method in {"kmeans+silhouette+kneedle", "gmm+bic+argmin"}:
                     resolved_params["determinism_class"] = "pseudo_deterministic"
                 else:
                     resolved_params["determinism_class"] = "non_deterministic"
+        elif normalized_method in _BUNDLED_SWEEP_METHODS:
+            # Slice 1.5 bundled-grammar dispatch path. Algorithmic identity
+            # with the legacy v1-envelope sweep methods is preserved by
+            # synthesizing the same _v1_pipeline_{resolved,effective} payload
+            # the YAML resolver would have produced; the kmeans/gmm runner
+            # code is reused as-is. The payload is consumed by the
+            # artifact-write callback below; _attach_v1_clustering_provenance
+            # is intentionally NOT invoked because envelope is "none".
+            if analysis_embeddings is None:
+                raise ValueError(
+                    f"bundled clustering method {method_name!r} requires embedding input"
+                )
+            synthetic_v1_pipeline = _synthesize_v1_pipeline_for_bundled_method(
+                method_name=normalized_method,
+                parameters=resolved_params,
+                embedding_dim=int(analysis_embeddings.shape[1]),
+                n_samples=int(analysis_embeddings.shape[0]),
+            )
+            if resolved_params.get("determinism_class") is None:
+                resolved_params["determinism_class"] = "pseudo_deterministic"
         elif (
             resolved_params.get("determinism_class") is None
             and algorithm_spec is not None
-            and str(algorithm_spec.method_name) == "agglomerative+fixed-k"
+            and str(algorithm_spec.method_name)
+            in {"agglomerative+fixed-k", "hdbscan+fixed"}
         ):
             resolved_params["determinism_class"] = str(
                 algorithm_spec.default_determinism_class
@@ -986,7 +1105,7 @@ def analyze(
                 raise RuntimeError("ArtifactService requires repository for analyze stage writes")
             runner_parameters = dict(resolved_params)
             if clustering_resolution_pre is not None:
-                # Runner input contract (v1 envelope only): runners may consume
+                # Runner input contract (v1 envelope path): runners may consume
                 # these private keys to replay the pre-resolved effective
                 # pipeline and rule-input context without recomputing it.
                 runner_parameters["_v1_pipeline_resolved"] = [
@@ -996,6 +1115,17 @@ def analyze(
                     clustering_resolution_pre.pipeline_effective
                 )
                 runner_parameters["_v1_rule_inputs"] = dict(clustering_resolution_pre.rule_inputs)
+            elif synthetic_v1_pipeline is not None:
+                # Bundled-grammar dispatch path: inject the synthesized payload
+                # so the kmeans/gmm runner contract sees the same shape as the
+                # legacy v1-envelope path. _v1_rule_inputs is intentionally
+                # omitted (the runner never reads it).
+                runner_parameters["_v1_pipeline_resolved"] = [
+                    dict(entry) for entry in synthetic_v1_pipeline["pipeline_resolved"]
+                ]
+                runner_parameters["_v1_pipeline_effective"] = list(
+                    synthetic_v1_pipeline["pipeline_effective"]
+                )
             raw_payload = runner(
                 method_name=method_name,
                 input_group_id=int(analysis_input_group_id),

@@ -17,6 +17,9 @@ def test_registry_contains_expected_builtin_methods() -> None:
         "hdbscan",
         "kmeans+silhouette+kneedle",
         "gmm+bic+argmin",
+        "hdbscan+fixed",
+        "kmeans+normalize+pca+sweep",
+        "gmm+normalize+pca+sweep",
     }
 
 

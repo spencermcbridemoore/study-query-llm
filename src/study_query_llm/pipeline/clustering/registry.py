@@ -107,6 +107,50 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         default_determinism_class="deterministic",
         strategy_aliases=(),
     ),
+    # Slice 1.5 bundled-grammar replacements for the legacy v1-envelope methods.
+    # Algorithmic identity is preserved (same runner functions); only the method
+    # name and provenance envelope change. Strategy aliases stay on the legacy
+    # specs in PR1 and move here in PR2 once the dispatcher branch is wired.
+    "hdbscan+fixed": AlgorithmSpec(
+        method_name="hdbscan+fixed",
+        runner=run_hdbscan_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="hdbscan",
+        default_determinism_class="non_deterministic",
+        strategy_aliases=(),
+    ),
+    "kmeans+normalize+pca+sweep": AlgorithmSpec(
+        method_name="kmeans+normalize+pca+sweep",
+        runner=run_kmeans_silhouette_kneedle_analysis,
+        fit_mode="sweep_select",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset(
+            {REPRESENTATION_FULL, REPRESENTATION_LABEL_CENTROID}
+        ),
+        provenance_envelope="none",
+        base_algorithm="kmeans",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+    ),
+    "gmm+normalize+pca+sweep": AlgorithmSpec(
+        method_name="gmm+normalize+pca+sweep",
+        runner=run_gmm_bic_argmin_analysis,
+        fit_mode="sweep_select",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset(
+            {REPRESENTATION_FULL, REPRESENTATION_LABEL_CENTROID}
+        ),
+        provenance_envelope="none",
+        base_algorithm="gmm",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+    ),
 }
 
 

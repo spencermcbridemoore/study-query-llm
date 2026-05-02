@@ -20,7 +20,7 @@ from sqlalchemy import text as sa_text
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import ProvenancedRun
-from study_query_llm.db.write_intent import WriteIntent
+from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 
 setup_logging()
@@ -36,10 +36,16 @@ def normalize_provenanced_run_kinds(*, strict_constraint: bool = True) -> int:
         logger.error("DATABASE_URL environment variable not set")
         return 1
 
+    # Derive write intent from the URL so the same migration works against
+    # canonical Postgres (CANONICAL), local Postgres clones (READ_MIRROR),
+    # and SQLite-file fixtures used by tests (SANDBOX). Matches the pattern
+    # established by the post-guardrail sibling migrations
+    # (add_call_artifacts_blob_uri_check, drop_embedding_vectors,
+    # add_raw_calls_uri_sentinel_index).
     db = DatabaseConnectionV2(
         database_url,
         enable_pgvector=True,
-        write_intent=WriteIntent.CANONICAL,
+        write_intent=default_write_intent_for_connection(database_url),
     )
     db.init_db()
 

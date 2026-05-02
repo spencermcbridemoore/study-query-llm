@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-01
+Last reviewed: 2026-05-02
 
 ## Purpose
 
@@ -33,6 +33,69 @@ This document is the v0 spec.
   canonical run fingerprint via `config_json["recipe_hash"]`, which
   `canonical_run_fingerprint` already hashes (minus scheduling-only keys).
   The fingerprint JSON schema itself is unchanged.
+
+## Bundled Clustering Subsystem
+
+### Subsystem definition
+
+- **Name:** Bundled Clustering Subsystem.
+- **Module home:** `src/study_query_llm/pipeline/clustering/`.
+- **Registry:** `src/study_query_llm/pipeline/clustering/registry.py`
+  registers only bundled clustering methods.
+- **Output schema contract:** every bundled method emits
+  `cluster_labels`, `summary_metrics`, and `recipe_hash`. Methods producing
+  non-cluster-label artifacts (for example transformed embeddings) do not
+  belong in this subsystem.
+
+### Naming grammar (locked)
+
+- **Pattern:** `<algorithm>+<preprocessing-chain-tokens>+<fit-mode>`.
+- **Algorithm tokens (closed set):** `kmeans`, `spherical-kmeans`, `gmm`,
+  `hdbscan`, `agglomerative`, `dbscan`, `spectral`, `leiden`, `louvain`.
+- **Preprocessing tokens (closed set):** `normalize`, `pca`, `umap`,
+  `umap-graph`, `knn-graph`, `similarity`. Tokens are listed
+  left-to-right in the method name in the order they are applied to
+  embeddings. Adding a new preprocessing token requires an explicit grammar
+  update in this document.
+- **Fit-mode tokens:** `fixed-k`, `fixed-eps`, `fixed`, `sweep`.
+  `sweep` is reserved for existing sweep-select methods.
+- **Special annotation:** `+approx+` annotates the approximation variant
+  of `spherical-kmeans` (`normalize -> sklearn KMeans`); the true
+  spherical objective is deferred and out of scope.
+- **Hyperparameters are parameters, not name tokens.** `k`, `eps`,
+  `min_samples`, `linkage`, `init`, `random_state`, `n_components`,
+  `n_neighbors`, `resolution`, `affinity`, and `metric` are passed as
+  method parameters.
+
+### Examples
+
+- `kmeans+fixed-k`
+- `kmeans+normalize+pca+fixed-k`
+- `spherical-kmeans+approx+fixed-k`
+- `hdbscan+normalize+pca+fixed`
+- `leiden+knn-graph+fixed`
+
+### Bundled-vs-composed coexistence rule
+
+- Bundled methods are permanently self-contained.
+- Bundled methods MUST NOT consume output from a future standalone
+  DR-as-method (transform) run.
+- Bundled methods are not transitional; they continue to exist after
+  DR-as-method ships.
+
+### Forward reservation for transforms
+
+- `src/study_query_llm/pipeline/transforms/` is reserved for future
+  DR-as-method work (transformed-embedding artifacts as first-class outputs).
+- No files exist there in this rollout.
+- Adding code to `src/study_query_llm/pipeline/transforms/` requires a
+  separate explicitly scoped design and is out of scope for the current
+  bundled clustering rollout.
+
+The grammar above is forward-looking for methods registered after this
+subsystem definition. Existing names `hdbscan`, `kmeans+silhouette+kneedle`,
+and `gmm+bic+argmin` predate this grammar and are not renamed in this slice;
+`agglomerative+fixed-k` already conforms.
 
 ## Storage
 
@@ -164,5 +227,8 @@ config for fingerprint identity, without v1 resolver/envelope fields.
 - [SCHEDULING_PROVENANCE_BOUNDARY.md](SCHEDULING_PROVENANCE_BOUNDARY.md) —
   the recipe does not drive scheduling; stages are not orchestration jobs
   in this phase.
+- Bundled Clustering Subsystem — see
+  [Bundled Clustering Subsystem](#bundled-clustering-subsystem); module home
+  `src/study_query_llm/pipeline/clustering/`.
 - `docs/STANDING_ORDERS.md` — Method Definitions and Provenance section
   cites this recipe rule.

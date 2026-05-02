@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-04-24
+Last reviewed: 2026-05-02
 
 This document establishes consistent practices for all development work on this project, ensuring that multiple developers (human or AI) maintain consistency in planning, implementation, and documentation.
 
@@ -150,6 +150,7 @@ For the binding doc-to-code map and the restricted list (history, deprecated, pl
 - **Parameters convention (soft)**: When a method has `parameters_schema`, include `result_json["parameters"]` with the run parameters (e.g., job payload) when recording results. This links parameters to results for queryability; validation is optional.
 - **Canonical run fingerprint**: Every `provenanced_runs` row should carry a `fingerprint_json`/`fingerprint_hash` that captures algorithmic identity (method, config, input, data regime) and excludes scheduling mechanics. Use `canonical_run_fingerprint()` from `provenanced_run_service.py`; compare runs with `fingerprints_match()`.
 - **Composite method recipes**: Composite/pipeline methods SHOULD populate `method_definitions.recipe_json` referencing registered component methods by `(name, version)`, and the run-level `recipe_hash = canonical_recipe_hash(recipe)` MUST be included in `config_json` so the canonical run fingerprint absorbs the recipe identity. Canonical recipes and helpers live in `src/study_query_llm/algorithms/recipes.py`; the v0 shape is documented in [METHOD_RECIPES.md](living/METHOD_RECIPES.md).
+- **Bundled clustering subsystem**: New bundled clustering methods follow the registered naming grammar in [METHOD_RECIPES.md](living/METHOD_RECIPES.md) § Bundled Clustering Subsystem. Methods that produce non-cluster-label artifacts (for example transforms or embeddings) do not belong in `src/study_query_llm/pipeline/clustering/`. The `src/study_query_llm/pipeline/transforms/` namespace is reserved for future DR-as-method work and must not receive implementations as part of bundled clustering rollouts.
 - **No auto-registration on write paths (forward-looking)**: Method definitions SHOULD be registered ahead of time via family scripts (`scripts/register_clustering_methods.py`, `scripts/register_text_classification_methods.py`) so that all writers go through `MethodService.get_method(name, version)` and never lazily create rows with placeholder schemas. The auto-register fallback in `SweepRequestService.record_analysis_result` is retained for backward compatibility but is considered a transitional path; new write paths must not introduce new auto-registration sites. A canonical-config builder spot exists at `src/study_query_llm/algorithms/canonical_configs.py` for future shared `config_json` normalization (currently unused; adopting per method changes that method's fingerprint going forward).
 - **Scheduling vs provenance boundary**: See [SCHEDULING_PROVENANCE_BOUNDARY.md](living/SCHEDULING_PROVENANCE_BOUNDARY.md) for the rule on when a sub-stage should be an orchestration job vs an in-job provenance event.
 - **Exceptions**: One-off or throwaway analyses that are not reused or versioned need not be registered; legacy or existing code that uses `metadata_json.algorithm` (or similar) can remain until migrated.

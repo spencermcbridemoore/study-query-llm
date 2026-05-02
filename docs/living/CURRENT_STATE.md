@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-01
+Last reviewed: 2026-05-02
 
 ## Scope
 
@@ -65,6 +65,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - BANK77 execution is scriptable via `scripts/run_bank77_pipeline.py` using the five-stage flow; idempotent reuse is verified in pipeline tests and full-suite regression runs.
 - Clustering provenance v1 is active in `analyze`: YAML-backed rule resolution (`config/rules/clustering/rules-v1.0.0.yaml`), pre-run and post-selection hard-constraint validation, and final effective-pipeline identity fields (`operation_type`, `operation_version`, `rule_set_version`, `rule_set_hash`, `rule_inputs`, `pipeline_declared`, `pipeline_resolved`, `pipeline_effective`, `pipeline_effective_hash`, `recipe_hash`) are persisted in analysis execution config + `structured_results.clustering_summary`.
 - Clustering analyze dispatch is registry-driven (`src/study_query_llm/pipeline/clustering/registry.py`) for built-ins: `hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`, and `agglomerative+fixed-k`.
+- The Bundled Clustering Subsystem is formally defined: `src/study_query_llm/pipeline/clustering/` is the permanent home for bundled clustering methods only (output schema contract: `cluster_labels`, `summary_metrics`, `recipe_hash`), with locked naming grammar and a forward reservation for `src/study_query_llm/pipeline/transforms/` (no files created there in this rollout). See [METHOD_RECIPES.md](METHOD_RECIPES.md) § Bundled Clustering Subsystem. Claim only; no runtime behavior change.
 - Canonical clustering runners are active for `hdbscan`, `kmeans+silhouette+kneedle`, and `gmm+bic+argmin` (with selection evidence + selection-curve artifacts for sweep-and-select methods). HDBSCAN now writes `operation_type=cluster_pipeline` in summary payloads while preserving legacy reader shape compatibility.
 - `agglomerative+fixed-k` is active as a single-fit clustering runner outside the v1 YAML resolver/validator envelope (`provenance_envelope=none`) with deterministic fixed-`k` behavior.
 - BANK77 script strategy mapping now resolves through registry aliases (`hdbscan`, `kmeans_silhouette_kneedle`, `gmm_bic_argmin`) instead of a script-local hardcoded runner map.

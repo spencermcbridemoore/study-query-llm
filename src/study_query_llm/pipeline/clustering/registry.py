@@ -3,6 +3,8 @@
 The registry is the runtime dispatch seam for method-name -> runner resolution.
 It intentionally starts small (built-ins only) so dispatch can move from
 hardcoded string maps without introducing behavior drift.
+See docs/living/METHOD_RECIPES.md (Bundled Clustering Subsystem) for the
+subsystem definition, naming grammar, and output-schema contract.
 
 Caveat:
     Registry metadata is not yet validated against persisted

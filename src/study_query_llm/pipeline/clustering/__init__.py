@@ -1,4 +1,8 @@
-"""Clustering provenance + canonical runner helpers for analyze stage."""
+"""Clustering provenance + canonical runner helpers for analyze stage.
+
+See docs/living/METHOD_RECIPES.md (Bundled Clustering Subsystem) for the
+subsystem definition, naming grammar, and output-schema contract.
+"""
 
 from __future__ import annotations
 

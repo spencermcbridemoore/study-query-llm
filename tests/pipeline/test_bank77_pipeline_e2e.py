@@ -304,4 +304,9 @@ def test_bank77_pipeline_hdbscan_phase1_analyze(
         )
         assert summary_result is not None
         summary_value = dict(summary_result.result_json or {}).get("value") or {}
-        assert summary_value.get("operation_type") == "cluster_pipeline"
+        # Slice 1.5: hdbscan runner no longer emits operation_type. Assert
+        # positive structural fields instead so the e2e test still gates the
+        # runner output shape without depending on the retired envelope tag.
+        assert int(summary_value.get("n_samples") or 0) > 0
+        assert int(summary_value.get("cluster_count") or 0) >= 0
+        assert "cluster_sizes" in summary_value

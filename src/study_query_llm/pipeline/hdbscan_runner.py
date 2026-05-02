@@ -269,7 +269,6 @@ def run_hdbscan_analysis(
     }
 
     summary: dict[str, Any] = {
-        "operation_type": "cluster_pipeline",
         "method_name": str(method_name),
         "input_group_id": int(input_group_id),
         "input_group_type": str(input_group_type),
@@ -288,7 +287,6 @@ def run_hdbscan_analysis(
         "parameters": used_parameters,
     }
     labels_payload: dict[str, Any] = {
-        "operation_type": "cluster_pipeline",
         "cluster_labels": labels.tolist(),
         "noise_label": -1,
         "cluster_ids": cluster_ids,

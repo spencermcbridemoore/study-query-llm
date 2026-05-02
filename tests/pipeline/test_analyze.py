@@ -551,7 +551,6 @@ def test_hdbscan_runner_uses_deterministic_defaults_and_echoes_parameters(
     used = (
         result["structured_results"]["hdbscan_summary"]["parameters"]  # type: ignore[index]
     )
-    assert result["structured_results"]["hdbscan_summary"]["operation_type"] == "cluster_pipeline"  # type: ignore[index]
     assert used["hdbscan_metric"] == "cosine"
     assert used["hdbscan_random_state"] == 0
     assert used["hdbscan_core_dist_n_jobs"] == 1
@@ -598,7 +597,6 @@ def test_hdbscan_runner_allows_explicit_policy_overrides(monkeypatch) -> None:
     used = (
         result["structured_results"]["hdbscan_summary"]["parameters"]  # type: ignore[index]
     )
-    assert result["structured_results"]["hdbscan_summary"]["operation_type"] == "cluster_pipeline"  # type: ignore[index]
     assert used["hdbscan_metric"] == "euclidean"
     assert used["hdbscan_random_state"] == 7
     assert used["hdbscan_core_dist_n_jobs"] == 2

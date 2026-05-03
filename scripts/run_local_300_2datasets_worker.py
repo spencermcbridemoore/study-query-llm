@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Thin wrapper for sweep worker; re-exports symbols for supervisors and benchmarks."""
+"""Tier-B compatibility wrapper for sweep worker entrypoints.
+
+Real orchestration/worker runtime logic lives in Tier A under
+`src/study_query_llm/experiments/sweep_worker_main.py`.
+Do not add new orchestration logic here; keep this file as a thin delegate.
+See `AGENTS.md` for scripts-vs-src boundary rules and terminology.
+"""
 
 from __future__ import annotations
 

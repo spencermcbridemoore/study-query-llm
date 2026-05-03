@@ -46,6 +46,34 @@ explicit user instruction. Do not duplicate or override that table here.
 - Never commit `.env` files or API keys (see `SECURITY.md`)
 - Use `encoding='utf-8'` for all Python file operations (Windows compatibility)
 
+## Code Layer Boundary
+- **Tier A (canonical runtime):** `src/study_query_llm/**` orchestration, pipeline, and runtime logic.
+- **Tier B (compatibility surfaces):** root `scripts/run_*.py` wrappers and stable operator entrypoints.
+- **Tier C (historical):** `scripts/history/**` and archived experiment artifacts.
+- **Tier D (policy mirror):** `docs/living/**` and runbooks that document current behavior.
+
+Boundary rule:
+- New orchestration/job logic belongs in Tier A (`src/study_query_llm/services/jobs/` or `src/study_query_llm/experiments/`), not in root `scripts/`.
+- Root `scripts/` are wrappers/utilities unless explicitly documented otherwise.
+
+Worked counter-example:
+- Adding a new clustering method belongs under `src/study_query_llm/pipeline/clustering/` (registry + runner + tests). Do **not** add a new `scripts/run_*.py` orchestration surface for it.
+
+Terminology lock:
+- `orchestration_job`: schedulable control-plane unit.
+- `worker_runtime`: process that claims/executes orchestration jobs.
+- `standalone_mode`: orchestration profile, not a separate legacy control plane.
+- `summarizer`: current persisted clustering axis key (`"None"` is first-class).
+- `compatibility_wrapper`: command/path-stable delegate into Tier A runtime.
+
+Known transitional violations (phase-2 backlog; document honestly):
+- `src/study_query_llm/services/jobs/runtime_supervisors.py` still spawns `scripts/run_local_300_2datasets_worker.py` (see current spawn callsites around lines 259 and 503).
+- `src/study_query_llm/experiments/sweep_worker_main.py` still carries campaign-era naming defaults (`OUT_PREFIX = "local_300_2d_14e_4s"` and fixed dataset defaults).
+- `src/study_query_llm/providers/managers/ollama.py` still contains sweep-era `LLM_SUMMARIZERS` wording/examples.
+
+Transitional-violation review cadence:
+- For every boundary-related PR, include a "Transitional Violations Review" checkpoint: each listed item must be either fixed and removed or explicitly re-accepted with date/reason.
+
 ## Before Starting Work
 1. Check `docs/living/CURRENT_STATE.md` for current capability/status
 2. Review `docs/living/ARCHITECTURE_CURRENT.md` for current design patterns

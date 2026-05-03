@@ -15,6 +15,12 @@ Quick pointers:
 - Pipeline contract: `docs/DATA_PIPELINE.md`
 - Parity evidence: `docs/review/DOC_PARITY_LEDGER.md`
 
+## Scripts vs src Boundary (summary)
+- Treat `src/study_query_llm/**` as canonical runtime for orchestration/pipeline behavior.
+- Treat root `scripts/run_*.py` as compatibility/operator surfaces unless explicitly scoped otherwise.
+- For new clustering methods or job logic, add runtime code in `src/` and keep wrappers thin.
+- Full tier vocabulary, worked counter-example, and transitional-violation cadence live in `AGENTS.md`.
+
 ## Code Style & Conventions
 - Use `encoding='utf-8'` in all Python file operations (open, read_text, write_text) for Windows compatibility
 - Follow bottom-up, incremental development approach

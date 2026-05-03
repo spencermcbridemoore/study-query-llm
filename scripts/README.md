@@ -2,6 +2,33 @@
 
 This directory contains standalone script entrypoints and script helper modules.
 
+## What Belongs Here
+
+This directory is a compatibility/operations surface, not the canonical runtime layer.
+
+- **Tier B (`scripts/`)**: command-stable wrappers, one-off ops utilities, and lane-governed historical tooling.
+- **Tier A (`src/study_query_llm/`)**: canonical orchestration, pipeline stages, job runners, and execution logic.
+
+Decision tree:
+- If code changes job orchestration, worker behavior, sweep planning, or pipeline-stage method behavior -> put it in `src/study_query_llm/**`.
+- If code is a standalone operator utility (DB checks, migration helper, inventory probe) or a wrapper entrypoint -> `scripts/**` is appropriate.
+
+Concrete examples:
+- `scripts/register_clustering_methods.py` belongs here (operator/setup utility).
+- `src/study_query_llm/pipeline/clustering/kmeans_fixed_k_runner.py` belongs in Tier A runtime (method execution logic).
+
+Worked counter-example:
+- Adding a new clustering method should update `src/study_query_llm/pipeline/clustering/` (registry + runner + tests), not introduce a new `scripts/run_*.py` orchestration entrypoint.
+
+Point-of-temptation rationale:
+- Keep boundary guidance in wrapper docstrings and this README so humans/agents see the rule where edits are likely, instead of relying on distant architecture docs only.
+
+Known transitional note:
+- `scripts/run_local_300_2datasets_worker.py` is currently a thin compatibility wrapper; canonical worker logic lives in `src/study_query_llm/experiments/sweep_worker_main.py`.
+
+Source-of-truth guidance:
+- See `AGENTS.md` for full tier vocabulary, terminology lock, and transitional-violation review cadence.
+
 ## Framework Lanes
 
 This repository applies the same governance framework used by docs:

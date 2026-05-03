@@ -103,12 +103,15 @@ class AnalysisRunPayload(BaseModel):
     request_id: int
     sweep_type: str
     analysis_key: str
+    run_key: str = ""
     scope: str = "run"
     method_name: str = ""
     method_version: str = "1.0"
     required: bool = False
     blocking: bool = False
     result_keys: list[str] = Field(default_factory=list)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    force: bool = False
 
     model_config = {"extra": "allow"}
 

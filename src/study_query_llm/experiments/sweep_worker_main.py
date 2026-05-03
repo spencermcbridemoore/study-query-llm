@@ -23,13 +23,14 @@ from datasets import load_dataset
 from study_query_llm.algorithms import SweepConfig, run_sweep
 from study_query_llm.analysis.mcq_analyze_request import run_mcq_analyses_for_request
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
-from study_query_llm.db.models_v2 import SweepRunClaim
+from study_query_llm.db.models_v2 import Group, GroupLink, SweepRunClaim
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.db.write_intent import WriteIntent
 from study_query_llm.experiments.ingestion import ingest_result_to_db
 from study_query_llm.experiments.sweep_mcq_standalone import execute_mcq_standalone_run
 from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_CLUSTERING, SWEEP_TYPE_MCQ
 from study_query_llm.experiments.sweep_io import get_output_dir, serialize_sweep_result
+from study_query_llm.pipeline.analyze import analyze as run_pipeline_analyze
 from study_query_llm.providers.managed_tei_embedding_provider import ManagedTEIEmbeddingProvider
 from study_query_llm.providers.managers.local_docker_tei import LocalDockerTEIManager
 from study_query_llm.providers.factory import ProviderFactory
@@ -39,6 +40,7 @@ from study_query_llm.services.embeddings import (
     EmbeddingService,
 )
 from study_query_llm.services.artifact_service import ArtifactService
+from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.services.jobs import (
@@ -580,20 +582,151 @@ def run_one_analysis_run_job(
         return (job_id, None, "missing_request_group_id")
     if not analysis_key:
         return (job_id, None, "missing_analysis_key")
-    if sweep_type and sweep_type != SWEEP_TYPE_MCQ:
+    if sweep_type in {"", SWEEP_TYPE_MCQ}:
+        try:
+            report = run_mcq_analyses_for_request(
+                db,
+                request_id,
+                dry_run=False,
+                analysis_keys=[analysis_key],
+                orchestration_job_id=job_id,
+                skip_completed=True,
+            )
+        except Exception as exc:
+            return (job_id, None, str(exc)[:1000])
+        return (job_id, f"analysis:{analysis_key}:{len(report.get('recorded') or [])}", None)
+    if sweep_type != SWEEP_TYPE_CLUSTERING:
         return (job_id, None, f"unsupported_analysis_sweep_type:{sweep_type}")
+
+    run_key = str(
+        payload.get("run_key")
+        or job_snapshot.get("base_run_key")
+        or job_snapshot.get("job_key")
+        or ""
+    ).strip()
+    if not run_key:
+        return (job_id, None, "missing_run_key")
+
+    method_name = str(payload.get("method_name") or analysis_key).strip()
+    method_version = str(payload.get("method_version") or "1.0").strip() or "1.0"
+    raw_parameters = payload.get("parameters")
+    parameters = dict(raw_parameters) if isinstance(raw_parameters, dict) else {}
+    force = bool(payload.get("force", False))
+
     try:
-        report = run_mcq_analyses_for_request(
-            db,
-            request_id,
-            dry_run=False,
-            analysis_keys=[analysis_key],
-            orchestration_job_id=job_id,
-            skip_completed=True,
+        (
+            snapshot_group_id,
+            embedding_batch_group_id,
+        ) = _resolve_clustering_analysis_inputs(
+            db=db,
+            request_id=request_id,
+            run_key=run_key,
+            method_name=method_name,
+            method_version=method_version,
+        )
+        run_pipeline_analyze(
+            snapshot_group_id=int(snapshot_group_id),
+            embedding_batch_group_id=(
+                int(embedding_batch_group_id)
+                if embedding_batch_group_id is not None
+                else None
+            ),
+            method_name=method_name,
+            run_key=run_key,
+            request_group_id=int(request_id),
+            method_version=method_version,
+            parameters=parameters,
+            force=force,
+            db=db,
+            write_intent=WriteIntent.CANONICAL,
         )
     except Exception as exc:
         return (job_id, None, str(exc)[:1000])
-    return (job_id, f"analysis:{analysis_key}:{len(report.get('recorded') or [])}", None)
+
+    return (job_id, f"analysis:{analysis_key}:{run_key}", None)
+
+
+def _normalize_snapshot_ids_from_run_metadata(run_meta: Dict[str, Any]) -> List[int]:
+    raw_snapshot_ids = run_meta.get("dataset_snapshot_ids")
+    if raw_snapshot_ids is None and run_meta.get("dataset_snapshot_id") is not None:
+        raw_snapshot_ids = [run_meta.get("dataset_snapshot_id")]
+    if raw_snapshot_ids is None:
+        return []
+    if not isinstance(raw_snapshot_ids, (list, tuple, set)):
+        raw_snapshot_ids = [raw_snapshot_ids]
+    out: List[int] = []
+    for raw_snapshot_id in raw_snapshot_ids:
+        try:
+            out.append(int(raw_snapshot_id))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
+def _resolve_clustering_analysis_inputs(
+    *,
+    db: DatabaseConnectionV2,
+    request_id: int,
+    run_key: str,
+    method_name: str,
+    method_version: str,
+) -> Tuple[int, Optional[int]]:
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_service = MethodService(repo)
+        requirements = method_service.resolve_method_input_requirements(
+            name=method_name,
+            version=method_version,
+        )
+        link_rows = (
+            session.query(GroupLink)
+            .filter(
+                GroupLink.parent_group_id == int(request_id),
+                GroupLink.link_type == "contains",
+            )
+            .all()
+        )
+        candidate_run_ids = [int(link.child_group_id) for link in link_rows]
+        if not candidate_run_ids:
+            raise ValueError(
+                f"no_delivered_runs_for_request:{int(request_id)}:{run_key}"
+            )
+        candidate_runs = (
+            session.query(Group)
+            .filter(
+                Group.id.in_(candidate_run_ids),
+                Group.group_type == "clustering_run",
+            )
+            .all()
+        )
+        matching_runs = [
+            run
+            for run in candidate_runs
+            if str((run.metadata_json or {}).get("run_key") or "").strip() == run_key
+        ]
+        if not matching_runs:
+            raise ValueError(
+                f"missing_clustering_run_for_request:{int(request_id)}:{run_key}"
+            )
+        matching_runs.sort(key=lambda run: int(run.id))
+        run_meta = dict(matching_runs[0].metadata_json or {})
+        snapshot_ids = _normalize_snapshot_ids_from_run_metadata(run_meta)
+        if not snapshot_ids:
+            raise ValueError(
+                f"missing_dataset_snapshot_ids:{int(request_id)}:{run_key}"
+            )
+        raw_embedding_batch_group_id = run_meta.get("embedding_batch_group_id")
+        embedding_batch_group_id: Optional[int] = None
+        if raw_embedding_batch_group_id is not None:
+            try:
+                embedding_batch_group_id = int(raw_embedding_batch_group_id)
+            except (TypeError, ValueError):
+                embedding_batch_group_id = None
+        if requirements.embedding_batch and embedding_batch_group_id is None:
+            raise ValueError(
+                f"missing_embedding_batch_group_id:{int(request_id)}:{run_key}"
+            )
+        return int(snapshot_ids[0]), embedding_batch_group_id
 
 
 def worker_main_queued(
@@ -726,7 +859,7 @@ def _run_sharded_worker_loop(
     job_types = (
         ["mcq_run", "analysis_run"]
         if sweep_type == SWEEP_TYPE_MCQ
-        else ["run_k_try", "reduce_k", "finalize_run"]
+        else ["run_k_try", "reduce_k", "finalize_run", "analysis_run"]
     )
     filter_payload = (
         {"embedding_engine": embedding_engine}

@@ -73,6 +73,10 @@ class SweepRequestService:
         self.provenanced_runs = ProvenancedRunService(repository)
         self.use_derived_analysis_status = _env_flag("SQ_DERIVE_ANALYSIS_STATUS_READ", True)
         self.enable_analysis_jobs = _env_flag("SQ_ENABLE_ANALYSIS_JOBS", True)
+        self.enable_clustering_analysis_jobs = _env_flag(
+            "SQ_ENABLE_CLUSTERING_ANALYSIS_JOBS",
+            False,
+        )
         self.record_analysis_parity = _env_flag("SQ_RECORD_ANALYSIS_PARITY", True)
         self.unified_execution_writes = _env_flag("SQ_UNIFIED_EXECUTION_WRITES", True)
 
@@ -137,6 +141,53 @@ class SweepRequestService:
         # Preserve order while deduplicating.
         deduped = list(dict.fromkeys(keys))
         return deduped
+
+    @staticmethod
+    def _normalize_run_key_to_lineage_inputs(
+        raw_mapping: Any,
+        *,
+        allowed_run_keys: Optional[set[str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        if not isinstance(raw_mapping, dict):
+            return {}
+        out: Dict[str, Dict[str, Any]] = {}
+        for raw_run_key, raw_payload in raw_mapping.items():
+            run_key = str(raw_run_key or "").strip()
+            if not run_key:
+                continue
+            if allowed_run_keys is not None and run_key not in allowed_run_keys:
+                continue
+            if not isinstance(raw_payload, dict):
+                continue
+            raw_snapshot_ids = raw_payload.get("dataset_snapshot_ids")
+            if raw_snapshot_ids is None and raw_payload.get("dataset_snapshot_id") is not None:
+                raw_snapshot_ids = [raw_payload.get("dataset_snapshot_id")]
+            if raw_snapshot_ids is not None and not isinstance(raw_snapshot_ids, (list, tuple, set)):
+                raw_snapshot_ids = [raw_snapshot_ids]
+            snapshot_ids: List[int] = []
+            for raw_snapshot_id in list(raw_snapshot_ids or []):
+                try:
+                    snapshot_ids.append(int(raw_snapshot_id))
+                except (TypeError, ValueError):
+                    continue
+            snapshot_ids = sorted(set(snapshot_ids))
+
+            embedding_batch_group_id: Optional[int] = None
+            raw_embedding_group_id = raw_payload.get("embedding_batch_group_id")
+            if raw_embedding_group_id is not None:
+                try:
+                    embedding_batch_group_id = int(raw_embedding_group_id)
+                except (TypeError, ValueError):
+                    embedding_batch_group_id = None
+
+            normalized_payload: Dict[str, Any] = {}
+            if snapshot_ids:
+                normalized_payload["dataset_snapshot_ids"] = snapshot_ids
+            if embedding_batch_group_id is not None:
+                normalized_payload["embedding_batch_group_id"] = embedding_batch_group_id
+            if normalized_payload:
+                out[run_key] = normalized_payload
+        return out
 
     def _analysis_job_state_by_key(
         self,
@@ -402,6 +453,15 @@ class SweepRequestService:
         execution_mode = str(metadata_json.get("execution_mode") or "standalone").lower()
         shard_config = dict(metadata_json.get("shard_config") or {})
         analysis_catalog = list(metadata_json.get("analysis_catalog") or [])
+        lineage_inputs_by_run_key = self._normalize_run_key_to_lineage_inputs(
+            metadata_json.get("run_key_to_lineage_inputs"),
+            allowed_run_keys=set(run_key_to_target.keys()),
+        )
+        enable_analysis_jobs = bool(self.enable_analysis_jobs)
+        if sweep_type == SWEEP_TYPE_CLUSTERING:
+            enable_analysis_jobs = enable_analysis_jobs and bool(
+                self.enable_clustering_analysis_jobs
+            )
         graph_spec = adapter.build_orchestration_graph(
             request_group_id=request_group_id,
             run_key_to_target=run_key_to_target,
@@ -409,7 +469,8 @@ class SweepRequestService:
             execution_mode=execution_mode,
             shard_config=shard_config,
             analysis_catalog=analysis_catalog,
-            enable_analysis_jobs=self.enable_analysis_jobs,
+            enable_analysis_jobs=enable_analysis_jobs,
+            lineage_inputs_by_run_key=lineage_inputs_by_run_key,
         )
         planned = self._enqueue_graph_spec(
             request_group_id=request_group_id,
@@ -458,6 +519,7 @@ class SweepRequestService:
         execution_mode: str = "standalone",
         shard_config: Optional[Dict[str, Any]] = None,
         determinism_class: str = "non_deterministic",
+        run_key_to_lineage_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> int:
         """
         Create a typed sweep request group and optionally pre-plan orchestration jobs.
@@ -471,6 +533,10 @@ class SweepRequestService:
         )
         expected_run_keys = [spec.run_key for spec in target_specs]
         run_key_to_target = {spec.run_key: dict(spec.target) for spec in target_specs}
+        normalized_lineage_inputs = self._normalize_run_key_to_lineage_inputs(
+            run_key_to_lineage_inputs,
+            allowed_run_keys=set(expected_run_keys),
+        )
         analysis_defs = adapter.analysis_definitions()
         analysis_catalog = [
             {
@@ -522,6 +588,8 @@ class SweepRequestService:
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
         }
+        if normalized_lineage_inputs:
+            metadata_json["run_key_to_lineage_inputs"] = normalized_lineage_inputs
         if adapter.sweep_type == SWEEP_TYPE_MCQ:
             metadata_json["orchestration_graph_kind"] = MCQ_ORCHESTRATION_GRAPH_KIND
             metadata_json["historical_backfill_policy"] = MCQ_HISTORICAL_BACKFILL_POLICY

@@ -50,7 +50,7 @@ Notes:
 ## Sweep / Execution APIs
 
 - Request lifecycle:
-  - `SweepRequestService.create_request(...)`
+  - `SweepRequestService.create_request(..., run_key_to_lineage_inputs=None)` (optional per-run lineage mapping keyed by `run_key`; used for clustering analysis late-bind inputs)
   - `SweepRequestService.get_request(request_id)` (returns execution-derived analysis state by default)
   - `SweepRequestService.list_requests(status=..., include_fulfilled=..., sweep_type=...)`
   - Planner behavior: adapter-driven orchestration graph specs are enqueued via `SweepRequestService.ensure_orchestration_jobs(...)` (no planner-type hardcoding in service branches).
@@ -60,7 +60,7 @@ Notes:
   - `ProvenancedRunService.record_analysis_execution(...)`
   - Canonical writes use `run_kind=execution`; semantic role is in `metadata_json.execution_role`.
 - Orchestration job types:
-  - Clustering: `run_k_try`, `reduce_k`, `finalize_run`
+  - Clustering: `run_k_try`, `reduce_k`, `finalize_run` (+ optional flag-gated `analysis_run` jobs for clustering analysis catalog entries)
   - MCQ: `mcq_run`, `analysis_run`
   - Terminology: these are `orchestration_job` types (control-plane units), not `algorithm_iteration` records; `run_k_try` represents a seeded `restart_try` work unit.
   - Job runner dispatch is registry-based (`create_job_runner(...)`); reduce/finalize runners consume the typed reducer plugin seam (`ReducerPlugin` / `ClusteringReducerPlugin`).
@@ -96,6 +96,7 @@ Execution-model feature flags:
 
 - `SQ_DERIVE_ANALYSIS_STATUS_READ` (default: enabled)
 - `SQ_ENABLE_ANALYSIS_JOBS` (default: enabled)
+- `SQ_ENABLE_CLUSTERING_ANALYSIS_JOBS` (default: disabled)
 - `SQ_RECORD_ANALYSIS_PARITY` (default: enabled)
 - `SQ_UNIFIED_EXECUTION_WRITES` (default: enabled)
 

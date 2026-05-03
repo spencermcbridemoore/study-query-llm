@@ -76,6 +76,7 @@ Current control-plane seam details:
 - Sweep-type adapters emit deterministic orchestration graph specs (job nodes + dependency edges).
 - Job execution dispatch is registry-based by `job_type`.
 - Reducer/finalizer execution is routed through a typed reducer plugin seam.
+- Clustering analysis jobs (when enabled) follow a producer/consumer contract: planner emits per-run `analysis_run` nodes keyed by request+run+analysis and dependent on per-run `finalize_run`; workers late-bind analyze inputs from persisted `clustering_run` lineage metadata (`dataset_snapshot_ids`, `embedding_batch_group_id`) by `(request_id, run_key)`.
 
 Neither the DB schema nor the fingerprint encode or depend on the job graph
 shape (fan-out, batch size, number of jobs).

@@ -250,6 +250,66 @@ def test_clustering_adapter_graph_spec_matches_legacy_shape():
     assert _node_signatures(graph) == expected
 
 
+def test_clustering_adapter_analysis_jobs_require_lineage_inputs():
+    adapter = get_sweep_type_adapter(SWEEP_TYPE_CLUSTERING)
+    run_key_to_target = {
+        "dbpedia_engine_a_None_50_50runs": {
+            "dataset": "dbpedia",
+            "embedding_engine": "engine/a",
+            "summarizer": "None",
+        },
+        "yahoo_engine_a_None_50_50runs": {
+            "dataset": "yahoo",
+            "embedding_engine": "engine/a",
+            "summarizer": "None",
+        },
+    }
+    analysis_catalog = [
+        {
+            "analysis_key": "bundle_eval",
+            "scope": "run",
+            "method_name": "kmeans+normalize+pca+sweep",
+            "method_version": "1.0",
+            "required": False,
+            "blocking": False,
+            "result_keys": [],
+            "parameters": {"top_n": 5},
+        }
+    ]
+    graph = adapter.build_orchestration_graph(
+        request_group_id=17,
+        run_key_to_target=run_key_to_target,
+        fixed_config={"k_min": 2, "k_max": 2, "n_restarts": 1},
+        execution_mode="sharded",
+        shard_config={"k_ranges": [[2, 2]], "tries_per_k": 1},
+        analysis_catalog=analysis_catalog,
+        enable_analysis_jobs=True,
+        lineage_inputs_by_run_key={
+            "dbpedia_engine_a_None_50_50runs": {
+                "dataset_snapshot_ids": [33, 31, 33],
+                "embedding_batch_group_id": 44,
+            }
+        },
+    )
+    analysis_jobs = [node for node in graph.jobs if node.job_type == "analysis_run"]
+    assert len(analysis_jobs) == 1
+    analysis_job = analysis_jobs[0]
+    assert analysis_job.job_key == "req17__dbpedia_engine_a_None_50_50runs__analysis__bundle_eval"
+    assert list(analysis_job.depends_on_job_keys) == [
+        "dbpedia_engine_a_None_50_50runs__finalize_run"
+    ]
+    assert analysis_job.payload_json["run_key"] == "dbpedia_engine_a_None_50_50runs"
+    assert analysis_job.payload_json["parameters"] == {"top_n": 5}
+    assert graph.metadata_updates["analysis_execution_mode"] == "orchestration_jobs"
+    assert graph.metadata_updates["analysis_job_count"] == 1
+    skipped = graph.metadata_updates.get("analysis_skipped_run_keys") or {}
+    assert "yahoo_engine_a_None_50_50runs" in skipped
+    assert skipped["yahoo_engine_a_None_50_50runs"][0]["missing_inputs"] == [
+        "dataset_snapshot_ids",
+        "embedding_batch_group_id",
+    ]
+
+
 def test_mcq_adapter_graph_spec_matches_legacy_shape():
     adapter = get_sweep_type_adapter(SWEEP_TYPE_MCQ)
     run_key_to_target = {
@@ -392,6 +452,100 @@ def test_create_request_computes_expected_keys(db_connection):
         assert len(expected) == 2
         assert "dbpedia_embed_v_4_0_None_300_50runs" in expected
         assert "dbpedia_embed_v_4_0_gpt_4o_300_50runs" in expected
+
+
+def test_create_request_normalizes_lineage_inputs_by_run_key(db_connection):
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+
+        req_id = svc.create_request(
+            request_name="lineage_inputs_req",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={},
+            parameter_axes={
+                "datasets": ["dbpedia"],
+                "embedding_engines": ["engine/a"],
+                "summarizers": ["None"],
+            },
+            entry_max=50,
+            run_key_to_lineage_inputs={
+                "dbpedia_engine_a_None_50_50runs": {
+                    "dataset_snapshot_ids": [9, 7, 9],
+                    "embedding_batch_group_id": "18",
+                },
+                "unknown_run": {
+                    "dataset_snapshot_ids": [100],
+                    "embedding_batch_group_id": 200,
+                },
+            },
+        )
+        req = svc.get_request(req_id)
+        assert req is not None
+        lineage = dict(req.get("run_key_to_lineage_inputs") or {})
+        assert list(lineage.keys()) == ["dbpedia_engine_a_None_50_50runs"]
+        assert lineage["dbpedia_engine_a_None_50_50runs"] == {
+            "dataset_snapshot_ids": [7, 9],
+            "embedding_batch_group_id": 18,
+        }
+
+
+def test_clustering_analysis_jobs_respect_per_type_flag(db_connection):
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        req_id = svc.create_request(
+            request_name="cluster_analysis_flag",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={"k_min": 2, "k_max": 2, "n_restarts": 1},
+            parameter_axes={
+                "datasets": ["dbpedia"],
+                "embedding_engines": ["engine/a"],
+                "summarizers": ["None"],
+            },
+            entry_max=50,
+            execution_mode="sharded",
+            shard_config={"k_ranges": [[2, 2]], "tries_per_k": 1},
+            run_key_to_lineage_inputs={
+                "dbpedia_engine_a_None_50_50runs": {
+                    "dataset_snapshot_ids": [11],
+                    "embedding_batch_group_id": 22,
+                }
+            },
+        )
+        req_group = repo.get_group_by_id(req_id)
+        assert req_group is not None
+        req_meta = dict(req_group.metadata_json or {})
+        req_meta["analysis_catalog"] = [
+            {
+                "analysis_key": "bundle_eval",
+                "scope": "run",
+                "method_name": "kmeans+normalize+pca+sweep",
+                "method_version": "1.0",
+                "required": False,
+                "blocking": False,
+                "result_keys": [],
+                "parameters": {"top_n": 3},
+            }
+        ]
+        req_group.metadata_json = req_meta
+        session.flush()
+
+        svc.enable_analysis_jobs = True
+        svc.enable_clustering_analysis_jobs = False
+        svc.ensure_orchestration_jobs(req_id, force=True)
+        jobs = repo.list_orchestration_jobs(request_group_id=req_id)
+        assert [j for j in jobs if j.job_type == "analysis_run"] == []
+
+        svc.enable_clustering_analysis_jobs = True
+        svc.ensure_orchestration_jobs(req_id, force=True)
+        jobs = repo.list_orchestration_jobs(request_group_id=req_id)
+        analysis_jobs = [j for j in jobs if j.job_type == "analysis_run"]
+        assert len(analysis_jobs) == 1
+        assert analysis_jobs[0].job_key == (
+            "req"
+            f"{int(req_id)}__dbpedia_engine_a_None_50_50runs__analysis__bundle_eval"
+        )
 
 
 def test_compute_progress_partial_deliveries(db_connection):

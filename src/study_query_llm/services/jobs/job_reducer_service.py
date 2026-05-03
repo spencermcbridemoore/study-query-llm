@@ -56,6 +56,52 @@ class JobReducerService:
                 return job
         return None
 
+    @staticmethod
+    def _normalize_snapshot_ids(raw_snapshot_ids: Any) -> List[int]:
+        if raw_snapshot_ids is None:
+            return []
+        if not isinstance(raw_snapshot_ids, (list, tuple, set)):
+            raw_snapshot_ids = [raw_snapshot_ids]
+        snapshot_ids: List[int] = []
+        for raw_snapshot_id in raw_snapshot_ids:
+            try:
+                snapshot_ids.append(int(raw_snapshot_id))
+            except (TypeError, ValueError):
+                continue
+        return sorted(set(snapshot_ids))
+
+    @classmethod
+    def _lineage_inputs_for_run(
+        cls,
+        *,
+        request_metadata: Dict[str, Any],
+        run_key: str,
+    ) -> Dict[str, Any]:
+        mapping = dict(request_metadata.get("run_key_to_lineage_inputs") or {})
+        run_entry = mapping.get(str(run_key))
+        if not isinstance(run_entry, dict):
+            return {}
+
+        snapshot_ids = cls._normalize_snapshot_ids(
+            run_entry.get("dataset_snapshot_ids")
+            if run_entry.get("dataset_snapshot_ids") is not None
+            else run_entry.get("dataset_snapshot_id")
+        )
+        embedding_batch_group_id: Optional[int] = None
+        raw_embedding_batch_group_id = run_entry.get("embedding_batch_group_id")
+        if raw_embedding_batch_group_id is not None:
+            try:
+                embedding_batch_group_id = int(raw_embedding_batch_group_id)
+            except (TypeError, ValueError):
+                embedding_batch_group_id = None
+
+        out: Dict[str, Any] = {}
+        if snapshot_ids:
+            out["dataset_snapshot_ids"] = snapshot_ids
+        if embedding_batch_group_id is not None:
+            out["embedding_batch_group_id"] = embedding_batch_group_id
+        return out
+
     def reduce_k_job(self, job_id: int) -> str:
         """Combine tries for a K-range into one K aggregate artifact."""
         with self.db.session_scope() as session:
@@ -138,7 +184,7 @@ class JobReducerService:
             out_path = self.artifacts_dir / f"finalize_run_job_{job.id}.json"
             result_ref = self._save_json(out_path, payload)
 
-            run_key = (job.payload_json or {}).get("run_key") or job.base_run_key
+            run_key = str((job.payload_json or {}).get("run_key") or job.base_run_key or "")
             metadata = {
                 "benchmark_source": (job.payload_json or {}).get("dataset", "unknown"),
                 "embedding_engine": (job.payload_json or {}).get("embedding_engine", "?"),
@@ -154,6 +200,14 @@ class JobReducerService:
                 "source": "job_table_sharded_finalize",
                 "result_ref": result_ref,
             }
+            request_group = repo.get_group_by_id(int(job.request_group_id))
+            request_metadata = dict((request_group.metadata_json or {}) if request_group else {})
+            lineage_inputs = self._lineage_inputs_for_run(
+                request_metadata=request_metadata,
+                run_key=run_key,
+            )
+            if lineage_inputs:
+                metadata.update(lineage_inputs)
             synthetic_result = _SweepLikeResult(payload)
             run_id = ingest_result_to_db(
                 synthetic_result,

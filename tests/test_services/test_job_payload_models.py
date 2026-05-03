@@ -123,6 +123,30 @@ def test_parse_analysis_run_payload_valid():
     assert payload.sweep_type == "mcq"
     assert payload.analysis_key == "mcq_compliance"
     assert payload.required is True
+    assert payload.run_key == ""
+    assert payload.parameters == {}
+    assert payload.force is False
+
+
+def test_parse_analysis_run_payload_valid_clustering_fields():
+    payload = parse_analysis_run_payload(
+        {
+            "request_id": 51,
+            "sweep_type": "clustering",
+            "analysis_key": "bundle_eval",
+            "run_key": "rk_1",
+            "method_name": "kmeans+normalize+pca+sweep",
+            "method_version": "1.2",
+            "parameters": {"top_n": 5},
+            "force": True,
+        }
+    )
+    assert payload.request_id == 51
+    assert payload.sweep_type == "clustering"
+    assert payload.analysis_key == "bundle_eval"
+    assert payload.run_key == "rk_1"
+    assert payload.parameters == {"top_n": 5}
+    assert payload.force is True
 
 
 def test_parse_analysis_run_payload_invalid():

@@ -124,6 +124,7 @@ class SweepTypeAdapter(Protocol):
         shard_config: Dict[str, Any],
         analysis_catalog: List[Dict[str, Any]],
         enable_analysis_jobs: bool,
+        lineage_inputs_by_run_key: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> OrchestrationGraphSpec:
         ...
 
@@ -155,6 +156,20 @@ def _safe_int(value: Any, default: int) -> int:
         return int(value)
     except Exception:
         return int(default)
+
+
+def _normalize_snapshot_ids(raw_snapshot_ids: Any) -> List[int]:
+    if raw_snapshot_ids is None:
+        return []
+    if not isinstance(raw_snapshot_ids, (list, tuple, set)):
+        raw_snapshot_ids = [raw_snapshot_ids]
+    snapshot_ids: List[int] = []
+    for sid in raw_snapshot_ids:
+        try:
+            snapshot_ids.append(int(sid))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(snapshot_ids))
 
 
 def _normalize_k_ranges(
@@ -327,8 +342,9 @@ class ClusteringSweepAdapter:
         shard_config: Dict[str, Any],
         analysis_catalog: List[Dict[str, Any]],
         enable_analysis_jobs: bool,
+        lineage_inputs_by_run_key: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> OrchestrationGraphSpec:
-        del request_group_id, analysis_catalog, enable_analysis_jobs
+        lineage_inputs_by_run_key = dict(lineage_inputs_by_run_key or {})
         resolved_shard_config = dict(shard_config or {})
         if str(execution_mode or "standalone").lower() != "sharded":
             k_min = _safe_int(fixed_config.get("k_min"), 2)
@@ -356,6 +372,7 @@ class ClusteringSweepAdapter:
         base_seed = _safe_int(fixed_config.get("base_seed"), 0)
 
         jobs: List[OrchestrationJobSpec] = []
+        finalize_key_by_run_key: Dict[str, str] = {}
         for run_key, target in run_key_to_target.items():
             reduce_job_keys: List[str] = []
             for k_min, k_max in k_ranges:
@@ -405,6 +422,7 @@ class ClusteringSweepAdapter:
                 )
 
             finalize_job_key = f"{run_key}__finalize_run"
+            finalize_key_by_run_key[run_key] = finalize_job_key
             jobs.append(
                 OrchestrationJobSpec(
                     job_type="finalize_run",
@@ -423,10 +441,92 @@ class ClusteringSweepAdapter:
                 )
             )
 
+        analysis_job_count = 0
+        skipped_analysis_jobs: Dict[str, List[Dict[str, Any]]] = {}
+        if enable_analysis_jobs and analysis_catalog:
+            for run_key, finalize_job_key in finalize_key_by_run_key.items():
+                lineage_inputs = dict(lineage_inputs_by_run_key.get(run_key) or {})
+                snapshot_ids = _normalize_snapshot_ids(
+                    lineage_inputs.get("dataset_snapshot_ids")
+                    if lineage_inputs.get("dataset_snapshot_ids") is not None
+                    else lineage_inputs.get("dataset_snapshot_id")
+                )
+                embedding_batch_group_id_raw = lineage_inputs.get("embedding_batch_group_id")
+                embedding_batch_group_id: Optional[int]
+                try:
+                    embedding_batch_group_id = (
+                        int(embedding_batch_group_id_raw)
+                        if embedding_batch_group_id_raw is not None
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    embedding_batch_group_id = None
+
+                for entry in analysis_catalog:
+                    if not isinstance(entry, dict):
+                        continue
+                    analysis_key = str(entry.get("analysis_key") or "").strip()
+                    if not analysis_key:
+                        continue
+                    requires_embedding_batch = bool(
+                        entry.get("requires_embedding_batch", True)
+                    )
+                    missing_inputs: List[str] = []
+                    if not snapshot_ids:
+                        missing_inputs.append("dataset_snapshot_ids")
+                    if requires_embedding_batch and embedding_batch_group_id is None:
+                        missing_inputs.append("embedding_batch_group_id")
+                    if missing_inputs:
+                        skipped_analysis_jobs.setdefault(run_key, []).append(
+                            {
+                                "analysis_key": analysis_key,
+                                "missing_inputs": missing_inputs,
+                            }
+                        )
+                        continue
+
+                    payload = {
+                        "request_id": int(request_group_id),
+                        "sweep_type": SWEEP_TYPE_CLUSTERING,
+                        "analysis_key": analysis_key,
+                        "run_key": run_key,
+                        "scope": str(entry.get("scope") or "run"),
+                        "method_name": str(entry.get("method_name") or analysis_key),
+                        "method_version": str(entry.get("method_version") or "1.0"),
+                        "required": bool(entry.get("required")),
+                        "blocking": bool(entry.get("blocking")),
+                        "result_keys": list(entry.get("result_keys") or []),
+                        "parameters": dict(entry.get("parameters") or {}),
+                        "force": bool(entry.get("force", False)),
+                    }
+                    job_key = (
+                        f"req{int(request_group_id)}__{run_key}__analysis__{analysis_key}"
+                    )
+                    jobs.append(
+                        OrchestrationJobSpec(
+                            job_type="analysis_run",
+                            job_key=job_key,
+                            base_run_key=run_key,
+                            payload_json=payload,
+                            max_attempts=max_attempts,
+                            depends_on_job_keys=(finalize_job_key,),
+                        )
+                    )
+                    analysis_job_count += 1
+
+        metadata_updates: Dict[str, Any] = {}
+        if analysis_catalog:
+            metadata_updates["analysis_execution_mode"] = (
+                "orchestration_jobs" if enable_analysis_jobs else "compatibility_only"
+            )
+            metadata_updates["analysis_job_count"] = int(analysis_job_count)
+            if skipped_analysis_jobs:
+                metadata_updates["analysis_skipped_run_keys"] = skipped_analysis_jobs
+
         return OrchestrationGraphSpec(
             graph_kind="k_try_reduce_finalize",
             jobs=tuple(jobs),
-            metadata_updates={},
+            metadata_updates=metadata_updates,
         )
 
 
@@ -557,8 +657,9 @@ class McqSweepAdapter:
         shard_config: Dict[str, Any],
         analysis_catalog: List[Dict[str, Any]],
         enable_analysis_jobs: bool,
+        lineage_inputs_by_run_key: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> OrchestrationGraphSpec:
-        del execution_mode, shard_config
+        del execution_mode, shard_config, lineage_inputs_by_run_key
         max_attempts = max(1, _safe_int(fixed_config.get("max_attempts"), 3))
 
         jobs: List[OrchestrationJobSpec] = []

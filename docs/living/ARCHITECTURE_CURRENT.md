@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-02
+Last reviewed: 2026-05-03
 
 ## System Shape
 
@@ -39,6 +39,15 @@ jobRuntimes --> repoLayer
 
 Legacy `scripts/run_*.py` files are compatibility wrappers where retained.
 
+Boundary vocabulary for implementation work:
+- Tier A (canonical runtime): `src/study_query_llm/**`
+- Tier B (compatibility surfaces): root `scripts/run_*.py` wrappers
+- Tier C (historical): `scripts/history/**`
+- Tier D (policy mirror): `docs/living/**` + runbooks
+
+Known transitional boundary mismatch (documented, not hidden):
+- `src/study_query_llm/services/jobs/runtime_supervisors.py` currently launches `scripts/run_local_300_2datasets_worker.py` via subprocess for compatibility (`worker_script` path + restart path).
+
 ## Data Pipeline (Canonical)
 
 - Canonical spec: [`docs/DATA_PIPELINE.md`](../DATA_PIPELINE.md).
@@ -52,6 +61,7 @@ Legacy `scripts/run_*.py` files are compatibility wrappers where retained.
 - `OrchestrationJob` is the canonical scheduling/lease substrate for clustering and MCQ execution paths.
 - Planner ownership is adapter-driven: sweep-type adapters emit orchestration graph specs (nodes + dependency edges), and `SweepRequestService` performs generic enqueue from those specs.
 - Standalone execution is modeled as an orchestration profile, not a separate run-key control plane.
+- Clustering payload identity keeps the persisted `summarizer` key (`parameter_axes["summarizers"]` expansion and job payload `summarizer`) with `"None"` as a first-class variant.
 - MCQ orchestration uses per-run `mcq_run` jobs plus dependent `analysis_run` jobs in the same control plane.
 - Job execution dispatch is registry-based in `job_runner_factory.py`; `langgraph_run` remains a first-class registry entry.
 - Reducer/finalizer execution uses a typed plugin seam (`ReducerPlugin`) with a default clustering adapter that wraps `JobReducerService`.

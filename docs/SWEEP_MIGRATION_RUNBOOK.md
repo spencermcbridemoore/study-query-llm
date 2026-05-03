@@ -2,7 +2,7 @@
 
 Status: runbook  
 Owner: sweep-ops-maintainers  
-Last reviewed: 2026-04-06
+Last reviewed: 2026-05-03
 
 This runbook performs targeted migration and hardening for request-driven sweep execution.
 
@@ -113,7 +113,9 @@ Scale worker count only after one-worker execution is stable.
 
 Use this mode for `local_300_2datasets` when running local TEI models on desktop GPU.
 
-**Mode selection:** The `--job-mode` flag (`standalone` or `sharded`) selects a strategy/factory-based orchestrator. Both modes preserve the same job semantics; `standalone` uses run-key claims via `sweep_run_claims`, while `sharded` uses the `orchestration_jobs` path with reducer/finalize flow. No behavior change from prior branching—only internal delegation to explicit orchestrator objects.
+**Current behavior note:** standalone execution is now an orchestration profile (see `docs/living/CURRENT_STATE.md` and `docs/living/ARCHITECTURE_CURRENT.md`). Workers ensure/plumb orchestration jobs first and consume the canonical `orchestration_jobs` control plane when jobs are present.
+
+**Mode selection:** The `--job-mode` flag (`standalone` or `sharded`) selects a strategy/factory-based orchestrator. `sharded` is the explicit K/try job-table fanout path; `standalone` remains the default profile and can fall back to run-key claims only when no orchestration jobs are available for a request.
 
 Stage A (1 worker):
 
@@ -169,7 +171,7 @@ python scripts/check_orchestration_jobs.py --request-id <REQUEST_ID>
 **Architecture boundary:** The DB `orchestration_jobs` table is the outer control plane (claim/lease/complete/fail). Job runners (`JobRunnerFactory` by `job_type`) execute the work inside a claimed job. LangGraph is an in-job workflow runtime—one DB job = one LangGraph run. LangGraph handles internal branching/parallelism; the DB handles scheduling and durability.
 
 - **Job types:** `run_k_try`, `reduce_k`, `finalize_run` (sweep), `langgraph_run` (agentic).
-- **Workers:** Sweep workers use `run_local_300_2datasets_worker.py` (or `python -m study_query_llm.cli sweep-worker`); LangGraph jobs use `python -m study_query_llm.cli jobs langgraph-worker` (wrapper: `scripts/run_langgraph_job_worker.py`).
+- **Workers:** Sweep workers use `python -m study_query_llm.cli sweep-worker` (compatibility wrapper: `scripts/run_local_300_2datasets_worker.py`); LangGraph jobs use `python -m study_query_llm.cli jobs langgraph-worker` (wrapper: `scripts/run_langgraph_job_worker.py`).
 
 Run LangGraph worker:
 

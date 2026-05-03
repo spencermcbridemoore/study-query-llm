@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-02
+Last reviewed: 2026-05-03
 
 This document establishes consistent practices for all development work on this project, ensuring that multiple developers (human or AI) maintain consistency in planning, implementation, and documentation.
 
@@ -44,9 +44,18 @@ The rule is enforced by:
 4. Ensure tests are written and passing
 
 ### Plan File Management (Cursor-specific)
-When creating temporary plan files in "plan mode", use session-aware naming to prevent conflicts across agent sessions. See `.cursor/PLANNING_GUIDE.md` for details on:
+Plan artifacts have two lanes:
+
+- **Workspace-shared plans (repo-tracked):** `.cursor/plans/**`  
+  Use this lane for plans that should be reviewable by collaborators and referenced in PRs/chats.
+- **Session-local scratch plans (gitignored):** `.plans/**`  
+  Use this lane for temporary per-session drafts that are not meant to be versioned.
+
+Operator-local home-directory plans (for example `C:/Users/<user>/.cursor/plans/**`) are local-only and outside repository policy.
+
+When creating session-local scratch plans, use session-aware naming to prevent collisions. See `.cursor/PLANNING_GUIDE.md` for details on:
 - Session identification using `CURSOR_TRACE_ID`
-- Creating uniquely-named plan files in `.plans/` directory
+- Creating uniquely-named plan files in `.plans/`
 - Using the `session_utils` module for plan file management
 
 ## Code Consistency
@@ -94,6 +103,20 @@ When creating temporary plan files in "plan mode", use session-aware naming to p
 2. Update `docs/living/CURRENT_STATE.md` if capability boundaries changed
 3. Update code docstrings to reflect changes
 4. Update `README.md`/`docs/README.md` routing if user-facing doc entrypoints changed
+
+### Transitional Violations Review (Boundary Work)
+
+When work touches scripts-vs-src boundary guidance, include a
+**Transitional Violations Review** checkpoint in the PR:
+
+1. For each documented transitional violation, either:
+   - fix it and remove/update the corresponding doc note, or
+   - explicitly re-accept it with date + reason.
+2. Promote a re-accepted item to **fix now** when:
+   - a PR already modifies the owning module/doc, or
+   - a related refactor lands that can absorb the fix without widening scope.
+3. Minimum cadence when no boundary PRs occur: once per release cycle
+   (or monthly if no release train).
 
 ### Documentation Files (living + repo-root only)
 

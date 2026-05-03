@@ -131,8 +131,12 @@ scratch/local/*
 !scratch/local/jetstream-remote-build-and-restart.ps1
 artifacts/
 
-# Temporary plan files (session-specific)
+# Temporary plan files (session-specific, local scratch)
 .plans/
+
+# Workspace-shared plan artifacts are intentionally tracked
+!.cursor/plans/
+!.cursor/plans/**
 
 # Local Claude/Cursor worktree metadata
 .claude/worktrees/

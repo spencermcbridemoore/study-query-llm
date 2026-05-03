@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-02
+Last reviewed: 2026-05-03
 
 ## Scope
 
@@ -15,6 +15,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Panel application with analytics, embeddings, groups, sweep explorers, sidebar **Database** health markdown (`panel_app/helpers.py#get_database_health_markdown`) with v2 counts for `groups`, `raw_calls`, `provenanced_runs`, `mcq_run` groups, and `call_artifacts`, and a **Storage / DB stats** tab (`panel_app/views/storage_stats.py`) for PostgreSQL size metrics (when using Postgres), deeper v2 row counts, artifact storage configuration summary, optional capped Azure blob prefix usage probe, and pointers to the local DB clone runbook. The **Inference** tab is intentionally disabled in `panel_app/app.py` (safe-mode runtime posture). The **Analytics** tab (`panel_app/views/analytics.py`) adds the same v2 count summary plus `group_members`, breakdowns of `raw_calls` by modality and status, `groups` by `group_type`, recent `provenanced_runs` and `groups`, and recent `raw_calls` across modalities (via `StudyService.get_recent_inferences(modality=None, status=None)`).
 - Package CLI entrypoint: `python -m study_query_llm.cli`.
 - Sweep/job workers and supervisors under `src/study_query_llm/services/jobs/` and `src/study_query_llm/experiments/`.
+- Root `scripts/run_*.py` entrypoints are compatibility surfaces; canonical worker/supervisor/sweep runtime behavior is implemented in `src/study_query_llm/**`.
 
 ### Database Model
 
@@ -51,6 +52,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Orchestration planning is adapter-driven: sweep-type adapters emit deterministic graph specs (`job_type`, `job_key`, payload shape, dependency edges), and `SweepRequestService` enqueues from spec rather than hardcoded clustering/MCQ planner branches.
 - Temporary planner fallback controls were retired after parity coverage; there is no active legacy-planner environment toggle in the current control plane.
 - Standalone sweep worker execution is now an OrchestrationJob profile for both clustering and MCQ (jobs are planned and consumed through the canonical orchestration table).
+- Clustering request/payload identity retains the persisted `summarizer` key (`parameter_axes["summarizers"]`, `run_key_to_target[*].summarizer`, orchestration payload `summarizer`); `"None"` remains a first-class variant.
 - MCQ orchestration now plans both `mcq_run` execution jobs and dependent `analysis_run` jobs; `python -m study_query_llm.cli analyze` is a compatibility wrapper that processes those orchestration analysis jobs rather than a separate analysis write path.
 - Job execution dispatch is registry-based in `job_runner_factory.py` (including `langgraph_run`), and reduce/finalize execution uses a typed reducer plugin seam that wraps the existing clustering reducer implementation.
 - PR0 control-plane parity fixtures are deterministic and SQLite-first (`tests/fixtures/p0_baseline/baseline_snapshot.json`), with regeneration/check tooling at `scripts/regenerate_p0_baseline.py` and CI enforcement in `.github/workflows/persistence-contract.yml`.
@@ -91,6 +93,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - For new DB-backed functionality: use v2 repository and models.
 - For chat providers: use `create_chat_provider` path, not legacy assumptions about `create()`.
 - For operational execution: prefer package CLI subcommands over legacy script wrappers.
+- For scripts-vs-runtime boundaries: treat `scripts/run_*.py` as compatibility wrappers and place new orchestration/pipeline runtime logic in `src/study_query_llm/**`.
 - For DB/tunnel/backup/restore operations: start at `docs/runbooks/README.md` (canonical source-of-truth policy + URL contract).
 - Read-only check that `call_artifacts.uri` Azure blob URLs target the expected container (e.g. `artifacts-dev`): `scripts/verify_call_artifact_blob_lanes.py`.
 - Data pipeline behavior/acceptance criteria are documented in `docs/DATA_PIPELINE.md`; use this as the canonical contract for acquisition/snapshot/embedding/analysis behavior.
@@ -106,6 +109,8 @@ This document is the canonical "what exists and works now" summary for the repos
 - `docs/API.md` is deprecated in favor of `docs/living/API_CURRENT.md`.
 - `docs/MIGRATION_GUIDE.md` is historical/deprecated migration context.
 - DB target contract v1 is now documented in `docs/living/DB_TARGET_CONTRACT.md`; Stage C/D/E wiring remains intentionally deferred (prep complete, implementation pending).
+- Transitional naming cleanup remains deferred: campaign-era naming defaults in `src/study_query_llm/experiments/sweep_worker_main.py` and sweep-era wording in `src/study_query_llm/providers/managers/ollama.py` are tracked for a later runtime cleanup phase.
+- Legacy script-surface triage for old PCA/summarizer experiment drivers remains deferred to a dedicated cleanup phase (boundary anchoring landed first).
 
 ## Near-Term Documentation Priorities
 

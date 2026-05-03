@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-02
+Last reviewed: 2026-05-03
 
 ## Configuration
 
@@ -54,6 +54,7 @@ Notes:
   - `SweepRequestService.get_request(request_id)` (returns execution-derived analysis state by default)
   - `SweepRequestService.list_requests(status=..., include_fulfilled=..., sweep_type=...)`
   - Planner behavior: adapter-driven orchestration graph specs are enqueued via `SweepRequestService.ensure_orchestration_jobs(...)` (no planner-type hardcoding in service branches).
+  - Clustering axes and payload identity keep the persisted `summarizer` contract (`parameter_axes["summarizers"]` and payload field `summarizer`); `"None"` remains first-class.
 - Unified execution records:
   - `ProvenancedRunService.record_method_execution(...)`
   - `ProvenancedRunService.record_analysis_execution(...)`
@@ -66,6 +67,7 @@ Notes:
 - CLI compatibility surfaces:
   - `python -m study_query_llm.cli sweep-worker --request-id <id>`
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)
+  - Root `scripts/run_*.py` commands remain compatibility wrappers; canonical runtime behavior lives under `src/study_query_llm/**`.
 - Pipeline analyze surface:
   - `study_query_llm.pipeline.analyze.analyze(snapshot_group_id, embedding_batch_group_id=None, ..., method_name=..., run_key=...)`
   - Embedding-backed runs normalize `parameters["representation_type"]` / `parameters["embedding_representation"]` (either key may be set). Accepted clustering input is **`full` only**. Values `label_centroid` and legacy alias `intent_mean` raise `ValueError` with migration text beginning `representation_type 'label_centroid' (alias 'intent_mean') was retired in Slice 1.6.` Snapshot-only methods continue to overwrite user-supplied representation keys to `snapshot_only` for fingerprint/provenance mode identity (unchanged).

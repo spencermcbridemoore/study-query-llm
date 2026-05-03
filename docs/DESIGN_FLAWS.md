@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: architecture-maintainers  
-Last reviewed: 2026-04-06
+Last reviewed: 2026-05-02
 
 ## Purpose
 
@@ -33,6 +33,7 @@ It is intentionally evidence-driven and separate from roadmap chronology.
 | DF-008 | operability | medium | hypothesis | open | `src/study_query_llm/services/jobs/`, `src/study_query_llm/experiments/`, `docs/SWEEP_MIGRATION_RUNBOOK.md` | Multiple execution surfaces increase operator error risk under incident pressure. | Maintain one operator matrix in docs and keep wrapper-vs-canonical guidance explicit. |
 | DF-009 | documentation-process | low | confirmed | open | `README.md`, `tests/` tree | Fixed test-count claims age quickly and become inaccurate. | Avoid hardcoded counts; reference CI and commands instead. |
 | DF-010 | implementation | medium | confirmed | open | `Dockerfile`, `docs/DEPLOYMENT.md`, `test_e2e_verification.py` | Build-time test path mismatch can silently skip intended checks. | Keep Docker/test command paths aligned with repository layout. |
+| DF-011 | implementation | low | confirmed | open | `src/study_query_llm/algorithms/recipes.py` (`COMPOSITE_RECIPES["cosine_kllmeans_no_pca"]`), `src/study_query_llm/pipeline/analyze.py` (TODO at runtime path + hardcoded `parameters_schema` fallback for `cosine_kllmeans_no_pca`), `scripts/register_clustering_methods.py` (`cosine_kllmeans_no_pca` branch), `docs/audit/coupling_acid_audit_2026-04-24/PROPOSALS.md` (T2.3) | `cosine_kllmeans_no_pca` is registered as a `MethodDefinition` and present in `COMPOSITE_RECIPES`, but has no `AlgorithmSpec`/runner in `pipeline/clustering/registry.py`; analyze keeps a hardcoded `parameters_schema` fallback and TODO that references the unresolved runtime mismatch. Several service-layer tests use the name as a stand-in algorithm, masking the absence of a real runner. Tracked here per Slice 2 Wave 1 reconciliation Item 9 (deferred from W1-PR3). | Pick one: (a) wire a dedicated runner under the bundled grammar (e.g. `cosine+kllmeans+fixed`) and add a registry spec + recipes entry, or (b) drop from `COMPOSITE_RECIPES` + remove the analyze fallback + retire the registration branch. Either way, remove the TODO in `analyze.py` and update `parity` claim C041 + `METHOD_RECIPES.md` recipe count. |
 
 ## Validation Queue (Hypotheses)
 

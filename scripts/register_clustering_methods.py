@@ -41,6 +41,7 @@ from study_query_llm.algorithms.recipes import (
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.db.write_intent import WriteIntent
+from study_query_llm.pipeline.clustering.registry import get_algorithm_spec
 from study_query_llm.services.method_service import MethodService
 
 
@@ -109,16 +110,11 @@ def main() -> int:
 
         print("Composite recipes:")
         for composite_name in COMPOSITE_RECIPES:
-            mid = ensure_composite_recipe(
-                method_svc,
-                composite_name,
-                composite_version="1.0",
-                description=(
-                    "Composite clustering pipeline "
-                    f"({composite_name}); see method_definitions.recipe_json "
-                    "for the stage list."
-                ),
-                parameters_schema={
+            spec = get_algorithm_spec(composite_name)
+            if spec is not None and spec.parameters_schema:
+                parameters_schema = dict(spec.parameters_schema)
+            elif composite_name == "cosine_kllmeans_no_pca":
+                parameters_schema = {
                     "type": "object",
                     "properties": {
                         "k_range": {"type": "array", "items": {"type": "integer"}},
@@ -129,7 +125,21 @@ def main() -> int:
                         "hdbscan_min_cluster_size": {"type": "integer"},
                         "hdbscan_min_samples": {"type": "integer"},
                     },
-                },
+                }
+            else:
+                raise RuntimeError(
+                    f"composite {composite_name!r} missing registry parameters_schema"
+                )
+            mid = ensure_composite_recipe(
+                method_svc,
+                composite_name,
+                composite_version="1.0",
+                description=(
+                    "Composite clustering pipeline "
+                    f"({composite_name}); see method_definitions.recipe_json "
+                    "for the stage list."
+                ),
+                parameters_schema=parameters_schema,
             )
             print(f"  - {composite_name}@1.0: id={mid}")
 

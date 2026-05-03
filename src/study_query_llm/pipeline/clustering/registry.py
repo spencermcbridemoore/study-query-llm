@@ -14,14 +14,30 @@ Caveat:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Literal
+from dataclasses import dataclass, field
+from typing import Any, Callable, Literal
 
 from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 
+from .agglomerative_preproc_runner import run_agglomerative_preproc_fixed_k_analysis
 from .agglomerative_runner import run_agglomerative_fixed_k_analysis
+from .dbscan_fixed_eps_runner import run_dbscan_fixed_eps_analysis
+from .gmm_fixed_k_runner import run_gmm_fixed_k_analysis
 from .gmm_runner import run_gmm_bic_argmin_analysis
+from .grammar import parse_method_name
+from .hdbscan_preproc_fixed_runner import run_hdbscan_preproc_fixed_analysis
+from .kmeans_fixed_k_runner import run_kmeans_fixed_k_analysis
 from .kmeans_runner import run_kmeans_silhouette_kneedle_analysis
+from .runner_common import (
+    AGGLOMERATIVE_FAMILY_FIXED_KEYS,
+    DBSCAN_FAMILY_FIXED_KEYS,
+    GMM_FAMILY_FIXED_KEYS,
+    HDBSCAN_BASELINE_PARAMETERS_SCHEMA,
+    HDBSCAN_FAMILY_FIXED_KEYS,
+    KMEANS_FAMILY_FIXED_KEYS,
+    SWEEP_PARAMETERS_SCHEMA,
+    build_parameters_schema,
+)
 
 FitMode = Literal["single_fit", "sweep_select"]
 # Slice 1.5 retired the ``clustering_v1`` envelope. ``ProvenanceEnvelope`` now
@@ -47,6 +63,8 @@ class AlgorithmSpec:
     base_algorithm: str
     default_determinism_class: str
     strategy_aliases: tuple[str, ...] = ()
+    preprocessing_chain: tuple[str, ...] = field(default_factory=tuple)
+    parameters_schema: dict[str, Any] = field(default_factory=dict)
 
 
 def normalize_method_name(method_name: str) -> str:
@@ -97,13 +115,39 @@ def raise_if_deprecated_clustering_method(method_name: str) -> None:
     )
 
 
-# Slice 1.5 bundled-grammar registry. The legacy v1-envelope specs (``hdbscan``,
-# ``kmeans+silhouette+kneedle``, ``gmm+bic+argmin``) were physically removed
-# here; the names live on only in ``DEPRECATED_LEGACY_CLUSTERING_METHODS`` and
-# in the loud-fail guard ``raise_if_deprecated_clustering_method``. Strategy
-# aliases (``hdbscan``, ``kmeans_silhouette_kneedle``, ``gmm_bic_argmin``) are
-# carried on the new bundled-grammar specs so the BANK77 strategy CLI keeps
-# operator-facing tokens stable while routing to the new method names.
+AGGLOMERATIVE_FIXED_K_PARAMETERS_SCHEMA = build_parameters_schema(
+    fixed_keys=AGGLOMERATIVE_FAMILY_FIXED_KEYS,
+    chain=(),
+    fixed_required=["k"],
+)
+AGGLOMERATIVE_NORMALIZE_FIXED_K_PARAMETERS_SCHEMA = build_parameters_schema(
+    fixed_keys=AGGLOMERATIVE_FAMILY_FIXED_KEYS,
+    chain=("normalize",),
+    fixed_required=["k"],
+)
+AGGLOMERATIVE_PCA_FIXED_K_PARAMETERS_SCHEMA = build_parameters_schema(
+    fixed_keys=AGGLOMERATIVE_FAMILY_FIXED_KEYS,
+    chain=("pca",),
+    fixed_required=["k"],
+)
+
+HDBSCAN_FIXED_PARAMETERS_SCHEMA = HDBSCAN_BASELINE_PARAMETERS_SCHEMA
+HDBSCAN_NORMALIZE_FIXED_PARAMETERS_SCHEMA = build_parameters_schema(
+    fixed_keys=HDBSCAN_FAMILY_FIXED_KEYS,
+    chain=("normalize",),
+    fixed_required=["min_cluster_size"],
+)
+HDBSCAN_PCA_FIXED_PARAMETERS_SCHEMA = build_parameters_schema(
+    fixed_keys=HDBSCAN_FAMILY_FIXED_KEYS,
+    chain=("pca",),
+    fixed_required=["min_cluster_size"],
+)
+HDBSCAN_NORMALIZE_PCA_FIXED_PARAMETERS_SCHEMA = build_parameters_schema(
+    fixed_keys=HDBSCAN_FAMILY_FIXED_KEYS,
+    chain=("normalize", "pca"),
+    fixed_required=["min_cluster_size"],
+)
+
 _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
     "agglomerative+fixed-k": AlgorithmSpec(
         method_name="agglomerative+fixed-k",
@@ -116,6 +160,36 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         base_algorithm="agglomerative",
         default_determinism_class="deterministic",
         strategy_aliases=(),
+        preprocessing_chain=(),
+        parameters_schema=AGGLOMERATIVE_FIXED_K_PARAMETERS_SCHEMA,
+    ),
+    "agglomerative+normalize+fixed-k": AlgorithmSpec(
+        method_name="agglomerative+normalize+fixed-k",
+        runner=run_agglomerative_preproc_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="agglomerative",
+        default_determinism_class="deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize",),
+        parameters_schema=AGGLOMERATIVE_NORMALIZE_FIXED_K_PARAMETERS_SCHEMA,
+    ),
+    "agglomerative+pca+fixed-k": AlgorithmSpec(
+        method_name="agglomerative+pca+fixed-k",
+        runner=run_agglomerative_preproc_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="agglomerative",
+        default_determinism_class="deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("pca",),
+        parameters_schema=AGGLOMERATIVE_PCA_FIXED_K_PARAMETERS_SCHEMA,
     ),
     "hdbscan+fixed": AlgorithmSpec(
         method_name="hdbscan+fixed",
@@ -128,6 +202,50 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         base_algorithm="hdbscan",
         default_determinism_class="non_deterministic",
         strategy_aliases=("hdbscan",),
+        preprocessing_chain=(),
+        parameters_schema=HDBSCAN_FIXED_PARAMETERS_SCHEMA,
+    ),
+    "hdbscan+normalize+fixed": AlgorithmSpec(
+        method_name="hdbscan+normalize+fixed",
+        runner=run_hdbscan_preproc_fixed_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="hdbscan",
+        default_determinism_class="non_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize",),
+        parameters_schema=HDBSCAN_NORMALIZE_FIXED_PARAMETERS_SCHEMA,
+    ),
+    "hdbscan+pca+fixed": AlgorithmSpec(
+        method_name="hdbscan+pca+fixed",
+        runner=run_hdbscan_preproc_fixed_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="hdbscan",
+        default_determinism_class="non_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("pca",),
+        parameters_schema=HDBSCAN_PCA_FIXED_PARAMETERS_SCHEMA,
+    ),
+    "hdbscan+normalize+pca+fixed": AlgorithmSpec(
+        method_name="hdbscan+normalize+pca+fixed",
+        runner=run_hdbscan_preproc_fixed_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="hdbscan",
+        default_determinism_class="non_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize", "pca"),
+        parameters_schema=HDBSCAN_NORMALIZE_PCA_FIXED_PARAMETERS_SCHEMA,
     ),
     "kmeans+normalize+pca+sweep": AlgorithmSpec(
         method_name="kmeans+normalize+pca+sweep",
@@ -140,6 +258,8 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         base_algorithm="kmeans",
         default_determinism_class="pseudo_deterministic",
         strategy_aliases=("kmeans_silhouette_kneedle",),
+        preprocessing_chain=("normalize", "pca"),
+        parameters_schema=SWEEP_PARAMETERS_SCHEMA,
     ),
     "gmm+normalize+pca+sweep": AlgorithmSpec(
         method_name="gmm+normalize+pca+sweep",
@@ -152,8 +272,275 @@ _ALGORITHM_SPECS: dict[str, AlgorithmSpec] = {
         base_algorithm="gmm",
         default_determinism_class="pseudo_deterministic",
         strategy_aliases=("gmm_bic_argmin",),
+        preprocessing_chain=("normalize", "pca"),
+        parameters_schema=SWEEP_PARAMETERS_SCHEMA,
+    ),
+    "kmeans+fixed-k": AlgorithmSpec(
+        method_name="kmeans+fixed-k",
+        runner=run_kmeans_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="kmeans",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=(),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=KMEANS_FAMILY_FIXED_KEYS,
+            chain=(),
+            fixed_required=["k"],
+        ),
+    ),
+    "kmeans+normalize+fixed-k": AlgorithmSpec(
+        method_name="kmeans+normalize+fixed-k",
+        runner=run_kmeans_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="kmeans",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize",),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=KMEANS_FAMILY_FIXED_KEYS,
+            chain=("normalize",),
+            fixed_required=["k"],
+        ),
+    ),
+    "kmeans+pca+fixed-k": AlgorithmSpec(
+        method_name="kmeans+pca+fixed-k",
+        runner=run_kmeans_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="kmeans",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("pca",),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=KMEANS_FAMILY_FIXED_KEYS,
+            chain=("pca",),
+            fixed_required=["k"],
+        ),
+    ),
+    "kmeans+normalize+pca+fixed-k": AlgorithmSpec(
+        method_name="kmeans+normalize+pca+fixed-k",
+        runner=run_kmeans_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="kmeans",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize", "pca"),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=KMEANS_FAMILY_FIXED_KEYS,
+            chain=("normalize", "pca"),
+            fixed_required=["k"],
+        ),
+    ),
+    "spherical-kmeans+approx+fixed-k": AlgorithmSpec(
+        method_name="spherical-kmeans+approx+fixed-k",
+        runner=run_kmeans_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="spherical-kmeans",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize",),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=KMEANS_FAMILY_FIXED_KEYS,
+            chain=("normalize",),
+            fixed_required=["k"],
+        ),
+    ),
+    "spherical-kmeans+approx+pca+fixed-k": AlgorithmSpec(
+        method_name="spherical-kmeans+approx+pca+fixed-k",
+        runner=run_kmeans_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="spherical-kmeans",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize", "pca"),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=KMEANS_FAMILY_FIXED_KEYS,
+            chain=("normalize", "pca"),
+            fixed_required=["k"],
+        ),
+    ),
+    "gmm+fixed-k": AlgorithmSpec(
+        method_name="gmm+fixed-k",
+        runner=run_gmm_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="gmm",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=(),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=GMM_FAMILY_FIXED_KEYS,
+            chain=(),
+            fixed_required=["k"],
+        ),
+    ),
+    "gmm+normalize+fixed-k": AlgorithmSpec(
+        method_name="gmm+normalize+fixed-k",
+        runner=run_gmm_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="gmm",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize",),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=GMM_FAMILY_FIXED_KEYS,
+            chain=("normalize",),
+            fixed_required=["k"],
+        ),
+    ),
+    "gmm+pca+fixed-k": AlgorithmSpec(
+        method_name="gmm+pca+fixed-k",
+        runner=run_gmm_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="gmm",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("pca",),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=GMM_FAMILY_FIXED_KEYS,
+            chain=("pca",),
+            fixed_required=["k"],
+        ),
+    ),
+    "gmm+normalize+pca+fixed-k": AlgorithmSpec(
+        method_name="gmm+normalize+pca+fixed-k",
+        runner=run_gmm_fixed_k_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="gmm",
+        default_determinism_class="pseudo_deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize", "pca"),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=GMM_FAMILY_FIXED_KEYS,
+            chain=("normalize", "pca"),
+            fixed_required=["k"],
+        ),
+    ),
+    "dbscan+fixed-eps": AlgorithmSpec(
+        method_name="dbscan+fixed-eps",
+        runner=run_dbscan_fixed_eps_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="dbscan",
+        default_determinism_class="deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=(),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=DBSCAN_FAMILY_FIXED_KEYS,
+            chain=(),
+            fixed_required=["eps", "min_samples"],
+        ),
+    ),
+    "dbscan+normalize+fixed-eps": AlgorithmSpec(
+        method_name="dbscan+normalize+fixed-eps",
+        runner=run_dbscan_fixed_eps_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="dbscan",
+        default_determinism_class="deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize",),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=DBSCAN_FAMILY_FIXED_KEYS,
+            chain=("normalize",),
+            fixed_required=["eps", "min_samples"],
+        ),
+    ),
+    "dbscan+pca+fixed-eps": AlgorithmSpec(
+        method_name="dbscan+pca+fixed-eps",
+        runner=run_dbscan_fixed_eps_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="dbscan",
+        default_determinism_class="deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("pca",),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=DBSCAN_FAMILY_FIXED_KEYS,
+            chain=("pca",),
+            fixed_required=["eps", "min_samples"],
+        ),
+    ),
+    "dbscan+normalize+pca+fixed-eps": AlgorithmSpec(
+        method_name="dbscan+normalize+pca+fixed-eps",
+        runner=run_dbscan_fixed_eps_analysis,
+        fit_mode="single_fit",
+        requires_embeddings=True,
+        supports_snapshot_only=False,
+        allowed_representations=frozenset({REPRESENTATION_FULL}),
+        provenance_envelope="none",
+        base_algorithm="dbscan",
+        default_determinism_class="deterministic",
+        strategy_aliases=(),
+        preprocessing_chain=("normalize", "pca"),
+        parameters_schema=build_parameters_schema(
+            fixed_keys=DBSCAN_FAMILY_FIXED_KEYS,
+            chain=("normalize", "pca"),
+            fixed_required=["eps", "min_samples"],
+        ),
     ),
 }
+
+
+def _assert_specs_match_grammar() -> None:
+    for spec in _ALGORITHM_SPECS.values():
+        parsed_chain = parse_method_name(spec.method_name)[1]
+        if spec.preprocessing_chain != parsed_chain:
+            raise AssertionError(
+                f"registry drift: {spec.method_name!r} preprocessing_chain "
+                f"{spec.preprocessing_chain!r} != grammar {parsed_chain!r}"
+            )
+
+
+_assert_specs_match_grammar()
 
 
 def _build_alias_index() -> dict[str, str]:

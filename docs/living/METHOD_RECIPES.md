@@ -81,6 +81,10 @@ This document is the v0 spec.
 - `hdbscan+normalize+pca+fixed`
 - `leiden+knn-graph+fixed`
 
+### Wave 1 onboarded methods (Slice 2)
+
+Nineteen sklearn-native bundled names were added on top of the four Slice 1.5 registry baselines (plus `cosine_kllmeans_no_pca` in `COMPOSITE_RECIPES`). They share `provenance_envelope="none"`, `fit_mode=single_fit` (except the two sweep baselines), and `allowed_representations={"full"}` (uniform with Slice 1.6; see C065). Method names: `kmeans+fixed-k`, `kmeans+normalize+fixed-k`, `kmeans+pca+fixed-k`, `kmeans+normalize+pca+fixed-k`, `spherical-kmeans+approx+fixed-k`, `spherical-kmeans+approx+pca+fixed-k`, `gmm+fixed-k`, `gmm+normalize+fixed-k`, `gmm+pca+fixed-k`, `gmm+normalize+pca+fixed-k`, `dbscan+fixed-eps`, `dbscan+normalize+fixed-eps`, `dbscan+pca+fixed-eps`, `dbscan+normalize+pca+fixed-eps`, `agglomerative+normalize+fixed-k`, `agglomerative+pca+fixed-k`, `hdbscan+normalize+fixed`, `hdbscan+pca+fixed`, `hdbscan+normalize+pca+fixed`. Runtime grammar: the `+approx+` token still denotes the spherical-kmeans approximation family, but `parse_method_name` folds it to a **`normalize` preprocessing stage** in the returned chain (what preprocessing applies), not a literal `approx` stage.
+
 ### Bundled-vs-composed coexistence rule
 
 - Bundled methods are permanently self-contained.

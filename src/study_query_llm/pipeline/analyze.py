@@ -29,6 +29,7 @@ from study_query_llm.pipeline.clustering import (
     raise_if_deprecated_clustering_method,
     resolve_algorithm_runner,
 )
+from study_query_llm.pipeline.clustering.runner_common import synthesize_fixed_bundled_payload
 from study_query_llm.pipeline.runner import StageIdentity, run_stage
 from study_query_llm.pipeline.types import StageResult
 from study_query_llm.services.artifact_service import ArtifactService
@@ -330,6 +331,27 @@ def _resolve_method_definition_id(
         # identity and DB registration until both registries are unified.
         register_clustering_components(method_service)
         composite_version = str(method_version or "1.0")
+        cluster_spec = get_algorithm_spec(normalized_name)
+        if cluster_spec is not None and cluster_spec.parameters_schema:
+            parameters_schema: dict[str, Any] = dict(cluster_spec.parameters_schema)
+        elif normalized_name == "cosine_kllmeans_no_pca":
+            parameters_schema = {
+                "type": "object",
+                "properties": {
+                    "k_range": {"type": "array", "items": {"type": "integer"}},
+                    "selection_metric": {"type": "string"},
+                    "selection_rule": {"type": "string"},
+                    "pca_n_components": {"type": "integer"},
+                    "hdbscan_metric": {"type": "string"},
+                    "hdbscan_min_cluster_size": {"type": "integer"},
+                    "hdbscan_min_samples": {"type": "integer"},
+                },
+            }
+        else:
+            raise RuntimeError(
+                f"composite method {normalized_name!r} missing clustering registry "
+                "parameters_schema"
+            )
         return int(
             ensure_composite_recipe(
                 method_service,
@@ -340,14 +362,7 @@ def _resolve_method_definition_id(
                     f"({normalized_name}); see method_definitions.recipe_json "
                     "for the stage list."
                 ),
-                parameters_schema={
-                    "type": "object",
-                    "properties": {
-                        "k_range": {"type": "array", "items": {"type": "integer"}},
-                        "selection_metric": {"type": "string"},
-                        "selection_rule": {"type": "string"},
-                    },
-                },
+                parameters_schema=parameters_schema,
             )
         )
 
@@ -675,6 +690,26 @@ def _synthesize_v1_pipeline_for_bundled_method(
     }
 
 
+def _synthesize_pipeline_for_fixed_bundled_method(
+    *,
+    method_name: str,
+    parameters: Mapping[str, Any],
+    embedding_dim: int,
+    n_samples: int,
+) -> dict[str, Any]:
+    """Sibling to :func:`_synthesize_v1_pipeline_for_bundled_method` for fixed-fit bundles."""
+    pipeline_resolved, pipeline_effective = synthesize_fixed_bundled_payload(
+        method_name=method_name,
+        parameters=parameters,
+        embedding_dim=int(embedding_dim),
+        n_samples=int(n_samples),
+    )
+    return {
+        "pipeline_resolved": pipeline_resolved,
+        "pipeline_effective": pipeline_effective,
+    }
+
+
 def analyze(
     snapshot_group_id: int,
     embedding_batch_group_id: int | None = None,
@@ -698,6 +733,7 @@ def analyze(
     raise_if_deprecated_clustering_method(method_name)
     resolved_params = dict(parameters or {})
     synthetic_v1_pipeline: dict[str, Any] | None = None
+    synthetic_fixed_pipeline: dict[str, Any] | None = None
     db_conn, _owned_db = _resolve_db(
         db=db,
         database_url=database_url,
@@ -762,11 +798,21 @@ def analyze(
             if resolved_params.get("determinism_class") is None:
                 resolved_params["determinism_class"] = "pseudo_deterministic"
         elif (
-            resolved_params.get("determinism_class") is None
-            and algorithm_spec is not None
-            and str(algorithm_spec.method_name)
-            in {"agglomerative+fixed-k", "hdbscan+fixed"}
+            algorithm_spec is not None
+            and algorithm_spec.fit_mode == "single_fit"
+            and len(algorithm_spec.preprocessing_chain) > 0
         ):
+            if analysis_embeddings is None:
+                raise ValueError(
+                    f"bundled clustering method {method_name!r} requires embedding input"
+                )
+            synthetic_fixed_pipeline = _synthesize_pipeline_for_fixed_bundled_method(
+                method_name=normalized_method,
+                parameters=resolved_params,
+                embedding_dim=int(analysis_embeddings.shape[1]),
+                n_samples=int(analysis_embeddings.shape[0]),
+            )
+        elif resolved_params.get("determinism_class") is None and algorithm_spec is not None:
             resolved_params["determinism_class"] = str(
                 algorithm_spec.default_determinism_class
             )
@@ -856,6 +902,13 @@ def analyze(
                 ]
                 runner_parameters["_v1_pipeline_effective"] = list(
                     synthetic_v1_pipeline["pipeline_effective"]
+                )
+            elif synthetic_fixed_pipeline is not None:
+                runner_parameters["_v1_pipeline_resolved"] = [
+                    dict(entry) for entry in synthetic_fixed_pipeline["pipeline_resolved"]
+                ]
+                runner_parameters["_v1_pipeline_effective"] = list(
+                    synthetic_fixed_pipeline["pipeline_effective"]
                 )
             raw_payload = runner(
                 method_name=method_name,

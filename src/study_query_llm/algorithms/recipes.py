@@ -283,6 +283,73 @@ KMEANS_NORMALIZE_PCA_SWEEP_RECIPE: Dict[str, Any] = copy.deepcopy(
 GMM_NORMALIZE_PCA_SWEEP_RECIPE: Dict[str, Any] = copy.deepcopy(GMM_BIC_ARGMIN_RECIPE)
 
 
+def build_bundled_recipe(base_algorithm: str, chain: tuple[str, ...]) -> Dict[str, Any]:
+    """Build canonical composite recipe JSON for bundled clustering grammar methods."""
+    stages: List[Dict[str, Any]] = [
+        {
+            "name": "embed",
+            "version": "1.0",
+            "role": "representation",
+            "params": {},
+        },
+    ]
+    for stage_name in chain:
+        stages.append(
+            {
+                "name": stage_name,
+                "version": "1.0",
+                "role": "preprocess",
+                "params": {},
+            }
+        )
+    stages.append(
+        {
+            "name": base_algorithm,
+            "version": "1.0",
+            "role": "clustering",
+            "params": {},
+        }
+    )
+    chain_suffix = "+".join(chain) if chain else ""
+    notes = (
+        f"bundled clustering {base_algorithm}"
+        + (f"+{chain_suffix}" if chain_suffix else "")
+        + " (Wave 1 grammar)"
+    )
+    return {"recipe_version": RECIPE_VERSION, "stages": stages, "notes": notes}
+
+
+KMEANS_FIXED_K_RECIPE = build_bundled_recipe("kmeans", ())
+KMEANS_NORMALIZE_FIXED_K_RECIPE = build_bundled_recipe("kmeans", ("normalize",))
+KMEANS_PCA_FIXED_K_RECIPE = build_bundled_recipe("kmeans", ("pca",))
+KMEANS_NORMALIZE_PCA_FIXED_K_RECIPE = build_bundled_recipe("kmeans", ("normalize", "pca"))
+SPHERICAL_KMEANS_APPROX_FIXED_K_RECIPE = build_bundled_recipe(
+    "spherical-kmeans", ("normalize",)
+)
+SPHERICAL_KMEANS_APPROX_PCA_FIXED_K_RECIPE = build_bundled_recipe(
+    "spherical-kmeans", ("normalize", "pca")
+)
+GMM_FIXED_K_RECIPE = build_bundled_recipe("gmm", ())
+GMM_NORMALIZE_FIXED_K_RECIPE = build_bundled_recipe("gmm", ("normalize",))
+GMM_PCA_FIXED_K_RECIPE = build_bundled_recipe("gmm", ("pca",))
+GMM_NORMALIZE_PCA_FIXED_K_RECIPE = build_bundled_recipe("gmm", ("normalize", "pca"))
+DBSCAN_FIXED_EPS_RECIPE = build_bundled_recipe("dbscan", ())
+DBSCAN_NORMALIZE_FIXED_EPS_RECIPE = build_bundled_recipe("dbscan", ("normalize",))
+DBSCAN_PCA_FIXED_EPS_RECIPE = build_bundled_recipe("dbscan", ("pca",))
+DBSCAN_NORMALIZE_PCA_FIXED_EPS_RECIPE = build_bundled_recipe(
+    "dbscan", ("normalize", "pca")
+)
+AGGLOMERATIVE_NORMALIZE_FIXED_K_RECIPE = build_bundled_recipe(
+    "agglomerative", ("normalize",)
+)
+AGGLOMERATIVE_PCA_FIXED_K_RECIPE = build_bundled_recipe("agglomerative", ("pca",))
+HDBSCAN_NORMALIZE_FIXED_RECIPE = build_bundled_recipe("hdbscan", ("normalize",))
+HDBSCAN_PCA_FIXED_RECIPE = build_bundled_recipe("hdbscan", ("pca",))
+HDBSCAN_NORMALIZE_PCA_FIXED_RECIPE = build_bundled_recipe(
+    "hdbscan", ("normalize", "pca")
+)
+
+
 # Slice 1.5 retired the legacy v1-envelope method names from this registry.
 # The legacy *constants* above are intentionally preserved (they back the
 # permanent recipe-hash equivalence regression test); only the *registry
@@ -293,6 +360,25 @@ COMPOSITE_RECIPES: Dict[str, Dict[str, Any]] = {
     "hdbscan+fixed": HDBSCAN_FIXED_RECIPE,
     "kmeans+normalize+pca+sweep": KMEANS_NORMALIZE_PCA_SWEEP_RECIPE,
     "gmm+normalize+pca+sweep": GMM_NORMALIZE_PCA_SWEEP_RECIPE,
+    "kmeans+fixed-k": KMEANS_FIXED_K_RECIPE,
+    "kmeans+normalize+fixed-k": KMEANS_NORMALIZE_FIXED_K_RECIPE,
+    "kmeans+pca+fixed-k": KMEANS_PCA_FIXED_K_RECIPE,
+    "kmeans+normalize+pca+fixed-k": KMEANS_NORMALIZE_PCA_FIXED_K_RECIPE,
+    "spherical-kmeans+approx+fixed-k": SPHERICAL_KMEANS_APPROX_FIXED_K_RECIPE,
+    "spherical-kmeans+approx+pca+fixed-k": SPHERICAL_KMEANS_APPROX_PCA_FIXED_K_RECIPE,
+    "gmm+fixed-k": GMM_FIXED_K_RECIPE,
+    "gmm+normalize+fixed-k": GMM_NORMALIZE_FIXED_K_RECIPE,
+    "gmm+pca+fixed-k": GMM_PCA_FIXED_K_RECIPE,
+    "gmm+normalize+pca+fixed-k": GMM_NORMALIZE_PCA_FIXED_K_RECIPE,
+    "dbscan+fixed-eps": DBSCAN_FIXED_EPS_RECIPE,
+    "dbscan+normalize+fixed-eps": DBSCAN_NORMALIZE_FIXED_EPS_RECIPE,
+    "dbscan+pca+fixed-eps": DBSCAN_PCA_FIXED_EPS_RECIPE,
+    "dbscan+normalize+pca+fixed-eps": DBSCAN_NORMALIZE_PCA_FIXED_EPS_RECIPE,
+    "agglomerative+normalize+fixed-k": AGGLOMERATIVE_NORMALIZE_FIXED_K_RECIPE,
+    "agglomerative+pca+fixed-k": AGGLOMERATIVE_PCA_FIXED_K_RECIPE,
+    "hdbscan+normalize+fixed": HDBSCAN_NORMALIZE_FIXED_RECIPE,
+    "hdbscan+pca+fixed": HDBSCAN_PCA_FIXED_RECIPE,
+    "hdbscan+normalize+pca+fixed": HDBSCAN_NORMALIZE_PCA_FIXED_RECIPE,
 }
 
 

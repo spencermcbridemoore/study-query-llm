@@ -22,6 +22,19 @@ from study_query_llm.pipeline.clustering import (
     run_gmm_bic_argmin_analysis,
     run_kmeans_silhouette_kneedle_analysis,
 )
+from study_query_llm.pipeline.clustering.agglomerative_preproc_runner import (
+    run_agglomerative_preproc_fixed_k_analysis,
+)
+from study_query_llm.pipeline.clustering.dbscan_fixed_eps_runner import (
+    run_dbscan_fixed_eps_analysis,
+)
+from study_query_llm.pipeline.clustering.gmm_fixed_k_runner import run_gmm_fixed_k_analysis
+from study_query_llm.pipeline.clustering.hdbscan_preproc_fixed_runner import (
+    run_hdbscan_preproc_fixed_analysis,
+)
+from study_query_llm.pipeline.clustering.kmeans_fixed_k_runner import (
+    run_kmeans_fixed_k_analysis,
+)
 from study_query_llm.pipeline.embed import embed
 from study_query_llm.pipeline.hdbscan_runner import run_hdbscan_analysis
 from study_query_llm.pipeline.parse import parse
@@ -812,6 +825,76 @@ def test_analyze_gmm_normalize_pca_sweep_writes_clustering_summary_no_v1_fields(
                 "embedding_deployment": "test-embedding-model",
             },
         ),
+        (
+            "kmeans+normalize+fixed-k",
+            run_kmeans_fixed_k_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "k": 2,
+            },
+        ),
+        (
+            "gmm+pca+fixed-k",
+            run_gmm_fixed_k_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "k": 2,
+                "pca_n_components": 3,
+            },
+        ),
+        (
+            "dbscan+normalize+pca+fixed-eps",
+            run_dbscan_fixed_eps_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "eps": 10.0,
+                "min_samples": 2,
+                "pca_n_components": 3,
+            },
+        ),
+        (
+            "spherical-kmeans+approx+fixed-k",
+            run_kmeans_fixed_k_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "k": 2,
+            },
+        ),
+        (
+            "agglomerative+normalize+fixed-k",
+            run_agglomerative_preproc_fixed_k_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "k": 2,
+            },
+        ),
+        (
+            "hdbscan+pca+fixed",
+            run_hdbscan_preproc_fixed_analysis,
+            {
+                "dataset_slug": "analyze_fixture",
+                "representation_type": "full",
+                "embedding_provider": "test-provider",
+                "embedding_deployment": "test-embedding-model",
+                "min_cluster_size": 2,
+                "pca_n_components": 3,
+            },
+        ),
     ],
 )
 def test_analyze_registry_dispatch_matches_explicit_runner_fingerprint(
@@ -829,7 +912,7 @@ def test_analyze_registry_dispatch_matches_explicit_runner_fingerprint(
         artifact_dir=artifact_dir,
     )
 
-    if method_name == "hdbscan+fixed":
+    if method_name.startswith("hdbscan"):
         class _FakeHDBSCAN:
             def __init__(self, **kwargs):
                 self._kwargs = dict(kwargs)

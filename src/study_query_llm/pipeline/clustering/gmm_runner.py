@@ -24,9 +24,10 @@ def _resolved_pipeline_from_params(
     effective = list(parameters.get("_v1_pipeline_effective") or [])
     if resolved and effective:
         return resolved, [str(stage) for stage in effective]
-    return (
-        [{"stage": "embed", "params": {}}, {"stage": "gmm", "params": {}}],
-        ["embed", "gmm"],
+    raise ValueError(
+        "gmm+normalize+pca+sweep requires synthesized _v1_pipeline_resolved/"
+        "_v1_pipeline_effective payload; direct-runner invocation without dispatcher "
+        "synthesis is no longer supported (Slice 2 invariant lock)."
     )
 
 

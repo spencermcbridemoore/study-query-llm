@@ -43,7 +43,6 @@ class RunTarget:
 
     dataset: str
     embedding_engine: str
-    summarizer: str
     entry_max: int
     n_restarts_suffix: str  # e.g. "50runs"
 
@@ -196,27 +195,15 @@ def _normalize_k_ranges(
     return [(k_min, k_max)]
 
 
-def normalize_summarizer(value: Any) -> str:
-    """Convert summarizer value to canonical string for run_key.
-
-    None -> "None", otherwise str(value).
-    """
-    if value is None:
-        return "None"
-    return str(value)
-
-
 def build_run_key(
     dataset: str,
     embedding_engine: str,
-    summarizer: str,
     entry_max: int,
     n_restarts_suffix: str = "50runs",
 ) -> str:
     """Build deterministic clustering run_key used by current ingestion scripts."""
     engine_safe = _safe_name(embedding_engine)
-    sum_safe = _safe_name(normalize_summarizer(summarizer))
-    return f"{dataset}_{engine_safe}_{sum_safe}_{entry_max}_{n_restarts_suffix}"
+    return f"{dataset}_{engine_safe}_{entry_max}_{n_restarts_suffix}"
 
 
 def expand_parameter_axes(
@@ -227,21 +214,18 @@ def expand_parameter_axes(
     """Expand clustering parameter axes into deterministic list of RunTargets."""
     datasets = parameter_axes.get("datasets", [])
     engines = parameter_axes.get("embedding_engines", [])
-    summarizers = parameter_axes.get("summarizers", [])
 
     targets: List[RunTarget] = []
     for dataset in datasets:
         for engine in engines:
-            for summ in summarizers:
-                targets.append(
-                    RunTarget(
-                        dataset=str(dataset),
-                        embedding_engine=str(engine),
-                        summarizer=normalize_summarizer(summ),
-                        entry_max=entry_max,
-                        n_restarts_suffix=n_restarts_suffix,
-                    )
+            targets.append(
+                RunTarget(
+                    dataset=str(dataset),
+                    embedding_engine=str(engine),
+                    entry_max=entry_max,
+                    n_restarts_suffix=n_restarts_suffix,
                 )
+            )
     return targets
 
 
@@ -251,7 +235,6 @@ def targets_to_run_keys(targets: List[RunTarget]) -> List[str]:
         build_run_key(
             t.dataset,
             t.embedding_engine,
-            t.summarizer,
             t.entry_max,
             t.n_restarts_suffix,
         )
@@ -316,14 +299,12 @@ class ClusteringSweepAdapter:
                 run_key=build_run_key(
                     t.dataset,
                     t.embedding_engine,
-                    t.summarizer,
                     t.entry_max,
                     t.n_restarts_suffix,
                 ),
                 target={
                     "dataset": t.dataset,
                     "embedding_engine": t.embedding_engine,
-                    "summarizer": t.summarizer,
                 },
             )
             for t in targets
@@ -389,7 +370,6 @@ class ClusteringSweepAdapter:
                                 "run_key": run_key,
                                 "dataset": target.get("dataset"),
                                 "embedding_engine": target.get("embedding_engine"),
-                                "summarizer": target.get("summarizer", "None"),
                                 "k_min": int(k_min),
                                 "k_max": int(k_max),
                                 "try_idx": int(try_idx),
@@ -411,7 +391,6 @@ class ClusteringSweepAdapter:
                             "run_key": run_key,
                             "dataset": target.get("dataset"),
                             "embedding_engine": target.get("embedding_engine"),
-                            "summarizer": target.get("summarizer", "None"),
                             "k_min": int(k_min),
                             "k_max": int(k_max),
                             "tries_per_k": int(tries_per_k),
@@ -432,7 +411,6 @@ class ClusteringSweepAdapter:
                         "run_key": run_key,
                         "dataset": target.get("dataset"),
                         "embedding_engine": target.get("embedding_engine"),
-                        "summarizer": target.get("summarizer", "None"),
                         "k_ranges": [[int(lo), int(hi)] for (lo, hi) in k_ranges],
                         "tries_per_k": int(tries_per_k),
                     },

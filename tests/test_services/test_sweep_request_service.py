@@ -24,7 +24,6 @@ from study_query_llm.experiments.sweep_request_types import (
     expand_parameter_axes,
     get_sweep_type_adapter,
     list_registered_sweep_types,
-    normalize_summarizer,
     targets_to_run_keys,
     RunTarget,
     REQUEST_STATUS_REQUESTED,
@@ -45,13 +44,6 @@ def db_connection():
 # sweep_request_types (no DB)
 # ---------------------------------------------------------------------------
 
-
-def test_normalize_summarizer():
-    """normalize_summarizer: None -> 'None', str unchanged."""
-    assert normalize_summarizer(None) == "None"
-    assert normalize_summarizer("gpt-4o") == "gpt-4o"
-
-
 def test_normalize_result_ref_strips_temp_and_timestamp_path_noise():
     raw_ref = (
         r"C:\Users\spenc\AppData\Local\Temp\sq-run-123\2026-04-28T15:00:00Z\job_shards\leaf.json"
@@ -69,23 +61,20 @@ def test_build_run_key():
     rk = build_run_key(
         dataset="dbpedia",
         embedding_engine="embed-v-4-0",
-        summarizer="gpt-4o-mini",
         entry_max=300,
         n_restarts_suffix="50runs",
     )
-    assert rk == "dbpedia_embed_v_4_0_gpt_4o_mini_300_50runs"
+    assert rk == "dbpedia_embed_v_4_0_300_50runs"
 
 
-def test_build_run_key_summarizer_none():
-    """build_run_key with summarizer None uses 'None' in key."""
+def test_build_run_key_no_summarizer_dimension():
+    """build_run_key remains deterministic without a summarizer segment."""
     rk = build_run_key(
         dataset="yahoo",
         embedding_engine="text-embedding-3-small",
-        summarizer=None,
         entry_max=300,
     )
-    assert "None" in rk
-    assert rk == "yahoo_text_embedding_3_small_None_300_50runs"
+    assert rk == "yahoo_text_embedding_3_small_300_50runs"
 
 
 def test_expand_parameter_axes():
@@ -93,27 +82,24 @@ def test_expand_parameter_axes():
     axes = {
         "datasets": ["dbpedia", "yahoo"],
         "embedding_engines": ["embed-v-4-0"],
-        "summarizers": [None, "gpt-4o"],
     }
     targets = expand_parameter_axes(axes, entry_max=300)
-    assert len(targets) == 4  # 2 * 1 * 2
+    assert len(targets) == 2  # 2 * 1
     assert targets[0].dataset == "dbpedia"
     assert targets[0].embedding_engine == "embed-v-4-0"
-    assert targets[0].summarizer == "None"
-    assert targets[1].summarizer == "gpt-4o"
-    assert targets[2].dataset == "yahoo"
+    assert targets[1].dataset == "yahoo"
 
 
 def test_targets_to_run_keys():
     """targets_to_run_keys converts RunTargets to run_key strings."""
     targets = [
-        RunTarget("dbpedia", "e1", "s1", 300, "50runs"),
-        RunTarget("yahoo", "e2", "s2", 300, "50runs"),
+        RunTarget("dbpedia", "e1", 300, "50runs"),
+        RunTarget("yahoo", "e2", 300, "50runs"),
     ]
     keys = targets_to_run_keys(targets)
     assert len(keys) == 2
-    assert keys[0] == "dbpedia_e1_s1_300_50runs"
-    assert keys[1] == "yahoo_e2_s2_300_50runs"
+    assert keys[0] == "dbpedia_e1_300_50runs"
+    assert keys[1] == "yahoo_e2_300_50runs"
 
 
 def test_list_registered_sweep_types_contains_expected():
@@ -154,10 +140,9 @@ def _node_signatures(graph_spec):
 def test_clustering_adapter_graph_spec_matches_legacy_shape():
     adapter = get_sweep_type_adapter(SWEEP_TYPE_CLUSTERING)
     run_key_to_target = {
-        "dbpedia_engine_a_None_50_50runs": {
+        "dbpedia_engine_a_50_50runs": {
             "dataset": "dbpedia",
             "embedding_engine": "engine/a",
-            "summarizer": "None",
         }
     }
     graph = adapter.build_orchestration_graph(
@@ -174,15 +159,14 @@ def test_clustering_adapter_graph_spec_matches_legacy_shape():
     expected = [
         {
             "job_type": "run_k_try",
-            "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try0",
-            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "job_key": "dbpedia_engine_a_50_50runs__k2_3__try0",
+            "base_run_key": "dbpedia_engine_a_50_50runs",
             "payload_keys": [
                 "dataset",
                 "embedding_engine",
                 "k_max",
                 "k_min",
                 "run_key",
-                "summarizer",
                 "tries_per_k",
                 "try_idx",
             ],
@@ -192,15 +176,14 @@ def test_clustering_adapter_graph_spec_matches_legacy_shape():
         },
         {
             "job_type": "run_k_try",
-            "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try1",
-            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "job_key": "dbpedia_engine_a_50_50runs__k2_3__try1",
+            "base_run_key": "dbpedia_engine_a_50_50runs",
             "payload_keys": [
                 "dataset",
                 "embedding_engine",
                 "k_max",
                 "k_min",
                 "run_key",
-                "summarizer",
                 "tries_per_k",
                 "try_idx",
             ],
@@ -210,40 +193,38 @@ def test_clustering_adapter_graph_spec_matches_legacy_shape():
         },
         {
             "job_type": "reduce_k",
-            "job_key": "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
-            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "job_key": "dbpedia_engine_a_50_50runs__reduce_k2_3",
+            "base_run_key": "dbpedia_engine_a_50_50runs",
             "payload_keys": [
                 "dataset",
                 "embedding_engine",
                 "k_max",
                 "k_min",
                 "run_key",
-                "summarizer",
                 "tries_per_k",
             ],
             "seed_value": None,
             "max_attempts": 3,
             "depends_on_job_keys": [
-                "dbpedia_engine_a_None_50_50runs__k2_3__try0",
-                "dbpedia_engine_a_None_50_50runs__k2_3__try1",
+                "dbpedia_engine_a_50_50runs__k2_3__try0",
+                "dbpedia_engine_a_50_50runs__k2_3__try1",
             ],
         },
         {
             "job_type": "finalize_run",
-            "job_key": "dbpedia_engine_a_None_50_50runs__finalize_run",
-            "base_run_key": "dbpedia_engine_a_None_50_50runs",
+            "job_key": "dbpedia_engine_a_50_50runs__finalize_run",
+            "base_run_key": "dbpedia_engine_a_50_50runs",
             "payload_keys": [
                 "dataset",
                 "embedding_engine",
                 "k_ranges",
                 "run_key",
-                "summarizer",
                 "tries_per_k",
             ],
             "seed_value": None,
             "max_attempts": 3,
             "depends_on_job_keys": [
-                "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
+                "dbpedia_engine_a_50_50runs__reduce_k2_3",
             ],
         },
     ]
@@ -253,15 +234,13 @@ def test_clustering_adapter_graph_spec_matches_legacy_shape():
 def test_clustering_adapter_analysis_jobs_require_lineage_inputs():
     adapter = get_sweep_type_adapter(SWEEP_TYPE_CLUSTERING)
     run_key_to_target = {
-        "dbpedia_engine_a_None_50_50runs": {
+        "dbpedia_engine_a_50_50runs": {
             "dataset": "dbpedia",
             "embedding_engine": "engine/a",
-            "summarizer": "None",
         },
-        "yahoo_engine_a_None_50_50runs": {
+        "yahoo_engine_a_50_50runs": {
             "dataset": "yahoo",
             "embedding_engine": "engine/a",
-            "summarizer": "None",
         },
     }
     analysis_catalog = [
@@ -285,7 +264,7 @@ def test_clustering_adapter_analysis_jobs_require_lineage_inputs():
         analysis_catalog=analysis_catalog,
         enable_analysis_jobs=True,
         lineage_inputs_by_run_key={
-            "dbpedia_engine_a_None_50_50runs": {
+            "dbpedia_engine_a_50_50runs": {
                 "dataset_snapshot_ids": [33, 31, 33],
                 "embedding_batch_group_id": 44,
             }
@@ -294,17 +273,17 @@ def test_clustering_adapter_analysis_jobs_require_lineage_inputs():
     analysis_jobs = [node for node in graph.jobs if node.job_type == "analysis_run"]
     assert len(analysis_jobs) == 1
     analysis_job = analysis_jobs[0]
-    assert analysis_job.job_key == "req17__dbpedia_engine_a_None_50_50runs__analysis__bundle_eval"
+    assert analysis_job.job_key == "req17__dbpedia_engine_a_50_50runs__analysis__bundle_eval"
     assert list(analysis_job.depends_on_job_keys) == [
-        "dbpedia_engine_a_None_50_50runs__finalize_run"
+        "dbpedia_engine_a_50_50runs__finalize_run"
     ]
-    assert analysis_job.payload_json["run_key"] == "dbpedia_engine_a_None_50_50runs"
+    assert analysis_job.payload_json["run_key"] == "dbpedia_engine_a_50_50runs"
     assert analysis_job.payload_json["parameters"] == {"top_n": 5}
     assert graph.metadata_updates["analysis_execution_mode"] == "orchestration_jobs"
     assert graph.metadata_updates["analysis_job_count"] == 1
     skipped = graph.metadata_updates.get("analysis_skipped_run_keys") or {}
-    assert "yahoo_engine_a_None_50_50runs" in skipped
-    assert skipped["yahoo_engine_a_None_50_50runs"][0]["missing_inputs"] == [
+    assert "yahoo_engine_a_50_50runs" in skipped
+    assert skipped["yahoo_engine_a_50_50runs"][0]["missing_inputs"] == [
         "dataset_snapshot_ids",
         "embedding_batch_group_id",
     ]
@@ -435,7 +414,6 @@ def test_create_request_computes_expected_keys(db_connection):
         axes = {
             "datasets": ["dbpedia"],
             "embedding_engines": ["embed-v-4-0"],
-            "summarizers": [None, "gpt-4o"],
         }
         req_id = svc.create_request(
             request_name="test_sweep",
@@ -449,9 +427,8 @@ def test_create_request_computes_expected_keys(db_connection):
         assert req is not None
         assert req["request_status"] == REQUEST_STATUS_REQUESTED
         expected = req["expected_run_keys"]
-        assert len(expected) == 2
-        assert "dbpedia_embed_v_4_0_None_300_50runs" in expected
-        assert "dbpedia_embed_v_4_0_gpt_4o_300_50runs" in expected
+        assert len(expected) == 1
+        assert "dbpedia_embed_v_4_0_300_50runs" in expected
 
 
 def test_create_request_normalizes_lineage_inputs_by_run_key(db_connection):
@@ -466,11 +443,10 @@ def test_create_request_normalizes_lineage_inputs_by_run_key(db_connection):
             parameter_axes={
                 "datasets": ["dbpedia"],
                 "embedding_engines": ["engine/a"],
-                "summarizers": ["None"],
             },
             entry_max=50,
             run_key_to_lineage_inputs={
-                "dbpedia_engine_a_None_50_50runs": {
+                "dbpedia_engine_a_50_50runs": {
                     "dataset_snapshot_ids": [9, 7, 9],
                     "embedding_batch_group_id": "18",
                 },
@@ -483,8 +459,8 @@ def test_create_request_normalizes_lineage_inputs_by_run_key(db_connection):
         req = svc.get_request(req_id)
         assert req is not None
         lineage = dict(req.get("run_key_to_lineage_inputs") or {})
-        assert list(lineage.keys()) == ["dbpedia_engine_a_None_50_50runs"]
-        assert lineage["dbpedia_engine_a_None_50_50runs"] == {
+        assert list(lineage.keys()) == ["dbpedia_engine_a_50_50runs"]
+        assert lineage["dbpedia_engine_a_50_50runs"] == {
             "dataset_snapshot_ids": [7, 9],
             "embedding_batch_group_id": 18,
         }
@@ -501,13 +477,12 @@ def test_clustering_analysis_jobs_respect_per_type_flag(db_connection):
             parameter_axes={
                 "datasets": ["dbpedia"],
                 "embedding_engines": ["engine/a"],
-                "summarizers": ["None"],
             },
             entry_max=50,
             execution_mode="sharded",
             shard_config={"k_ranges": [[2, 2]], "tries_per_k": 1},
             run_key_to_lineage_inputs={
-                "dbpedia_engine_a_None_50_50runs": {
+                "dbpedia_engine_a_50_50runs": {
                     "dataset_snapshot_ids": [11],
                     "embedding_batch_group_id": 22,
                 }
@@ -544,7 +519,7 @@ def test_clustering_analysis_jobs_respect_per_type_flag(db_connection):
         assert len(analysis_jobs) == 1
         assert analysis_jobs[0].job_key == (
             "req"
-            f"{int(req_id)}__dbpedia_engine_a_None_50_50runs__analysis__bundle_eval"
+            f"{int(req_id)}__dbpedia_engine_a_50_50runs__analysis__bundle_eval"
         )
 
 
@@ -557,7 +532,6 @@ def test_compute_progress_partial_deliveries(db_connection):
         axes = {
             "datasets": ["dbpedia"],
             "embedding_engines": ["embed-v-4-0"],
-            "summarizers": ["gpt-4o"],
         }
         req_id = svc.create_request(
             request_name="partial_test",
@@ -567,7 +541,7 @@ def test_compute_progress_partial_deliveries(db_connection):
             entry_max=300,
         )
 
-        expected_key = "dbpedia_embed_v_4_0_gpt_4o_300_50runs"
+        expected_key = "dbpedia_embed_v_4_0_300_50runs"
         progress = svc.compute_progress(req_id)
         assert progress["expected_count"] == 1
         assert progress["completed_count"] == 0
@@ -596,7 +570,7 @@ def test_record_delivery_idempotent(db_connection):
         svc = SweepRequestService(repo)
         from study_query_llm.db.models_v2 import GroupLink
 
-        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"], "summarizers": ["s1"]}
+        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"]}
         req_id = svc.create_request(
             request_name="idempotent_test",
             algorithm="cosine_kllmeans_no_pca",
@@ -608,11 +582,11 @@ def test_record_delivery_idempotent(db_connection):
         run_id = repo.create_group(
             group_type=GROUP_TYPE_CLUSTERING_RUN,
             name="run1",
-            metadata_json={"run_key": "dbpedia_e1_s1_300_50runs"},
+            metadata_json={"run_key": "dbpedia_e1_300_50runs"},
         )
 
-        ok1 = svc.record_delivery(req_id, run_id, "dbpedia_e1_s1_300_50runs")
-        ok2 = svc.record_delivery(req_id, run_id, "dbpedia_e1_s1_300_50runs")
+        ok1 = svc.record_delivery(req_id, run_id, "dbpedia_e1_300_50runs")
+        ok2 = svc.record_delivery(req_id, run_id, "dbpedia_e1_300_50runs")
 
         assert ok1 is True
         assert ok2 is True
@@ -631,7 +605,7 @@ def test_finalize_if_fulfilled_creates_sweep(db_connection):
         repo = RawCallRepository(session)
         svc = SweepRequestService(repo)
 
-        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"], "summarizers": ["s1"]}
+        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"]}
         req_id = svc.create_request(
             request_name="fulfill_test",
             algorithm="cosine_kllmeans_no_pca",
@@ -640,7 +614,7 @@ def test_finalize_if_fulfilled_creates_sweep(db_connection):
             entry_max=300,
         )
 
-        run_key = "dbpedia_e1_s1_300_50runs"
+        run_key = "dbpedia_e1_300_50runs"
         run_id = repo.create_group(
             group_type=GROUP_TYPE_CLUSTERING_RUN,
             name="run1",
@@ -667,7 +641,7 @@ def test_finalize_if_fulfilled_preserves_sweep_semantics(db_connection):
         svc = SweepRequestService(repo)
         from study_query_llm.db.models_v2 import GroupLink
 
-        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"], "summarizers": ["s1"]}
+        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"]}
         req_id = svc.create_request(
             request_name="semantics_test",
             algorithm="cosine_kllmeans_no_pca",
@@ -679,7 +653,7 @@ def test_finalize_if_fulfilled_preserves_sweep_semantics(db_connection):
         run_id = repo.create_group(
             group_type=GROUP_TYPE_CLUSTERING_RUN,
             name="run1",
-            metadata_json={"run_key": "dbpedia_e1_s1_300_50runs"},
+            metadata_json={"run_key": "dbpedia_e1_300_50runs"},
         )
 
         sweep_id = svc.finalize_if_fulfilled(req_id, sweep_name="my_sweep")
@@ -709,7 +683,7 @@ def test_finalize_if_fulfilled_is_idempotent(db_connection):
         svc = SweepRequestService(repo)
         from study_query_llm.db.models_v2 import Group
 
-        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"], "summarizers": ["s1"]}
+        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"]}
         req_id = svc.create_request(
             request_name="idempotent_finalize",
             algorithm="cosine_kllmeans_no_pca",
@@ -721,7 +695,7 @@ def test_finalize_if_fulfilled_is_idempotent(db_connection):
         repo.create_group(
             group_type=GROUP_TYPE_CLUSTERING_RUN,
             name="run1",
-            metadata_json={"run_key": "dbpedia_e1_s1_300_50runs"},
+            metadata_json={"run_key": "dbpedia_e1_300_50runs"},
         )
 
         sweep_id_1 = svc.finalize_if_fulfilled(req_id, sweep_name="idempotent_sweep")
@@ -746,7 +720,6 @@ def test_finalize_if_fulfilled_returns_none_when_missing(db_connection):
         axes = {
             "datasets": ["dbpedia", "yahoo"],
             "embedding_engines": ["e1"],
-            "summarizers": ["s1"],
         }
         req_id = svc.create_request(
             request_name="missing_test",
@@ -760,7 +733,7 @@ def test_finalize_if_fulfilled_returns_none_when_missing(db_connection):
         repo.create_group(
             group_type=GROUP_TYPE_CLUSTERING_RUN,
             name="run1",
-            metadata_json={"run_key": "dbpedia_e1_s1_300_50runs"},
+            metadata_json={"run_key": "dbpedia_e1_300_50runs"},
         )
 
         sweep_id = svc.finalize_if_fulfilled(req_id)
@@ -777,7 +750,7 @@ def test_list_requests(db_connection):
             request_name="req1",
             algorithm="cosine_kllmeans_no_pca",
             fixed_config={},
-            parameter_axes={"datasets": ["dbpedia"], "embedding_engines": ["e1"], "summarizers": ["s1"]},
+            parameter_axes={"datasets": ["dbpedia"], "embedding_engines": ["e1"]},
             entry_max=300,
         )
 

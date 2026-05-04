@@ -55,7 +55,6 @@ def test_parse_run_k_try_payload_valid():
     raw = {
         "embedding_engine": "e/a",
         "dataset": "dbpedia",
-        "summarizer": "None",
         "k_min": 2,
         "k_max": 20,
     }
@@ -69,7 +68,6 @@ def test_parse_run_k_try_payload_valid():
 def test_parse_run_k_try_payload_defaults():
     raw = {"embedding_engine": "e", "dataset": "d"}
     payload = parse_run_k_try_payload(raw)
-    assert payload.summarizer == "None"
     assert payload.k_min == 2
     assert payload.k_max == 20
 
@@ -160,7 +158,6 @@ def test_parse_reduce_k_payload_valid():
             "run_key": "rk1",
             "dataset": "dbpedia",
             "embedding_engine": "engine/a",
-            "summarizer": "None",
             "k_min": 2,
             "k_max": 3,
             "tries_per_k": 2,
@@ -182,7 +179,6 @@ def test_parse_finalize_run_payload_valid():
             "run_key": "rk1",
             "dataset": "dbpedia",
             "embedding_engine": "engine/a",
-            "summarizer": "None",
             "k_ranges": [[2, 3]],
             "tries_per_k": 2,
         }

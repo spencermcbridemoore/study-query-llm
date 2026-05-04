@@ -188,7 +188,6 @@ class JobReducerService:
             metadata = {
                 "benchmark_source": (job.payload_json or {}).get("dataset", "unknown"),
                 "embedding_engine": (job.payload_json or {}).get("embedding_engine", "?"),
-                "summarizer": (job.payload_json or {}).get("summarizer", "None"),
                 "n_restarts": int((job.payload_json or {}).get("tries_per_k", 1)),
                 "actual_entry_count": int((job.payload_json or {}).get("n_texts", 0)),
                 "request_group_id": int(job.request_group_id),

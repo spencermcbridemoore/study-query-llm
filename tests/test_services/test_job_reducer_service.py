@@ -22,7 +22,7 @@ def test_finalize_run_job_propagates_lineage_inputs_from_request_metadata(
     tmp_path: Path,
 ) -> None:
     db = _db()
-    run_key = "dbpedia_engine_a_None_50_50runs"
+    run_key = "dbpedia_engine_a_50_50runs"
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         svc = SweepRequestService(repo)
@@ -33,7 +33,6 @@ def test_finalize_run_job_propagates_lineage_inputs_from_request_metadata(
             parameter_axes={
                 "datasets": ["dbpedia"],
                 "embedding_engines": ["engine/a"],
-                "summarizers": ["None"],
             },
             entry_max=50,
             execution_mode="sharded",
@@ -74,7 +73,6 @@ def test_finalize_run_job_propagates_lineage_inputs_from_request_metadata(
                 "run_key": run_key,
                 "dataset": "dbpedia",
                 "embedding_engine": "engine/a",
-                "summarizer": "None",
                 "tries_per_k": 1,
             },
             depends_on_job_ids=[int(reduce_id)],

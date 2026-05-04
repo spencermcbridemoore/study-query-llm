@@ -25,7 +25,6 @@ class RunKTryPayload(BaseModel):
 
     embedding_engine: str
     dataset: str
-    summarizer: str = "None"
     k_min: int = 2
     k_max: int = 20
     try_idx: int = 0
@@ -40,7 +39,6 @@ class ReduceKPayload(BaseModel):
     run_key: str
     dataset: str
     embedding_engine: str
-    summarizer: str = "None"
     k_min: int = 2
     k_max: int = 20
     tries_per_k: int = 1
@@ -54,7 +52,6 @@ class FinalizeRunPayload(BaseModel):
     run_key: str
     dataset: str
     embedding_engine: str
-    summarizer: str = "None"
     k_ranges: list[list[int]] = Field(default_factory=list)
     tries_per_k: int = 1
 

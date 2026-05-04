@@ -1,5 +1,5 @@
 """
-300-sample bigrun sweep runtime: 3 datasets × 3 embeddings × 5 summarizers, 50 restarts each.
+300-sample bigrun sweep runtime: 3 datasets × 3 embeddings, 50 restarts each.
 
 Library entrypoint for scripts and ``python -m study_query_llm.cli sweep run-bigrun``.
 """
@@ -27,7 +27,6 @@ from study_query_llm.experiments.datasets import load_dbpedia_full, load_yahoo_a
 from study_query_llm.experiments.ingestion import ingest_result_to_db, run_key_exists_in_db
 from study_query_llm.experiments.sweep_io import get_output_dir, save_single_sweep_result as save_pkl
 from study_query_llm.services.embeddings import DEPLOYMENT_MAX_TOKENS, estimate_tokens, fetch_embeddings_async
-from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.services.provenance_service import ProvenanceService
 from study_query_llm.services.sweep_request_service import SweepRequestService
 from study_query_llm.utils.estela_loader import load_estela_dict
@@ -47,14 +46,6 @@ EMBEDDING_ENGINES = [
     "embed-v-4-0",
     "text-embedding-3-large",
     "text-embedding-3-small",
-]
-
-SUMMARIZERS = [
-    None,
-    "gpt-4o-mini",
-    "gpt-4o",
-    "gpt-5-chat",
-    "claude-opus-4-6",
 ]
 
 SWEEP_CONFIG = SweepConfig(
@@ -253,34 +244,14 @@ DATASETS = [
 ]
 
 
-async def _run_sweep(texts, embeddings, llm_deployment, db, embedding_engine):
+async def _run_sweep(texts, embeddings):
     from study_query_llm.algorithms.sweep import run_sweep
-
-    paraphraser = create_paraphraser_for_llm(llm_deployment, db)
-
-    async def _embed_async(texts_list):
-        return await fetch_embeddings_async(texts_list, embedding_engine, db)
-
-    def _embed_sync(texts_list):
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                return loop.run_until_complete(_embed_async(texts_list))
-        except RuntimeError:
-            pass
-        return asyncio.run(_embed_async(texts_list))
 
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as executor:
         result = await loop.run_in_executor(
             executor,
-            lambda: run_sweep(
-                texts,
-                embeddings,
-                SWEEP_CONFIG,
-                paraphraser=paraphraser,
-                embedder=_embed_sync if paraphraser else None,
-            ),
+            lambda: run_sweep(texts, embeddings, SWEEP_CONFIG),
         )
     return result
 
@@ -331,16 +302,15 @@ async def main_bigrun_300_sweep(
                 parameter_axes={
                     "datasets": [d["name"] for d in DATASETS],
                     "embedding_engines": EMBEDDING_ENGINES,
-                    "summarizers": [str(s) if s is not None else "None" for s in SUMMARIZERS],
                 },
                 entry_max=ENTRY_MAX,
                 n_restarts_suffix="50runs",
-                description=f"{OUT_PREFIX} sweep request: 3 datasets x 3 embeddings x 5 summarizers",
+                description=f"{OUT_PREFIX} sweep request: 3 datasets x 3 embeddings",
             )
         print(f"[OK] Created sweep request: id={rid}, name={name}")
         return
 
-    total = len(DATASETS) * len(EMBEDDING_ENGINES) * len(SUMMARIZERS)
+    total = len(DATASETS) * len(EMBEDDING_ENGINES)
 
     print("=" * 80)
     print(f"300-sample Bigrun Sweep  ({total} sweeps, each {N_RESTARTS} restarts)")
@@ -350,7 +320,6 @@ async def main_bigrun_300_sweep(
     print(f"  n_restarts  : {N_RESTARTS}")
     print(f"  datasets    : {[d['name'] for d in DATASETS]}")
     print(f"  embeddings  : {EMBEDDING_ENGINES}")
-    print(f"  summarizers : {SUMMARIZERS}")
     print(f"  mode        : skip_pca=True, cosine, normalize")
     if request_id:
         print(f"  request_id  : {request_id} (missing-only mode)")
@@ -399,7 +368,7 @@ async def main_bigrun_300_sweep(
         }
         print(f"  {len(texts)} texts, {len(set(labels))} unique labels")
 
-    tasks_to_run: list[tuple[str, str, str]] = []
+    tasks_to_run: list[tuple[str, str]] = []
     if request_id:
         with db.session_scope() as session:
             repo = RawCallRepository(session)
@@ -414,7 +383,6 @@ async def main_bigrun_300_sweep(
                     (
                         t["dataset"],
                         t["embedding_engine"],
-                        t["summarizer"],
                     )
                 )
         if not tasks_to_run:
@@ -427,9 +395,7 @@ async def main_bigrun_300_sweep(
     else:
         for dataset_name in loaded:
             for embedding_engine in EMBEDDING_ENGINES:
-                for llm in SUMMARIZERS:
-                    summarizer_name = "None" if llm is None else str(llm)
-                    tasks_to_run.append((dataset_name, embedding_engine, summarizer_name))
+                tasks_to_run.append((dataset_name, embedding_engine))
         total_to_run = len(tasks_to_run)
 
     run_ids_ingested: list[int] = []
@@ -438,11 +404,9 @@ async def main_bigrun_300_sweep(
     current_engine = None
     embeddings_cache = None
 
-    for dataset_name, embedding_engine, summarizer_name in tasks_to_run:
+    for dataset_name, embedding_engine in tasks_to_run:
         run_count += 1
         engine_safe = _safe_name(embedding_engine)
-        sum_safe = _safe_name(summarizer_name)
-        llm = None if summarizer_name == "None" else summarizer_name
 
         if dataset_name not in loaded:
             print(f"  [{run_count}/{total_to_run}] {dataset_name} (SKIP – not loaded)")
@@ -471,10 +435,10 @@ async def main_bigrun_300_sweep(
             texts_eng = texts
             gt_eng = gt_labels
 
-        run_key = f"{dataset_name}_{engine_safe}_{sum_safe}_{ENTRY_MAX}_50runs"
+        run_key = f"{dataset_name}_{engine_safe}_{ENTRY_MAX}_50runs"
         out_name = (
             f"{OUT_PREFIX}_entry{ENTRY_MAX}_{dataset_name}"
-            f"_{engine_safe}_{sum_safe}_"
+            f"_{engine_safe}_"
         )
 
         if request_id:
@@ -487,18 +451,16 @@ async def main_bigrun_300_sweep(
             )
             if not claimed:
                 print(
-                    f"  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} / "
-                    f"{summarizer_name} (SKIP – claimed by another worker or already completed)"
+                    f"  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} "
+                    f"(SKIP – claimed by another worker or already completed)"
                 )
                 continue
         elif not force and run_key_exists_in_db(db, run_key):
             # Non-request/local execution path keeps compatibility pre-check.
-            print(f"  [{run_count}/{total_to_run}] {summarizer_name} (SKIP – run_key in DB)")
+            print(f"  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} (SKIP – run_key in DB)")
             continue
 
-        print(
-            f"\n  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine} / {summarizer_name}"
-        )
+        print(f"\n  [{run_count}/{total_to_run}] {dataset_name} / {embedding_engine}")
 
         if (current_dataset, current_engine) != (dataset_name, embedding_engine):
             try:
@@ -513,7 +475,7 @@ async def main_bigrun_300_sweep(
 
         try:
             result = await asyncio.wait_for(
-                _run_sweep(texts_eng, embeddings, llm, db, embedding_engine),
+                _run_sweep(texts_eng, embeddings),
                 timeout=7200.0,
             )
         except asyncio.TimeoutError:
@@ -539,7 +501,6 @@ async def main_bigrun_300_sweep(
             "actual_entry_count": len(texts_eng),
             "actual_label_count": len(set(gt_eng)) if gt_eng is not None else 0,
             "benchmark_source": dataset_name,
-            "summarizer": summarizer_name,
             "embedding_engine": embedding_engine,
             "n_restarts": N_RESTARTS,
             "sweep_config": {
@@ -549,7 +510,7 @@ async def main_bigrun_300_sweep(
                 "n_restarts": N_RESTARTS,
                 "compute_stability": True,
             },
-            "note": "300-sample bigrun sweep: 3 datasets × 3 embeddings × 5 summarizers",
+            "note": "300-sample bigrun sweep: 3 datasets × 3 embeddings",
         }
 
         run_id = ingest_result_to_db(result, metadata, gt_eng, db, run_key)
@@ -622,12 +583,10 @@ async def main_bigrun_300_sweep(
                         parameter_axes={
                             "datasets": list(loaded.keys()),
                             "embedding_engines": EMBEDDING_ENGINES,
-                            "summarizers": [str(s) if s is not None else "None" for s in SUMMARIZERS],
                         },
                         description=(
                             f"{OUT_PREFIX} sweep: {len(loaded)} datasets x "
                             f"{len(EMBEDDING_ENGINES)} embeddings x "
-                            f"{len(SUMMARIZERS)} summarizers, "
                             f"{N_RESTARTS} restarts each."
                         ),
                     )
@@ -657,7 +616,7 @@ async def main_bigrun_300_sweep(
 
 
 def build_bigrun_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="300-sample bigrun sweep (3×3×5, 50 restarts)")
+    parser = argparse.ArgumentParser(description="300-sample bigrun sweep (3×3, 50 restarts)")
     parser.add_argument(
         "--force",
         action="store_true",

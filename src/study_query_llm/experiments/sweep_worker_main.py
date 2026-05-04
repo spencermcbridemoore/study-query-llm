@@ -42,7 +42,6 @@ from study_query_llm.services.embeddings import (
 from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.provenance_service import ProvenanceService
-from study_query_llm.services.paraphraser_factory import create_paraphraser_for_llm
 from study_query_llm.services.jobs import (
     ClusteringReducerPlugin,
     JobReducerService,
@@ -80,8 +79,6 @@ EMBEDDING_ENGINES = [
     "nomic-ai/nomic-embed-text-v2-moe",
     "sentence-transformers/all-mpnet-base-v2",
 ]
-
-SUMMARIZERS = [None, "gpt-4o-mini", "gpt-4o", "gpt-5-chat"]
 
 SWEEP_CONFIG = SweepConfig(
     skip_pca=True,
@@ -427,7 +424,6 @@ def run_one_run_k_try_job(
 
     current_engine = payload.get("embedding_engine")
     dataset_name = payload.get("dataset")
-    summarizer_key = payload.get("summarizer", "None")
     k_min = int(payload.get("k_min", K_MIN))
     k_max = int(payload.get("k_max", K_MAX))
     seed_value = int(seed_value or payload.get("seed_value", 0))
@@ -451,7 +447,6 @@ def run_one_run_k_try_job(
     texts = dataset["texts"]
     labels = dataset["labels"]
     gt = labels if dataset["has_gt"] else None
-    summarizer_name = None if summarizer_key == "None" else summarizer_key
 
     def _embed_sync(txts):
         dataset_key = f"{dataset_name}:entry_max={len(txts)}"
@@ -482,15 +477,8 @@ def run_one_run_k_try_job(
     base_embed_started = time.perf_counter()
     embeddings = _embed_sync(texts)
     base_embed_seconds = time.perf_counter() - base_embed_started
-    paraphraser = create_paraphraser_for_llm(summarizer_name, db) if summarizer_name else None
     sweep_started = time.perf_counter()
-    result = run_sweep(
-        texts,
-        embeddings,
-        cfg,
-        paraphraser=paraphraser,
-        embedder=_embed_sync if paraphraser else None,
-    )
+    result = run_sweep(texts, embeddings, cfg)
     sweep_seconds = time.perf_counter() - sweep_started
     sweep_timing = dict((result.pca or {}).get("timing") or {})
     shard_payload = {
@@ -504,7 +492,6 @@ def run_one_run_k_try_job(
         "seed_value": seed_value,
         "dataset": dataset_name,
         "embedding_engine": current_engine,
-        "summarizer": summarizer_key,
         "ground_truth_labels": gt.tolist() if gt is not None else None,
         "n_texts": len(texts),
         "profiling": {
@@ -1224,7 +1211,6 @@ def _run_clustering_standalone_worker_loop(
                     break
 
                 dataset_name = str(target.get("dataset") or "")
-                summarizer_key = target.get("summarizer", "None")
 
                 if not _claim_run_target(
                     request_id=request_id,
@@ -1234,7 +1220,6 @@ def _run_clustering_standalone_worker_loop(
                 ):
                     continue
 
-                summarizer_name = None if summarizer_key == "None" else summarizer_key
                 dataset = loaded.get(dataset_name)
                 if dataset is None:
                     _fail_run_claim(request_id, run_key, worker_id, "dataset_not_loaded")
@@ -1259,16 +1244,7 @@ def _run_clustering_standalone_worker_loop(
 
                 try:
                     embeddings = _embed_sync(texts)
-                    paraphraser = (
-                        create_paraphraser_for_llm(summarizer_name, db) if summarizer_name else None
-                    )
-                    result = run_sweep(
-                        texts,
-                        embeddings,
-                        SWEEP_CONFIG,
-                        paraphraser=paraphraser,
-                        embedder=_embed_sync if paraphraser else None,
-                    )
+                    result = run_sweep(texts, embeddings, SWEEP_CONFIG)
                 except Exception as exc:
                     _fail_run_claim(request_id, run_key, worker_id, str(exc))
                     print(f"[{worker_id}] {run_key} ERROR: {exc}")
@@ -1277,7 +1253,6 @@ def _run_clustering_standalone_worker_loop(
                 metadata = {
                     "embedding_engine": current_engine,
                     "embedding_provider": provider_label,
-                    "summarizer": str(summarizer_key),
                     "n_restarts": N_RESTARTS,
                     "request_group_id": int(request_id),
                     "determinism_class": "pseudo_deterministic",

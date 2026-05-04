@@ -3,44 +3,44 @@
     "claimed_completion": {
       "claimed_count": 4,
       "normalized_result_refs": [
-        "finalize_run/dbpedia_engine_a_None_50_50runs__finalize_run.json",
-        "reduce_k/dbpedia_engine_a_None_50_50runs__reduce_k2_3.json",
-        "run_k_try/dbpedia_engine_a_None_50_50runs__k2_3__try0.json",
-        "run_k_try/dbpedia_engine_a_None_50_50runs__k2_3__try1.json"
+        "finalize_run/dbpedia_engine_a_50_50runs__finalize_run.json",
+        "reduce_k/dbpedia_engine_a_50_50runs__reduce_k2_3.json",
+        "run_k_try/dbpedia_engine_a_50_50runs__k2_3__try0.json",
+        "run_k_try/dbpedia_engine_a_50_50runs__k2_3__try1.json"
       ]
     },
     "completed_jobs": {
       "graph": [
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [
-            "dbpedia_engine_a_None_50_50runs__reduce_k2_3"
+            "dbpedia_engine_a_50_50runs__reduce_k2_3"
           ],
-          "job_key": "dbpedia_engine_a_None_50_50runs__finalize_run",
+          "job_key": "dbpedia_engine_a_50_50runs__finalize_run",
           "job_type": "finalize_run",
           "status": "completed"
         },
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [
-            "dbpedia_engine_a_None_50_50runs__k2_3__try0",
-            "dbpedia_engine_a_None_50_50runs__k2_3__try1"
+            "dbpedia_engine_a_50_50runs__k2_3__try0",
+            "dbpedia_engine_a_50_50runs__k2_3__try1"
           ],
-          "job_key": "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
+          "job_key": "dbpedia_engine_a_50_50runs__reduce_k2_3",
           "job_type": "reduce_k",
           "status": "completed"
         },
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [],
-          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+          "job_key": "dbpedia_engine_a_50_50runs__k2_3__try0",
           "job_type": "run_k_try",
           "status": "completed"
         },
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [],
-          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try1",
+          "job_key": "dbpedia_engine_a_50_50runs__k2_3__try1",
           "job_type": "run_k_try",
           "status": "completed"
         }
@@ -56,7 +56,6 @@
           "embedding_engine",
           "k_ranges",
           "run_key",
-          "summarizer",
           "tries_per_k"
         ],
         "reduce_k": [
@@ -65,7 +64,6 @@
           "k_max",
           "k_min",
           "run_key",
-          "summarizer",
           "tries_per_k"
         ],
         "run_k_try": [
@@ -74,7 +72,6 @@
           "k_max",
           "k_min",
           "run_key",
-          "summarizer",
           "tries_per_k",
           "try_idx"
         ]
@@ -94,35 +91,35 @@
     "planned": {
       "graph": [
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [
-            "dbpedia_engine_a_None_50_50runs__reduce_k2_3"
+            "dbpedia_engine_a_50_50runs__reduce_k2_3"
           ],
-          "job_key": "dbpedia_engine_a_None_50_50runs__finalize_run",
+          "job_key": "dbpedia_engine_a_50_50runs__finalize_run",
           "job_type": "finalize_run",
           "status": "pending"
         },
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [
-            "dbpedia_engine_a_None_50_50runs__k2_3__try0",
-            "dbpedia_engine_a_None_50_50runs__k2_3__try1"
+            "dbpedia_engine_a_50_50runs__k2_3__try0",
+            "dbpedia_engine_a_50_50runs__k2_3__try1"
           ],
-          "job_key": "dbpedia_engine_a_None_50_50runs__reduce_k2_3",
+          "job_key": "dbpedia_engine_a_50_50runs__reduce_k2_3",
           "job_type": "reduce_k",
           "status": "pending"
         },
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [],
-          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try0",
+          "job_key": "dbpedia_engine_a_50_50runs__k2_3__try0",
           "job_type": "run_k_try",
           "status": "ready"
         },
         {
-          "base_run_key": "dbpedia_engine_a_None_50_50runs",
+          "base_run_key": "dbpedia_engine_a_50_50runs",
           "depends_on_job_keys": [],
-          "job_key": "dbpedia_engine_a_None_50_50runs__k2_3__try1",
+          "job_key": "dbpedia_engine_a_50_50runs__k2_3__try1",
           "job_type": "run_k_try",
           "status": "ready"
         }
@@ -138,7 +135,6 @@
           "embedding_engine",
           "k_ranges",
           "run_key",
-          "summarizer",
           "tries_per_k"
         ],
         "reduce_k": [
@@ -147,7 +143,6 @@
           "k_max",
           "k_min",
           "run_key",
-          "summarizer",
           "tries_per_k"
         ],
         "run_k_try": [
@@ -156,7 +151,6 @@
           "k_max",
           "k_min",
           "run_key",
-          "summarizer",
           "tries_per_k",
           "try_idx"
         ]

@@ -90,7 +90,6 @@ def test_sharded_request_planner_creates_leaf_reducer_finalize_jobs():
             parameter_axes={
                 "datasets": ["dbpedia"],
                 "embedding_engines": ["engine/a"],
-                "summarizers": ["None"],
             },
             entry_max=300,
             execution_mode="sharded",

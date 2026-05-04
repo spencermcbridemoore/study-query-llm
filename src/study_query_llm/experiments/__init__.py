@@ -22,6 +22,5 @@ from study_query_llm.experiments.sweep_request_types import (
     get_sweep_type_adapter,
     list_registered_sweep_types,
     list_request_group_types,
-    normalize_summarizer,
     targets_to_run_keys,
 )

@@ -52,7 +52,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Orchestration planning is adapter-driven: sweep-type adapters emit deterministic graph specs (`job_type`, `job_key`, payload shape, dependency edges), and `SweepRequestService` enqueues from spec rather than hardcoded clustering/MCQ planner branches.
 - Temporary planner fallback controls were retired after parity coverage; there is no active legacy-planner environment toggle in the current control plane.
 - Standalone sweep worker execution is now an OrchestrationJob profile for both clustering and MCQ (jobs are planned and consumed through the canonical orchestration table).
-- Clustering request/payload identity retains the persisted `summarizer` key (`parameter_axes["summarizers"]`, `run_key_to_target[*].summarizer`, orchestration payload `summarizer`); `"None"` remains a first-class variant.
+- Clustering request/payload identity no longer threads `summarizer`; clustering run keys and orchestration payloads are dataset+embedding scoped without a `parameter_axes["summarizers"]` axis.
 - Clustering orchestration supports flag-gated, additive `analysis_run` job planning with per-run deterministic keys (`req{request_id}__{run_key}__analysis__{analysis_key}`) when clustering analysis catalog entries are present and lineage-input preconditions are met (`SQ_ENABLE_ANALYSIS_JOBS` + `SQ_ENABLE_CLUSTERING_ANALYSIS_JOBS`).
 - Producer/consumer lineage contract for clustering analysis jobs is active: request metadata can carry per-run lineage inputs (`run_key_to_lineage_inputs`), finalize/ingestion propagation stamps `dataset_snapshot_ids` / `embedding_batch_group_id` onto `clustering_run` metadata, and worker-side clustering analysis input resolution reads those fields by `(request_id, run_key)` before calling `pipeline.analyze`.
 - MCQ orchestration now plans both `mcq_run` execution jobs and dependent `analysis_run` jobs; `python -m study_query_llm.cli analyze` is a compatibility wrapper that processes those orchestration analysis jobs rather than a separate analysis write path.
@@ -112,7 +112,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - `docs/MIGRATION_GUIDE.md` is historical/deprecated migration context.
 - DB target contract v1 is now documented in `docs/living/DB_TARGET_CONTRACT.md`; Stage C/D/E wiring remains intentionally deferred (prep complete, implementation pending).
 - Transitional naming cleanup remains deferred: campaign-era naming defaults in `src/study_query_llm/experiments/sweep_worker_main.py` and sweep-era wording in `src/study_query_llm/providers/managers/ollama.py` are tracked for a later runtime cleanup phase.
-- Legacy script-surface triage for old PCA/summarizer experiment drivers remains deferred to a dedicated cleanup phase (boundary anchoring landed first).
+- Phase 1 mechanical cleanup completed execution-module removal, summarizer-threading removal, and the triage-matrix lane move set; broader root `scripts/run_*.py` surface audit remains deferred to a later cleanup pass.
 
 ## Near-Term Documentation Priorities
 

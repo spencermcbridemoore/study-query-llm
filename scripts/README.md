@@ -64,6 +64,14 @@ Move set v1.2 moved one-off probes/utilities into `scripts/history/one_offs/`
 (for example: `check_db_empty.py`, `check_all_data.py`, `check_embedding_calls.py`,
 `check_rate_limits.py`, TEI/OpenRouter probes, and export/migration one-offs).
 
+Move set v1.3 applied the `a81cfde` triage matrix lane moves:
+
+- moved to `scripts/living/`: `build_embedding_cache_30k.py`,
+  `download_embedding_models.py`, `download_summarizer_models.py`,
+  `fill_snapshot_embeddings_from_baseline.py`
+- moved to `scripts/history/`: `export_mcq_sweep_stats.py`,
+  `probe_snapshot_long_text_openrouter.py`, `run_prompt_snapshot_llama_openrouter.py`
+
 Thin compatibility wrappers remain at their original root paths under `scripts/` and
 print a deprecation notice when executed. **Move set v1.1:** no-PCA/history forwarding
 scripts delegate to [`scripts/deprecated/`](deprecated/) (canonical relocated surface);

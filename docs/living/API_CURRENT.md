@@ -54,7 +54,7 @@ Notes:
   - `SweepRequestService.get_request(request_id)` (returns execution-derived analysis state by default)
   - `SweepRequestService.list_requests(status=..., include_fulfilled=..., sweep_type=...)`
   - Planner behavior: adapter-driven orchestration graph specs are enqueued via `SweepRequestService.ensure_orchestration_jobs(...)` (no planner-type hardcoding in service branches).
-  - Clustering axes and payload identity keep the persisted `summarizer` contract (`parameter_axes["summarizers"]` and payload field `summarizer`); `"None"` remains first-class.
+  - Clustering axes and payload identity are dataset+embedding scoped; `summarizer` is not part of request axes, run-key composition, or clustering orchestration payloads.
 - Unified execution records:
   - `ProvenancedRunService.record_method_execution(...)`
   - `ProvenancedRunService.record_analysis_execution(...)`

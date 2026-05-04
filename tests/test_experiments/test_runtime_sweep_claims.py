@@ -7,6 +7,7 @@ from pathlib import Path
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import SweepRunClaim
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.experiments import runtime_sweeps
 from study_query_llm.experiments import sweep_worker_main as worker_main
 from study_query_llm.experiments.runtime_sweeps import _claim_run_target, _complete_run_claim
 
@@ -155,3 +156,45 @@ def test_standalone_worker_preserves_mcq_fallback_path(tmp_path: Path, monkeypat
     assert called["mcq"] is True
     assert called["cluster"] is False
     assert called["sharded"] is False
+
+
+def test_main_bigrun_create_request_parses_selection_and_lineage_json(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def _fake_main(**kwargs):  # noqa: ANN003
+        captured.update(dict(kwargs))
+        return None
+
+    def _fake_asyncio_run(coro):
+        try:
+            coro.send(None)
+        except StopIteration as exc:
+            return exc.value
+        return None
+
+    monkeypatch.setattr(runtime_sweeps, "main_bigrun_300_sweep", _fake_main)
+    monkeypatch.setattr(runtime_sweeps.asyncio, "run", _fake_asyncio_run)
+
+    runtime_sweeps.main_bigrun_sync(
+        [
+            "--create-request",
+            "--request-name",
+            "fanout_req",
+            "--clustering-analysis-selection-json",
+            '[{"method_name":"kmeans+fixed-k","parameters":{"k":2}}]',
+            "--run-key-to-lineage-inputs-json",
+            '{"dbpedia_embed_v_4_0_300_50runs":{"dataset_snapshot_ids":[11],"embedding_batch_group_id":22}}',
+        ]
+    )
+
+    assert captured["create_request"] is True
+    assert captured["request_name"] == "fanout_req"
+    assert captured["clustering_analysis_selection"] == [
+        {"method_name": "kmeans+fixed-k", "parameters": {"k": 2}}
+    ]
+    assert captured["run_key_to_lineage_inputs"] == {
+        "dbpedia_embed_v_4_0_300_50runs": {
+            "dataset_snapshot_ids": [11],
+            "embedding_batch_group_id": 22,
+        }
+    }

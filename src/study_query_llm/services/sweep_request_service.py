@@ -33,6 +33,12 @@ from study_query_llm.experiments.sweep_request_types import (
     SWEEP_TYPE_MCQ,
     get_sweep_type_adapter,
 )
+from study_query_llm.pipeline.clustering.registry import (
+    get_algorithm_spec,
+    iter_algorithm_specs,
+    resolve_clustering_method_version,
+    resolve_registry_method_name,
+)
 from study_query_llm.services.method_service import MethodService
 from study_query_llm.services.provenance_service import (
     GROUP_TYPE_CLUSTERING_SWEEP,
@@ -188,6 +194,144 @@ class SweepRequestService:
             if normalized_payload:
                 out[run_key] = normalized_payload
         return out
+
+    @staticmethod
+    def _normalize_clustering_analysis_selection(
+        raw_selection: Any,
+    ) -> List[Dict[str, Any]]:
+        if raw_selection is None:
+            return []
+        if not isinstance(raw_selection, list):
+            raise ValueError(
+                "invalid_clustering_analysis_selection: expected a list of entries"
+            )
+        normalized_entries: List[Dict[str, Any]] = []
+        seen_analysis_keys: set[str] = set()
+        for index, raw_entry in enumerate(raw_selection):
+            if not isinstance(raw_entry, dict):
+                raise ValueError(
+                    "invalid_clustering_analysis_selection_entry:"
+                    f"{index}: expected object"
+                )
+            raw_method_name = str(raw_entry.get("method_name") or "").strip()
+            if not raw_method_name:
+                raise ValueError(
+                    "invalid_clustering_analysis_selection_entry:"
+                    f"{index}: missing method_name"
+                )
+            canonical_name = resolve_registry_method_name(raw_method_name) or raw_method_name
+            spec = get_algorithm_spec(canonical_name)
+            if spec is None:
+                supported = ", ".join(item.method_name for item in iter_algorithm_specs())
+                raise ValueError(
+                    f"unknown_clustering_method_name:{raw_method_name!r}; "
+                    f"supported={supported}"
+                )
+            method_version = resolve_clustering_method_version(
+                spec.method_name,
+                raw_entry.get("method_version"),
+            )
+            raw_parameters = raw_entry.get("parameters")
+            if raw_parameters is None:
+                parameters: Dict[str, Any] = {}
+            elif isinstance(raw_parameters, dict):
+                parameters = {}
+                for raw_key, raw_value in raw_parameters.items():
+                    key = str(raw_key or "").strip()
+                    if not key:
+                        raise ValueError(
+                            "invalid_clustering_analysis_selection_entry:"
+                            f"{index}: parameter keys must be non-empty strings"
+                        )
+                    parameters[key] = raw_value
+            else:
+                raise ValueError(
+                    "invalid_clustering_analysis_selection_entry:"
+                    f"{index}: parameters must be an object"
+                )
+
+            parameters_schema = dict(spec.parameters_schema or {})
+            properties = dict(parameters_schema.get("properties") or {})
+            allowed_keys = set(str(key) for key in properties.keys())
+            unknown_keys = sorted(key for key in parameters.keys() if key not in allowed_keys)
+            if unknown_keys:
+                raise ValueError(
+                    f"unknown_clustering_method_parameters:{spec.method_name}:"
+                    f"{','.join(unknown_keys)}"
+                )
+
+            required_keys = [
+                str(item).strip()
+                for item in list(parameters_schema.get("required") or [])
+                if str(item).strip()
+            ]
+            missing_required = sorted(
+                key for key in required_keys if parameters.get(key) is None
+            )
+            if missing_required:
+                raise ValueError(
+                    f"missing_required_clustering_method_parameters:{spec.method_name}:"
+                    f"{','.join(missing_required)}"
+                )
+
+            analysis_key = str(spec.method_name)
+            if analysis_key in seen_analysis_keys:
+                raise ValueError(f"duplicate_clustering_method_selection:{analysis_key}")
+            seen_analysis_keys.add(analysis_key)
+            normalized_entries.append(
+                {
+                    "analysis_key": analysis_key,
+                    "method_name": str(spec.method_name),
+                    "method_version": str(method_version),
+                    "scope": "run",
+                    "required": False,
+                    "blocking": False,
+                    "result_keys": [],
+                    "parameters": parameters,
+                    "requires_embedding_batch": bool(spec.requires_embeddings),
+                }
+            )
+        return normalized_entries
+
+    @staticmethod
+    def _raise_if_lineage_missing_for_selection(
+        *,
+        run_key_to_target: Dict[str, Dict[str, Any]],
+        analysis_catalog: List[Dict[str, Any]],
+        lineage_inputs_by_run_key: Dict[str, Dict[str, Any]],
+    ) -> None:
+        if not analysis_catalog:
+            return
+        missing_by_run_key: Dict[str, List[Dict[str, Any]]] = {}
+        for run_key in sorted(run_key_to_target.keys()):
+            lineage_payload = dict(lineage_inputs_by_run_key.get(run_key) or {})
+            snapshot_ids = list(lineage_payload.get("dataset_snapshot_ids") or [])
+            embedding_batch_group_id = lineage_payload.get("embedding_batch_group_id")
+            for item in analysis_catalog:
+                if not isinstance(item, dict):
+                    continue
+                analysis_key = str(item.get("analysis_key") or "").strip()
+                if not analysis_key:
+                    continue
+                requires_embedding_batch = bool(item.get("requires_embedding_batch", True))
+                missing_inputs: List[str] = []
+                if not snapshot_ids:
+                    missing_inputs.append("dataset_snapshot_ids")
+                if requires_embedding_batch and embedding_batch_group_id is None:
+                    missing_inputs.append("embedding_batch_group_id")
+                if missing_inputs:
+                    missing_by_run_key.setdefault(run_key, []).append(
+                        {
+                            "analysis_key": analysis_key,
+                            "missing_inputs": missing_inputs,
+                        }
+                    )
+        if missing_by_run_key:
+            raise ValueError(
+                "lineage_required_for_selection:"
+                " run_key_to_lineage_inputs missing required lineage inputs "
+                f"for selected clustering analyses: {missing_by_run_key}"
+            )
 
     def _analysis_job_state_by_key(
         self,
@@ -457,6 +601,12 @@ class SweepRequestService:
             metadata_json.get("run_key_to_lineage_inputs"),
             allowed_run_keys=set(run_key_to_target.keys()),
         )
+        if sweep_type == SWEEP_TYPE_CLUSTERING and analysis_catalog:
+            self._raise_if_lineage_missing_for_selection(
+                run_key_to_target=run_key_to_target,
+                analysis_catalog=analysis_catalog,
+                lineage_inputs_by_run_key=lineage_inputs_by_run_key,
+            )
         enable_analysis_jobs = bool(self.enable_analysis_jobs)
         if sweep_type == SWEEP_TYPE_CLUSTERING:
             enable_analysis_jobs = enable_analysis_jobs and bool(
@@ -520,9 +670,14 @@ class SweepRequestService:
         shard_config: Optional[Dict[str, Any]] = None,
         determinism_class: str = "non_deterministic",
         run_key_to_lineage_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
+        clustering_analysis_selection: Optional[List[Dict[str, Any]]] = None,
     ) -> int:
         """
         Create a typed sweep request group and optionally pre-plan orchestration jobs.
+
+        For clustering requests, callers may provide `clustering_analysis_selection`
+        as a per-request list of bundled methods. When selection is non-empty, the
+        caller is responsible for supplying complete `run_key_to_lineage_inputs`.
         """
         adapter = get_sweep_type_adapter(sweep_type)
         target_specs = adapter.build_targets(
@@ -537,19 +692,44 @@ class SweepRequestService:
             run_key_to_lineage_inputs,
             allowed_run_keys=set(expected_run_keys),
         )
-        analysis_defs = adapter.analysis_definitions()
-        analysis_catalog = [
-            {
-                "analysis_key": d.analysis_key,
-                "method_name": d.method_name,
-                "method_version": d.method_version,
-                "scope": d.scope,
-                "required": bool(d.required),
-                "blocking": bool(d.blocking),
-                "result_keys": list(d.result_keys),
-            }
-            for d in analysis_defs
-        ]
+        clustering_selection_meta: List[Dict[str, Any]] = []
+        if adapter.sweep_type == SWEEP_TYPE_CLUSTERING:
+            analysis_catalog = self._normalize_clustering_analysis_selection(
+                clustering_analysis_selection
+            )
+            clustering_selection_meta = [
+                {
+                    "method_name": str(entry["method_name"]),
+                    "method_version": str(entry["method_version"]),
+                    "parameters": dict(entry.get("parameters") or {}),
+                }
+                for entry in analysis_catalog
+            ]
+            if analysis_catalog:
+                self._raise_if_lineage_missing_for_selection(
+                    run_key_to_target=run_key_to_target,
+                    analysis_catalog=analysis_catalog,
+                    lineage_inputs_by_run_key=normalized_lineage_inputs,
+                )
+        else:
+            if clustering_analysis_selection is not None:
+                raise ValueError(
+                    "clustering_analysis_selection is only supported for "
+                    "sweep_type='clustering'"
+                )
+            analysis_defs = adapter.analysis_definitions()
+            analysis_catalog = [
+                {
+                    "analysis_key": d.analysis_key,
+                    "method_name": d.method_name,
+                    "method_version": d.method_version,
+                    "scope": d.scope,
+                    "required": bool(d.required),
+                    "blocking": bool(d.blocking),
+                    "result_keys": list(d.result_keys),
+                }
+                for d in analysis_defs
+            ]
         required_analyses = [x["analysis_key"] for x in analysis_catalog if x.get("required")]
         algo = algorithm or adapter.default_algorithm()
         resolved_determinism_class = str(determinism_class or "non_deterministic")
@@ -585,6 +765,7 @@ class SweepRequestService:
                 if required_analyses
                 else ANALYSIS_STATUS_NOT_REQUIRED
             ),
+            "clustering_analysis_selection": clustering_selection_meta,
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
         }

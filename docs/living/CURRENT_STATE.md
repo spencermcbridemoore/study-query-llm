@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-03
+Last reviewed: 2026-05-04
 
 ## Scope
 
@@ -53,9 +53,11 @@ This document is the canonical "what exists and works now" summary for the repos
 - Temporary planner fallback controls were retired after parity coverage; there is no active legacy-planner environment toggle in the current control plane.
 - Standalone sweep worker execution is now an OrchestrationJob profile for both clustering and MCQ (jobs are planned and consumed through the canonical orchestration table).
 - Clustering request/payload identity no longer threads `summarizer`; clustering run keys and orchestration payloads are dataset+embedding scoped without a `parameter_axes["summarizers"]` axis.
-- Clustering orchestration supports flag-gated, additive `analysis_run` job planning with per-run deterministic keys (`req{request_id}__{run_key}__analysis__{analysis_key}`) when clustering analysis catalog entries are present and lineage-input preconditions are met (`SQ_ENABLE_ANALYSIS_JOBS` + `SQ_ENABLE_CLUSTERING_ANALYSIS_JOBS`).
-- Clustering `analysis_run` jobs are scheduled per request: each request specifies which bundled methods to run, and the planner emits one `analysis_run` per `(specified method, finalized clustering run)`. The bundled clustering registry (`iter_algorithm_specs()`) is a menu of available methods, not a default catalog; methods present in the registry but not requested are not exercised.
-- Producer/consumer lineage contract for clustering analysis jobs is active: request metadata can carry per-run lineage inputs (`run_key_to_lineage_inputs`), finalize/ingestion propagation stamps `dataset_snapshot_ids` / `embedding_batch_group_id` onto `clustering_run` metadata, and worker-side clustering analysis input resolution reads those fields by `(request_id, run_key)` before calling `pipeline.analyze`.
+- Clustering orchestration supports flag-gated, additive `analysis_run` job planning with per-run deterministic job keys (`req{request_id}__{run_key}__analysis__{analysis_key}`) when clustering analysis catalog entries are present (`SQ_ENABLE_ANALYSIS_JOBS` + `SQ_ENABLE_CLUSTERING_ANALYSIS_JOBS`).
+- Clustering `analysis_run` jobs are scheduled per request through explicit `SweepRequestService.create_request(..., clustering_analysis_selection=[...])` selection entries (`method_name`, optional `method_version`, optional `parameters`). The service derives `analysis_catalog` from that selection (not from registry defaults), defaults omitted versions via registry resolver, and validates eagerly at request creation: unknown method names, missing required params, and unknown/extra params fail loud.
+- The bundled clustering registry (`iter_algorithm_specs()`) is a menu of available methods, not a default catalog; methods present in the registry but not selected are not scheduled.
+- Producer/consumer lineage contract for clustering analysis jobs is active and strict: when clustering selection is non-empty, request planning requires complete `run_key_to_lineage_inputs` coverage (`dataset_snapshot_ids` and, when required, `embedding_batch_group_id`) for each selected run/method and raises `lineage_required_for_selection` on missing/incomplete lineage. Finalize/ingestion propagation stamps lineage onto `clustering_run` metadata, and worker-side input resolution reads those fields by `(request_id, run_key)` before calling `pipeline.analyze`.
+- Clustering `analysis_run` payloads carry `analysis_run_key = "{base_run_key}__analysis__{analysis_key}"`; worker dispatch rejects non-registry clustering methods before `analyze`, and `analyze` uses `analysis_run_key` for analysis-execution lock/idempotency keys to prevent cross-method reuse collisions on the same base run.
 - MCQ orchestration now plans both `mcq_run` execution jobs and dependent `analysis_run` jobs; `python -m study_query_llm.cli analyze` is a compatibility wrapper that processes those orchestration analysis jobs rather than a separate analysis write path.
 - Job execution dispatch is registry-based in `job_runner_factory.py` (including `langgraph_run`), and reduce/finalize execution uses a typed reducer plugin seam that wraps the existing clustering reducer implementation.
 - PR0 control-plane parity fixtures are deterministic and SQLite-first (`tests/fixtures/p0_baseline/baseline_snapshot.json`), with regeneration/check tooling at `scripts/regenerate_p0_baseline.py` and CI enforcement in `.github/workflows/persistence-contract.yml`.

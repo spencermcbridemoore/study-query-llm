@@ -31,6 +31,10 @@ from study_query_llm.experiments.sweep_mcq_standalone import execute_mcq_standal
 from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_CLUSTERING, SWEEP_TYPE_MCQ
 from study_query_llm.experiments.sweep_io import get_output_dir, serialize_sweep_result
 from study_query_llm.pipeline.analyze import analyze as run_pipeline_analyze
+from study_query_llm.pipeline.clustering.registry import (
+    get_algorithm_spec,
+    resolve_registry_method_name,
+)
 from study_query_llm.providers.managed_tei_embedding_provider import ManagedTEIEmbeddingProvider
 from study_query_llm.providers.managers.local_docker_tei import LocalDockerTEIManager
 from study_query_llm.providers.factory import ProviderFactory
@@ -594,11 +598,21 @@ def run_one_analysis_run_job(
     if not run_key:
         return (job_id, None, "missing_run_key")
 
-    method_name = str(payload.get("method_name") or analysis_key).strip()
+    raw_method_name = str(payload.get("method_name") or analysis_key).strip()
+    method_token = resolve_registry_method_name(raw_method_name) or raw_method_name
+    registry_spec = get_algorithm_spec(method_token)
+    if registry_spec is None:
+        return (job_id, None, f"unsupported_clustering_analysis_method:{raw_method_name}")
+    method_name = str(registry_spec.method_name)
     method_version = str(payload.get("method_version") or "1.0").strip() or "1.0"
     raw_parameters = payload.get("parameters")
     parameters = dict(raw_parameters) if isinstance(raw_parameters, dict) else {}
     force = bool(payload.get("force", False))
+    analysis_run_key = str(
+        payload.get("analysis_run_key") or f"{run_key}__analysis__{analysis_key}"
+    ).strip()
+    if not analysis_run_key:
+        return (job_id, None, "missing_analysis_run_key")
 
     try:
         (
@@ -620,6 +634,7 @@ def run_one_analysis_run_job(
             ),
             method_name=method_name,
             run_key=run_key,
+            analysis_run_key=analysis_run_key,
             request_group_id=int(request_id),
             method_version=method_version,
             parameters=parameters,
@@ -630,7 +645,7 @@ def run_one_analysis_run_job(
     except Exception as exc:
         return (job_id, None, str(exc)[:1000])
 
-    return (job_id, f"analysis:{analysis_key}:{run_key}", None)
+    return (job_id, f"analysis:{analysis_key}:{analysis_run_key}", None)
 
 
 def _normalize_snapshot_ids_from_run_metadata(run_meta: Dict[str, Any]) -> List[int]:

@@ -556,6 +556,7 @@ def _build_alias_index() -> dict[str, str]:
 
 
 _ALIAS_INDEX = _build_alias_index()
+_DEFAULT_CLUSTERING_METHOD_VERSION = "1.0"
 
 
 def iter_algorithm_specs() -> tuple[AlgorithmSpec, ...]:
@@ -582,6 +583,36 @@ def resolve_registry_method_name(token: str) -> str | None:
     return _ALIAS_INDEX.get(normalize_method_name(token))
 
 
+def resolve_clustering_method_version(
+    method_name: str,
+    method_version: str | None = None,
+) -> str:
+    """Resolve validated method version for a registry-backed clustering method.
+
+    Current registry-backed clustering methods publish a single stable runtime
+    version (`1.0`). The resolver enforces that callers either omit version or
+    pass that stable value explicitly.
+    """
+    canonical_name = resolve_registry_method_name(method_name) or normalize_method_name(
+        method_name
+    )
+    spec = get_algorithm_spec(canonical_name)
+    if spec is None:
+        raise ValueError(
+            f"unknown_clustering_method_name:{method_name!r}; expected one of "
+            f"{', '.join(s.method_name for s in iter_algorithm_specs())}"
+        )
+    if method_version is None or str(method_version).strip() == "":
+        return _DEFAULT_CLUSTERING_METHOD_VERSION
+    resolved_version = str(method_version).strip()
+    if resolved_version != _DEFAULT_CLUSTERING_METHOD_VERSION:
+        raise ValueError(
+            f"unsupported_clustering_method_version:{spec.method_name}:{resolved_version}; "
+            f"expected {_DEFAULT_CLUSTERING_METHOD_VERSION}"
+        )
+    return resolved_version
+
+
 __all__ = [
     "AlgorithmSpec",
     "DEPRECATED_LEGACY_CLUSTERING_METHODS",
@@ -593,5 +624,6 @@ __all__ = [
     "normalize_method_name",
     "raise_if_deprecated_clustering_method",
     "resolve_algorithm_runner",
+    "resolve_clustering_method_version",
     "resolve_registry_method_name",
 ]

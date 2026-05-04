@@ -75,11 +75,15 @@ def test_run_one_analysis_run_job_clustering_calls_analyze(monkeypatch) -> None:
     )
     assert job_id == 41
     assert error is None
-    assert result_ref == f"analysis:bundle_eval:{run_key}"
+    assert result_ref == f"analysis:bundle_eval:{run_key}__analysis__bundle_eval"
     assert int(captured.get("snapshot_group_id") or -1) == 101
     assert int(captured.get("embedding_batch_group_id") or -1) == 202
     assert int(captured.get("request_group_id") or -1) == int(request_id)
     assert str(captured.get("run_key") or "") == run_key
+    assert (
+        str(captured.get("analysis_run_key") or "")
+        == f"{run_key}__analysis__bundle_eval"
+    )
     assert dict(captured.get("parameters") or {}) == {"top_n": 5}
     assert bool(captured.get("force")) is False
 
@@ -134,3 +138,55 @@ def test_run_one_analysis_run_job_clustering_missing_embedding_fails() -> None:
     assert job_id == 42
     assert result_ref is None
     assert str(error or "").startswith("missing_embedding_batch_group_id:")
+
+
+def test_run_one_analysis_run_job_clustering_rejects_non_registry_method() -> None:
+    db = _db()
+    run_key = "dbpedia_engine_a_50_50runs"
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        request_id = svc.create_request(
+            request_name="cluster_analysis_non_registry_method",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={"k_min": 2, "k_max": 2, "n_restarts": 1},
+            parameter_axes={
+                "datasets": ["dbpedia"],
+                "embedding_engines": ["engine/a"],
+            },
+            entry_max=50,
+        )
+        run_id = repo.create_group(
+            group_type="clustering_run",
+            name="run_with_lineage_for_guard",
+            metadata_json={
+                "run_key": run_key,
+                "dataset_snapshot_ids": [101],
+                "embedding_batch_group_id": 202,
+            },
+        )
+        assert svc.record_delivery(request_id, int(run_id), run_key) is True
+
+    job_snapshot = {
+        "id": 43,
+        "request_group_id": int(request_id),
+        "job_type": "analysis_run",
+        "job_key": f"req{int(request_id)}__{run_key}__analysis__bad_method",
+        "base_run_key": run_key,
+        "payload_json": {
+            "request_id": int(request_id),
+            "sweep_type": "clustering",
+            "analysis_key": "bad_method",
+            "run_key": run_key,
+            "method_name": "not_in_registry",
+            "method_version": "1.0",
+        },
+    }
+    job_id, result_ref, error = worker_main.run_one_analysis_run_job(
+        job_snapshot=job_snapshot,
+        db=db,
+        worker_label="test-worker",
+    )
+    assert job_id == 43
+    assert result_ref is None
+    assert str(error or "").startswith("unsupported_clustering_analysis_method:")

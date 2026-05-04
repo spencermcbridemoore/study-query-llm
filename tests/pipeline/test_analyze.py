@@ -287,6 +287,77 @@ def test_analyze_auto_request_group_and_idempotent_reuse(tmp_path: Path, monkeyp
         assert len(request_groups) == 1
 
 
+def test_analyze_analysis_run_key_prevents_cross_method_collision(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_analysis_run_key")
+    calls: list[str] = []
+
+    def _runner(tag: str):
+        def _inner(**kwargs):
+            calls.append(tag)
+            embeddings = np.asarray(kwargs["embeddings"], dtype=np.float64)
+            return {
+                "scalar_results": {"row_count": float(embeddings.shape[0])},
+                "structured_results": {"tag": tag},
+                "artifacts": {f"{tag}.json": b"{}"},
+                "result_ref": f"{tag}.json",
+            }
+
+        return _inner
+
+    first = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name="analysis_run_key_method_a",
+        run_key="rk_shared",
+        analysis_run_key="rk_shared__analysis__analysis_run_key_method_a",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        method_runner=_runner("method_a"),
+    )
+    second = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name="analysis_run_key_method_b",
+        run_key="rk_shared",
+        analysis_run_key="rk_shared__analysis__analysis_run_key_method_b",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        method_runner=_runner("method_b"),
+    )
+
+    assert calls == ["method_a", "method_b"]
+    assert first.run_id != second.run_id
+    assert second.metadata["reused"] is False
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        run_a = repo.get_provenanced_run_by_request_and_key(
+            request_group_id=request_group_id,
+            run_key="rk_shared__analysis__analysis_run_key_method_a",
+            run_kind="analysis_execution",
+        )
+        run_b = repo.get_provenanced_run_by_request_and_key(
+            request_group_id=request_group_id,
+            run_key="rk_shared__analysis__analysis_run_key_method_b",
+            run_kind="analysis_execution",
+        )
+        assert run_a is not None
+        assert run_b is not None
+        assert int(run_a.id) != int(run_b.id)
+
+
 def test_analyze_requires_embedding_by_default_when_contract_absent(
     tmp_path: Path,
     monkeypatch,

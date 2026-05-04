@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-03
+Last reviewed: 2026-05-04
 
 ## Configuration
 
@@ -50,7 +50,9 @@ Notes:
 ## Sweep / Execution APIs
 
 - Request lifecycle:
-  - `SweepRequestService.create_request(..., run_key_to_lineage_inputs=None)` (optional per-run lineage mapping keyed by `run_key`; used for clustering analysis late-bind inputs)
+  - `SweepRequestService.create_request(..., run_key_to_lineage_inputs=None, clustering_analysis_selection=None)` for clustering/MCQ request creation.
+  - `clustering_analysis_selection` entries persist as `{method_name, method_version, parameters}` and are resolved/validated in service-layer request creation (unknown method name, missing required params, unknown/extra params fail loud before planning).
+  - For clustering requests with non-empty `clustering_analysis_selection`, `run_key_to_lineage_inputs` becomes required for every target run (`dataset_snapshot_ids` and, when required, `embedding_batch_group_id`), and planning raises `lineage_required_for_selection` when incomplete.
   - `SweepRequestService.get_request(request_id)` (returns execution-derived analysis state by default)
   - `SweepRequestService.list_requests(status=..., include_fulfilled=..., sweep_type=...)`
   - Planner behavior: adapter-driven orchestration graph specs are enqueued via `SweepRequestService.ensure_orchestration_jobs(...)` (no planner-type hardcoding in service branches).
@@ -62,14 +64,17 @@ Notes:
 - Orchestration job types:
   - Clustering: `run_k_try`, `reduce_k`, `finalize_run` (+ optional flag-gated `analysis_run` jobs for clustering analysis catalog entries)
   - MCQ: `mcq_run`, `analysis_run`
+  - Clustering `analysis_run` payloads include both base `run_key` (lineage lookup key) and `analysis_run_key = "{run_key}__analysis__{analysis_key}"` (analysis execution idempotency key).
   - Terminology: these are `orchestration_job` types (control-plane units), not `algorithm_iteration` records; `run_k_try` represents a seeded `restart_try` work unit.
   - Job runner dispatch is registry-based (`create_job_runner(...)`); reduce/finalize runners consume the typed reducer plugin seam (`ReducerPlugin` / `ClusteringReducerPlugin`).
 - CLI compatibility surfaces:
   - `python -m study_query_llm.cli sweep-worker --request-id <id>`
   - `python -m study_query_llm.cli analyze --request-id <id>` (compatibility wrapper over orchestrated `analysis_run` jobs)
+  - `python -m study_query_llm.cli sweep run-bigrun --create-request --clustering-analysis-selection-json '<json-array>' --run-key-to-lineage-inputs-json '<json-object>'` for explicit per-request clustering fanout inputs.
   - Root `scripts/run_*.py` commands remain compatibility wrappers; canonical runtime behavior lives under `src/study_query_llm/**`.
 - Pipeline analyze surface:
-  - `study_query_llm.pipeline.analyze.analyze(snapshot_group_id, embedding_batch_group_id=None, ..., method_name=..., run_key=...)`
+  - `study_query_llm.pipeline.analyze.analyze(snapshot_group_id, embedding_batch_group_id=None, ..., method_name=..., run_key=..., analysis_run_key=None)`
+  - `analysis_run_key` is the explicit analysis-execution idempotency key; when set (clustering orchestration path), lock/upsert/run-stage identity use that key while `run_key` remains available as caller-level lineage identity.
   - Embedding-backed runs normalize `parameters["representation_type"]` / `parameters["embedding_representation"]` (either key may be set). Accepted clustering input is **`full` only**. Values `label_centroid` and legacy alias `intent_mean` raise `ValueError` with migration text beginning `representation_type 'label_centroid' (alias 'intent_mean') was retired in Slice 1.6.` Snapshot-only methods continue to overwrite user-supplied representation keys to `snapshot_only` for fingerprint/provenance mode identity (unchanged).
   - Built-in clustering runner dispatch is registry-driven via `study_query_llm.pipeline.clustering.registry` (**23** bundled methods; authoritative list from `iter_algorithm_specs()` / `registry.py`). All ship with `provenance_envelope="none"`; the `clustering_v1` envelope literal was retired (Slice 1.5). Slice 2 Wave 1 adds `pipeline/clustering/grammar.py` (`parse_method_name`), `AlgorithmSpec.preprocessing_chain` + `parameters_schema`, fixed-bundle pipeline synthesis (`runner_common.synthesize_fixed_bundled_payload`, invoked from `analyze()` when `fit_mode=single_fit` and the preprocessing chain is non-empty), and grammar-bound sklearn runners. For bundled sweep methods (`kmeans+normalize+pca+sweep`, `gmm+normalize+pca+sweep`), `analyze()` continues to inject `_v1_pipeline_{resolved,effective}` via `_synthesize_v1_pipeline_for_bundled_method` only (unchanged fingerprint path). For methods with `+pca+` in the name, `pca_n_components` is **required** in parameters; values above `max(1, min(embedding_dim, n_samples-1))` raise `ValueError` (no silent clamp). The shipped sweep runners (`kmeans_runner`, `gmm_runner`) raise `ValueError` if called directly without synthesized pipeline payloads (Slice 2 invariant lock). `ensure_composite_recipe` / `_resolve_method_definition_id` take `parameters_schema` from the clustering registry when the composite name resolves to an `AlgorithmSpec` (fallback remains for `cosine_kllmeans_no_pca`).
   - The legacy method names (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`) are pinned in `DEPRECATED_LEGACY_CLUSTERING_METHODS` and rejected at the top of `analyze()` by `raise_if_deprecated_clustering_method`. The guard fires *before* runner resolution so explicit `method_runner` injection cannot bypass it; historical `provenanced_runs` rows under those names remain queryable.

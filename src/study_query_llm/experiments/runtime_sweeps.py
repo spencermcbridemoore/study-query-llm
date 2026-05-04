@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from sqlalchemy.exc import IntegrityError
@@ -211,6 +212,18 @@ def _safe_name(s: str) -> str:
     return s.replace("-", "_").replace("/", "_")
 
 
+def _parse_optional_json(raw_value: Optional[str], *, argument_name: str) -> Any:
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:  # pragma: no cover - parser error branch
+        raise ValueError(f"{argument_name} must be valid JSON: {exc}") from exc
+
+
 def _load_estela_with_labels():
     pkl_path = str(_REPO_ROOT / "notebooks" / "estela_prompt_data.pkl")
     data = load_estela_dict(pkl_path=pkl_path)
@@ -265,6 +278,8 @@ async def main_bigrun_300_sweep(
     worker_id: Optional[str] = None,
     claim_lease_seconds: int = 3600,
     database_url: Optional[str] = None,
+    clustering_analysis_selection: Optional[List[Dict[str, Any]]] = None,
+    run_key_to_lineage_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
 ):
     database_url = database_url or os.environ.get("DATABASE_URL")
     if not database_url:
@@ -306,6 +321,8 @@ async def main_bigrun_300_sweep(
                 entry_max=ENTRY_MAX,
                 n_restarts_suffix="50runs",
                 description=f"{OUT_PREFIX} sweep request: 3 datasets x 3 embeddings",
+                clustering_analysis_selection=clustering_analysis_selection,
+                run_key_to_lineage_inputs=run_key_to_lineage_inputs,
             )
         print(f"[OK] Created sweep request: id={rid}, name={name}")
         return
@@ -656,6 +673,24 @@ def build_bigrun_arg_parser() -> argparse.ArgumentParser:
         default=3600,
         help="Lease duration in seconds for request-mode run claims (default 3600)",
     )
+    parser.add_argument(
+        "--clustering-analysis-selection-json",
+        type=str,
+        default=None,
+        help=(
+            "JSON array for per-request clustering analysis selection entries "
+            "(method_name, optional method_version, optional parameters)"
+        ),
+    )
+    parser.add_argument(
+        "--run-key-to-lineage-inputs-json",
+        type=str,
+        default=None,
+        help=(
+            "JSON object keyed by run_key with dataset_snapshot_ids and "
+            "embedding_batch_group_id payloads"
+        ),
+    )
     return parser
 
 
@@ -668,6 +703,25 @@ def main_bigrun_sync(argv: Optional[list[str]] = None) -> None:
         argv = sys.argv[1:]
     parser = build_bigrun_arg_parser()
     args = parser.parse_args(argv)
+    try:
+        clustering_analysis_selection = _parse_optional_json(
+            args.clustering_analysis_selection_json,
+            argument_name="--clustering-analysis-selection-json",
+        )
+        if clustering_analysis_selection is not None and not isinstance(
+            clustering_analysis_selection, list
+        ):
+            raise ValueError("--clustering-analysis-selection-json must decode to a JSON array")
+        run_key_to_lineage_inputs = _parse_optional_json(
+            args.run_key_to_lineage_inputs_json,
+            argument_name="--run-key-to-lineage-inputs-json",
+        )
+        if run_key_to_lineage_inputs is not None and not isinstance(
+            run_key_to_lineage_inputs, dict
+        ):
+            raise ValueError("--run-key-to-lineage-inputs-json must decode to a JSON object")
+    except ValueError as exc:
+        parser.error(str(exc))
     asyncio.run(
         main_bigrun_300_sweep(
             force=args.force,
@@ -677,5 +731,7 @@ def main_bigrun_sync(argv: Optional[list[str]] = None) -> None:
             request_name=args.request_name,
             worker_id=args.worker_id,
             claim_lease_seconds=args.claim_lease_seconds,
+            clustering_analysis_selection=clustering_analysis_selection,
+            run_key_to_lineage_inputs=run_key_to_lineage_inputs,
         )
     )

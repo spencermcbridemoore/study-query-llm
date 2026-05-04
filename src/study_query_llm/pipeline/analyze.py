@@ -716,6 +716,7 @@ def analyze(
     *,
     method_name: str,
     run_key: str,
+    analysis_run_key: str | None = None,
     request_group_id: int | None = None,
     method_version: str | None = None,
     parameters: Mapping[str, Any] | None = None,
@@ -732,6 +733,9 @@ def analyze(
     # methods; legacy names are loud-rejected here with migration guidance.
     raise_if_deprecated_clustering_method(method_name)
     resolved_params = dict(parameters or {})
+    resolved_analysis_run_key = str(analysis_run_key or run_key).strip()
+    if not resolved_analysis_run_key:
+        raise ValueError("analysis_run_key must be non-empty")
     synthetic_v1_pipeline: dict[str, Any] | None = None
     synthetic_fixed_pipeline: dict[str, Any] | None = None
     db_conn, _owned_db = _resolve_db(
@@ -829,23 +833,25 @@ def analyze(
             "method_name": method_name,
             "method_version": method_version,
             "snapshot_group_id": int(snapshot_group_id_int),
-            "run_key": run_key,
+            "run_key": resolved_analysis_run_key,
             "representation_type": representation,
             "parameters": resolved_params,
             "request_group_id": int(resolved_request_group_id),
         }
+        if resolved_analysis_run_key != str(run_key):
+            stage_group_metadata["source_run_key"] = str(run_key)
         if embedding_batch_input_group_id is not None:
             stage_group_metadata["embedding_batch_group_id"] = int(embedding_batch_input_group_id)
         else:
             stage_group_metadata["analysis_input_mode"] = ANALYSIS_INPUT_MODE_SNAPSHOT_ONLY
 
-    lock_key = f"{resolved_request_group_id}:{run_key}:analysis_execution"
+    lock_key = f"{resolved_request_group_id}:{resolved_analysis_run_key}:analysis_execution"
     with _analysis_lock(lock_key):
         with db_conn.session_scope() as session:
             repo = RawCallRepository(session)
             existing = repo.get_provenanced_run_by_request_and_key(
                 request_group_id=int(resolved_request_group_id),
-                run_key=run_key,
+                run_key=resolved_analysis_run_key,
                 run_kind="analysis_execution",
             )
             if (
@@ -927,7 +933,7 @@ def analyze(
                 artifact_type, content_type = _artifact_type_and_content_type(logical_name)
                 artifact_id = artifact_service.store_group_blob_artifact(
                     group_id=identity.group_id,
-                    step_name=f"analyze_{method_name}_{run_key}",
+                    step_name=f"analyze_{method_name}_{resolved_analysis_run_key}",
                     logical_filename=logical_name,
                     data=blob_bytes,
                     artifact_type=artifact_type,
@@ -936,7 +942,7 @@ def analyze(
                         {
                             "method_name": method_name,
                             "snapshot_group_id": int(snapshot_group_id_int),
-                            "run_key": run_key,
+                            "run_key": resolved_analysis_run_key,
                         }
                         | (
                             {
@@ -1082,7 +1088,7 @@ def analyze(
                     source_group_id=int(analysis_input_group_id),
                     method_definition_id=method_definition_id,
                     analysis_key=method_name,
-                    analysis_run_key=run_key,
+                    analysis_run_key=resolved_analysis_run_key,
                     result_ref=resolved_result_ref,
                     config_json=canonical_config,
                     determinism_class=determinism_class,
@@ -1114,7 +1120,7 @@ def analyze(
             group_metadata=stage_group_metadata,
             request_group_id=int(resolved_request_group_id),
             source_group_id=int(analysis_input_group_id),
-            run_key=run_key,
+            run_key=resolved_analysis_run_key,
             run_kind="analysis_execution",
             run_metadata={
                 "execution_role": "analysis_execution",

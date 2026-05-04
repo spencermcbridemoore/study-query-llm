@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-03
+Last reviewed: 2026-05-04
 
 ## System Shape
 
@@ -62,8 +62,12 @@ Known transitional boundary mismatch (documented, not hidden):
 - Planner ownership is adapter-driven: sweep-type adapters emit orchestration graph specs (nodes + dependency edges), and `SweepRequestService` performs generic enqueue from those specs.
 - Standalone execution is modeled as an orchestration profile, not a separate run-key control plane.
 - Clustering payload identity does not include `summarizer`; request expansion and orchestration payloads are dataset+embedding scoped.
+- Clustering per-request fanout is service-owned: `create_request(..., clustering_analysis_selection=...)` resolves/validates selection against the clustering registry and derives request `analysis_catalog`; the adapter consumes resolved catalog entries and does not auto-expand from full registry membership.
+- Clustering selection validation is strict at request creation (unknown method names, missing required params, unknown/extra params fail loud before planning).
+- For non-empty clustering selection, planning enforces complete caller-supplied lineage inputs (`run_key_to_lineage_inputs`) and raises `lineage_required_for_selection` when `dataset_snapshot_ids` / required `embedding_batch_group_id` coverage is missing.
 - MCQ orchestration uses per-run `mcq_run` jobs plus dependent `analysis_run` jobs in the same control plane.
 - Job execution dispatch is registry-based in `job_runner_factory.py`; `langgraph_run` remains a first-class registry entry.
+- Clustering `analysis_run` execution separates lineage identity from analysis idempotency identity: payload keeps base `run_key` for lineage lookup and carries `analysis_run_key = "{run_key}__analysis__{analysis_key}"`; worker enforces registry-only clustering methods before analyze dispatch, and `analyze` uses `analysis_run_key` for lock/upsert/run-stage keys to prevent cross-method collisions on the same base run.
 - Reducer/finalizer execution uses a typed plugin seam (`ReducerPlugin`) with a default clustering adapter that wraps `JobReducerService`.
 - `analyze` CLI remains as compatibility UX, but now enqueues/claims/executes orchestration `analysis_run` jobs instead of a separate non-orchestrated write path.
 - Read models derive request-level analysis state from orchestration/execution records, with legacy metadata arrays retained as compatibility mirrors during cutover.

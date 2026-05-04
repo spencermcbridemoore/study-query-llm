@@ -23,6 +23,7 @@ from study_query_llm.pipeline.clustering.registry import (
     iter_algorithm_specs,
     raise_if_deprecated_clustering_method,
     resolve_algorithm_runner,
+    resolve_clustering_method_version,
     resolve_registry_method_name,
 )
 from study_query_llm.pipeline.clustering.runner_common import synthesize_fixed_bundled_payload
@@ -148,6 +149,22 @@ def test_registry_alias_resolution_maps_to_canonical_method_name() -> None:
     )
     assert resolve_registry_method_name("gmm_bic_argmin") == "gmm+normalize+pca+sweep"
     assert resolve_registry_method_name("hdbscan") == "hdbscan+fixed"
+
+
+def test_resolve_clustering_method_version_defaults_to_latest_stable() -> None:
+    assert resolve_clustering_method_version("kmeans+fixed-k") == "1.0"
+    # Alias token should resolve to the canonical method version too.
+    assert resolve_clustering_method_version("hdbscan") == "1.0"
+
+
+def test_resolve_clustering_method_version_rejects_unknown_method() -> None:
+    with pytest.raises(ValueError, match="unknown_clustering_method_name"):
+        resolve_clustering_method_version("missing_method")
+
+
+def test_resolve_clustering_method_version_rejects_unsupported_version() -> None:
+    with pytest.raises(ValueError, match="unsupported_clustering_method_version"):
+        resolve_clustering_method_version("kmeans+fixed-k", "2.0")
 
 
 def test_all_specs_carry_parameters_schema() -> None:

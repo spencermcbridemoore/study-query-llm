@@ -466,6 +466,144 @@ def test_create_request_normalizes_lineage_inputs_by_run_key(db_connection):
         }
 
 
+def test_create_request_clustering_analysis_selection_populates_catalog(db_connection):
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        run_key = "dbpedia_engine_a_50_50runs"
+        req_id = svc.create_request(
+            request_name="cluster_selection_req",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={},
+            parameter_axes={
+                "datasets": ["dbpedia"],
+                "embedding_engines": ["engine/a"],
+            },
+            entry_max=50,
+            clustering_analysis_selection=[
+                {
+                    "method_name": "kmeans+fixed-k",
+                    "parameters": {"k": 2},
+                }
+            ],
+            run_key_to_lineage_inputs={
+                run_key: {
+                    "dataset_snapshot_ids": [11],
+                    "embedding_batch_group_id": 22,
+                }
+            },
+        )
+        req = svc.get_request(req_id)
+        assert req is not None
+        assert req.get("clustering_analysis_selection") == [
+            {
+                "method_name": "kmeans+fixed-k",
+                "method_version": "1.0",
+                "parameters": {"k": 2},
+            }
+        ]
+        catalog = list(req.get("analysis_catalog") or [])
+        assert [entry.get("analysis_key") for entry in catalog] == ["kmeans+fixed-k"]
+        assert catalog[0]["method_name"] == "kmeans+fixed-k"
+        assert catalog[0]["method_version"] == "1.0"
+        assert catalog[0]["parameters"] == {"k": 2}
+
+
+def test_create_request_rejects_unknown_clustering_method_selection(db_connection):
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        with pytest.raises(ValueError, match="unknown_clustering_method_name"):
+            svc.create_request(
+                request_name="cluster_selection_unknown_method",
+                algorithm="cosine_kllmeans_no_pca",
+                fixed_config={},
+                parameter_axes={
+                    "datasets": ["dbpedia"],
+                    "embedding_engines": ["engine/a"],
+                },
+                entry_max=50,
+                clustering_analysis_selection=[
+                    {
+                        "method_name": "does_not_exist",
+                        "parameters": {},
+                    }
+                ],
+            )
+
+
+def test_create_request_rejects_missing_required_selection_parameters(db_connection):
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        with pytest.raises(ValueError, match="missing_required_clustering_method_parameters"):
+            svc.create_request(
+                request_name="cluster_selection_missing_required",
+                algorithm="cosine_kllmeans_no_pca",
+                fixed_config={},
+                parameter_axes={
+                    "datasets": ["dbpedia"],
+                    "embedding_engines": ["engine/a"],
+                },
+                entry_max=50,
+                clustering_analysis_selection=[
+                    {
+                        "method_name": "kmeans+fixed-k",
+                        "parameters": {},
+                    }
+                ],
+            )
+
+
+def test_create_request_rejects_unknown_extra_selection_parameters(db_connection):
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        with pytest.raises(ValueError, match="unknown_clustering_method_parameters"):
+            svc.create_request(
+                request_name="cluster_selection_unknown_params",
+                algorithm="cosine_kllmeans_no_pca",
+                fixed_config={},
+                parameter_axes={
+                    "datasets": ["dbpedia"],
+                    "embedding_engines": ["engine/a"],
+                },
+                entry_max=50,
+                clustering_analysis_selection=[
+                    {
+                        "method_name": "kmeans+fixed-k",
+                        "parameters": {
+                            "k": 2,
+                            "unexpected": 7,
+                        },
+                    }
+                ],
+            )
+
+
+def test_create_request_lineage_required_for_selection(db_connection):
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        with pytest.raises(ValueError, match="lineage_required_for_selection"):
+            svc.create_request(
+                request_name="cluster_selection_missing_lineage",
+                algorithm="cosine_kllmeans_no_pca",
+                fixed_config={},
+                parameter_axes={
+                    "datasets": ["dbpedia"],
+                    "embedding_engines": ["engine/a"],
+                },
+                entry_max=50,
+                clustering_analysis_selection=[
+                    {
+                        "method_name": "kmeans+fixed-k",
+                        "parameters": {"k": 2},
+                    }
+                ],
+            )
+
+
 def test_clustering_analysis_jobs_respect_per_type_flag(db_connection):
     with db_connection.session_scope() as session:
         repo = RawCallRepository(session)

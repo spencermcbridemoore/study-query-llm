@@ -468,6 +468,7 @@ class ClusteringSweepAdapter:
                         "sweep_type": SWEEP_TYPE_CLUSTERING,
                         "analysis_key": analysis_key,
                         "run_key": run_key,
+                        "analysis_run_key": f"{run_key}__analysis__{analysis_key}",
                         "scope": str(entry.get("scope") or "run"),
                         "method_name": str(entry.get("method_name") or analysis_key),
                         "method_version": str(entry.get("method_version") or "1.0"),

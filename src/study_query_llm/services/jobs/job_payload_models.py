@@ -101,6 +101,7 @@ class AnalysisRunPayload(BaseModel):
     sweep_type: str
     analysis_key: str
     run_key: str = ""
+    analysis_run_key: str = ""
     scope: str = "run"
     method_name: str = ""
     method_version: str = "1.0"

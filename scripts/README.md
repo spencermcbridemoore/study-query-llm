@@ -67,14 +67,16 @@ Move set v1.2 moved one-off probes/utilities into `scripts/history/one_offs/`
 Thin compatibility wrappers remain at their original root paths under `scripts/` and
 print a deprecation notice when executed. **Move set v1.1:** no-PCA/history forwarding
 scripts delegate to [`scripts/deprecated/`](deprecated/) (canonical relocated surface);
-root -> `scripts/deprecated/*` -> `scripts/history/*` (or `scripts/run_pca_kllmeans_sweep.py`
-for the legacy PCA name). Incident recovery scripts live under
+for retained wrappers the chain is `scripts/*` -> `scripts/deprecated/*` ->
+`scripts/history/*` (or `scripts/run_pca_kllmeans_sweep.py` for the legacy PCA name).
+Incident recovery scripts live under
 [`scripts/history/sweep_recovery/`](history/sweep_recovery/); root `archive_pre_fix_runs.py`
 / `label_pre_fix_runs.py` forward there.
 
-Historical compatibility stubs for names that still appear in historical docs
-(`scripts/pca_kllmeans_sweep.py`, `scripts/migrate_v1_to_v2.py`) have implementations
-under `scripts/deprecated/` with root wrappers preserved.
+Historical compatibility stubs for names that still appear in historical docs now live
+under `scripts/deprecated/` directly (for example:
+`scripts/deprecated/pca_kllmeans_sweep.py` and
+`scripts/deprecated/migrate_v1_to_v2.py`).
 
 ## Canonical DB Ops Matrix
 

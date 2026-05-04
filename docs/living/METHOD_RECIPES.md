@@ -48,6 +48,21 @@ This document is the v0 spec.
   non-cluster-label artifacts (for example transformed embeddings) do not
   belong in this subsystem.
 
+### Registry, catalog, and per-request selection
+
+- **Registry:** the set of bundled methods that exist in the codebase,
+  exposed via `iter_algorithm_specs()`. Adding a method to the registry
+  makes it available to be requested.
+- **Catalog:** the methods scheduled for a specific request, passed to
+  `ClusteringSweepAdapter.build_orchestration_graph` as
+  `analysis_catalog`.
+- **Per-request selection:** requests specify which registry methods they
+  want; planner validation checks the requested names against the registry
+  and populates the request's catalog accordingly.
+- **Implication:** methods can be added to the registry without being
+  exercised by any existing request. Broken methods (for example DF-011)
+  are excluded by not requesting them.
+
 ### Embedding representation (Slice 1.6)
 
 - Bundled registry specs declare `allowed_representations=frozenset({"full"})` only.

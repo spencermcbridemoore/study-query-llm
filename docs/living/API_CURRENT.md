@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-04
+Last reviewed: 2026-05-05
 
 ## Configuration
 
@@ -53,6 +53,7 @@ Notes:
   - `SweepRequestService.create_request(..., run_key_to_lineage_inputs=None, clustering_analysis_selection=None)` for clustering/MCQ request creation.
   - `clustering_analysis_selection` entries persist as `{method_name, method_version, parameters}` and are resolved/validated in service-layer request creation (unknown method name, missing required params, unknown/extra params fail loud before planning).
   - For clustering requests with non-empty `clustering_analysis_selection`, `run_key_to_lineage_inputs` becomes required for every target run (`dataset_snapshot_ids` and, when required, `embedding_batch_group_id`), and planning raises `lineage_required_for_selection` when incomplete.
+  - Request progress/fulfillment is request-scoped: delivered runs are counted from `request -> contains -> run` links (not global `run_key` presence).
   - `SweepRequestService.get_request(request_id)` (returns execution-derived analysis state by default)
   - `SweepRequestService.list_requests(status=..., include_fulfilled=..., sweep_type=...)`
   - Planner behavior: adapter-driven orchestration graph specs are enqueued via `SweepRequestService.ensure_orchestration_jobs(...)` (no planner-type hardcoding in service branches).
@@ -62,8 +63,9 @@ Notes:
   - `ProvenancedRunService.record_analysis_execution(...)`
   - Canonical writes use `run_kind=execution`; semantic role is in `metadata_json.execution_role`.
 - Orchestration job types:
-  - Clustering: `run_k_try`, `reduce_k`, `finalize_run` (+ optional flag-gated `analysis_run` jobs for clustering analysis catalog entries)
+  - Clustering: `run_k_try`, `reduce_k`, `finalize_run`, optional `finalize_request` (flag-gated), plus optional `analysis_run` jobs for clustering analysis catalog entries.
   - MCQ: `mcq_run`, `analysis_run`
+  - When `SQ_USE_REQUEST_FINALIZER_JOB=1`, planner emits one request-level `finalize_request` node and analysis jobs depend on it; otherwise analysis jobs depend on per-run `finalize_run`.
   - Clustering `analysis_run` payloads include both base `run_key` (lineage lookup key) and `analysis_run_key = "{run_key}__analysis__{analysis_key}"` (analysis execution idempotency key).
   - Terminology: these are `orchestration_job` types (control-plane units), not `algorithm_iteration` records; `run_k_try` represents a seeded `restart_try` work unit.
   - Job runner dispatch is registry-based (`create_job_runner(...)`); reduce/finalize runners consume the typed reducer plugin seam (`ReducerPlugin` / `ClusteringReducerPlugin`).
@@ -102,6 +104,7 @@ Execution-model feature flags:
 - `SQ_DERIVE_ANALYSIS_STATUS_READ` (default: enabled)
 - `SQ_ENABLE_ANALYSIS_JOBS` (default: enabled)
 - `SQ_ENABLE_CLUSTERING_ANALYSIS_JOBS` (default: disabled)
+- `SQ_USE_REQUEST_FINALIZER_JOB` (default: disabled)
 - `SQ_RECORD_ANALYSIS_PARITY` (default: enabled)
 - `SQ_UNIFIED_EXECUTION_WRITES` (default: enabled)
 

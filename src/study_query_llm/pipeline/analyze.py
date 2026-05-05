@@ -58,7 +58,7 @@ _ANALYZE_LOCKS: dict[str, threading.Lock] = {}
 class AnalysisPayload:
     """Normalized method output payload for analysis stage persistence."""
 
-    scalar_results: dict[str, float]
+    scalar_results: dict[str, float | None]
     structured_results: dict[str, Any]
     artifacts: dict[str, bytes]
     result_ref: str | None = None
@@ -134,16 +134,46 @@ def _coerce_artifact_bytes(payload: Any) -> bytes:
     return json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
 
+def _sanitize_nonfinite_for_json(value: Any) -> Any:
+    """Recursively replace NaN/Inf floats with JSON-safe ``None``."""
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        return numeric if np.isfinite(numeric) else None
+    if isinstance(value, dict):
+        return {str(k): _sanitize_nonfinite_for_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_nonfinite_for_json(v) for v in value]
+    if isinstance(value, tuple):
+        return [_sanitize_nonfinite_for_json(v) for v in value]
+    return value
+
+
+def _coerce_scalar_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    numeric = float(value)
+    return numeric if np.isfinite(numeric) else None
+
+
 def _coerce_payload(raw: AnalysisPayload | Mapping[str, Any]) -> AnalysisPayload:
     if isinstance(raw, AnalysisPayload):
-        return raw
-    scalar = {str(k): float(v) for k, v in dict(raw.get("scalar_results") or {}).items()}
-    structured = {str(k): v for k, v in dict(raw.get("structured_results") or {}).items()}
+        scalar_source = dict(raw.scalar_results or {})
+        structured_source = dict(raw.structured_results or {})
+        artifacts_source = dict(raw.artifacts or {})
+        result_ref = raw.result_ref
+    else:
+        scalar_source = dict(raw.get("scalar_results") or {})
+        structured_source = dict(raw.get("structured_results") or {})
+        artifacts_source = dict(raw.get("artifacts") or {})
+        result_ref = raw.get("result_ref")
+    scalar: dict[str, float | None] = {}
+    for key, value in scalar_source.items():
+        scalar[str(key)] = _coerce_scalar_value(value)
+    structured = {str(k): _sanitize_nonfinite_for_json(v) for k, v in structured_source.items()}
     artifacts = {
         str(k): _coerce_artifact_bytes(v)
-        for k, v in dict(raw.get("artifacts") or {}).items()
+        for k, v in artifacts_source.items()
     }
-    result_ref = raw.get("result_ref")
     return AnalysisPayload(
         scalar_results=scalar,
         structured_results=structured,
@@ -978,13 +1008,17 @@ def analyze(
 
             result_count = 0
             for key, value in payload.scalar_results.items():
+                scalar_value = _coerce_scalar_value(value)
+                scalar_json: dict[str, Any] = {"parameters": resolved_params}
+                if scalar_value is None:
+                    scalar_json["value"] = None
                 method_service.record_result(
                     method_definition_id=method_definition_id,
                     source_group_id=int(analysis_input_group_id),
                     analysis_group_id=identity.group_id,
                     result_key=str(key),
-                    result_value=float(value),
-                    result_json={"parameters": resolved_params},
+                    result_value=scalar_value,
+                    result_json=scalar_json,
                 )
                 result_count += 1
 

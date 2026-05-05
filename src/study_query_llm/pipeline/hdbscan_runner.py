@@ -9,7 +9,11 @@ import numpy as np
 
 from study_query_llm.pipeline.runner import allow_no_run_stage
 
-HDBSCAN_DEFAULT_METRIC = "cosine"
+# NOTE:
+# The sklearn BallTree backend used by our current hdbscan build does not
+# support ``metric="cosine"``. Keep the runtime-safe default at euclidean
+# unless callers explicitly override ``hdbscan_metric``.
+HDBSCAN_DEFAULT_METRIC = "euclidean"
 HDBSCAN_DEFAULT_RANDOM_STATE = 0
 HDBSCAN_DEFAULT_CORE_DIST_N_JOBS = 1
 HDBSCAN_DEFAULT_APPROX_MIN_SPAN_TREE = False
@@ -88,6 +92,20 @@ def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
         ensure_ascii=False,
         sort_keys=True,
     ).encode("utf-8")
+
+
+def _replace_nonfinite_floats(value: Any) -> Any:
+    """Recursively replace NaN/Inf float values with ``None``."""
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        return numeric if np.isfinite(numeric) else None
+    if isinstance(value, dict):
+        return {str(k): _replace_nonfinite_floats(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_nonfinite_floats(v) for v in value]
+    if isinstance(value, tuple):
+        return [_replace_nonfinite_floats(v) for v in value]
+    return value
 
 
 @allow_no_run_stage
@@ -266,7 +284,7 @@ def run_hdbscan_analysis(
         "hdbscan_approx_min_span_tree": bool(approx_min_span_tree),
     }
 
-    summary: dict[str, Any] = {
+    summary_raw: dict[str, Any] = {
         "method_name": str(method_name),
         "input_group_id": int(input_group_id),
         "input_group_type": str(input_group_type),
@@ -284,16 +302,15 @@ def run_hdbscan_analysis(
         "mean_outlier_score": float(mean_outlier_score),
         "parameters": used_parameters,
     }
-    labels_payload: dict[str, Any] = {
+    labels_payload_raw: dict[str, Any] = {
         "cluster_labels": labels.tolist(),
         "noise_label": -1,
         "cluster_ids": cluster_ids,
         "cluster_sizes": cluster_sizes,
         "parameters": used_parameters,
     }
-
-    return {
-        "scalar_results": {
+    scalar_results = _replace_nonfinite_floats(
+        {
             "n_samples": float(n_samples),
             "n_features": float(matrix_for_fit.shape[1]),
             "cluster_count": float(len(cluster_ids)),
@@ -302,7 +319,13 @@ def run_hdbscan_analysis(
             "largest_cluster_size": float(largest_cluster_size),
             "mean_membership_probability": float(mean_membership_probability),
             "mean_outlier_score": float(mean_outlier_score),
-        },
+        }
+    )
+    summary = _replace_nonfinite_floats(summary_raw)
+    labels_payload = _replace_nonfinite_floats(labels_payload_raw)
+
+    return {
+        "scalar_results": scalar_results,
         "structured_results": {
             "hdbscan_summary": summary,
             "hdbscan_cluster_labels": labels_payload,

@@ -664,7 +664,7 @@ def test_hdbscan_runner_uses_deterministic_defaults_and_echoes_parameters(
     )
 
     kwargs = dict(captured.get("kwargs") or {})
-    assert kwargs["metric"] == "cosine"
+    assert kwargs["metric"] == "euclidean"
     assert kwargs["random_state"] == 0
     assert kwargs["core_dist_n_jobs"] == 1
     assert kwargs["approx_min_span_tree"] is False
@@ -672,7 +672,7 @@ def test_hdbscan_runner_uses_deterministic_defaults_and_echoes_parameters(
     used = (
         result["structured_results"]["hdbscan_summary"]["parameters"]  # type: ignore[index]
     )
-    assert used["hdbscan_metric"] == "cosine"
+    assert used["hdbscan_metric"] == "euclidean"
     assert used["hdbscan_random_state"] == 0
     assert used["hdbscan_core_dist_n_jobs"] == 1
     assert used["hdbscan_approx_min_span_tree"] is False
@@ -724,6 +724,37 @@ def test_hdbscan_runner_allows_explicit_policy_overrides(monkeypatch) -> None:
     assert used["hdbscan_approx_min_span_tree"] is True
 
 
+def test_hdbscan_runner_sanitizes_nonfinite_statistics(monkeypatch) -> None:
+    class _FakeHDBSCAN:
+        def __init__(self, **_kwargs):
+            pass
+
+        def fit_predict(self, matrix):
+            rows = int(np.asarray(matrix).shape[0])
+            self.probabilities_ = np.asarray([1.0, np.nan, 0.5][:rows], dtype=np.float64)
+            self.outlier_scores_ = np.asarray([0.0, np.inf, -np.inf][:rows], dtype=np.float64)
+            return np.asarray([0, 0, -1][:rows], dtype=np.int64)
+
+    monkeypatch.setitem(sys.modules, "hdbscan", types.SimpleNamespace(HDBSCAN=_FakeHDBSCAN))
+
+    result = run_hdbscan_analysis(
+        method_name="phase1_hdbscan_fixture",
+        input_group_id=126,
+        input_group_type="embedding_batch",
+        input_group_metadata={"representation": "full"},
+        embeddings=np.asarray([[1.0, 0.0], [0.8, 0.2], [0.0, 1.0]], dtype=np.float64),
+        texts=["a", "b", "c"],
+        parameters={"hdbscan_min_cluster_size": 2},
+    )
+    scalar = dict(result["scalar_results"])
+    summary = dict(result["structured_results"]["hdbscan_summary"])  # type: ignore[index]
+
+    assert scalar["mean_membership_probability"] is None
+    assert scalar["mean_outlier_score"] is None
+    assert summary["mean_membership_probability"] is None
+    assert summary["mean_outlier_score"] is None
+
+
 def test_hdbscan_runner_rejects_zero_core_dist_jobs(monkeypatch) -> None:
     monkeypatch.setitem(
         sys.modules,
@@ -744,6 +775,65 @@ def test_hdbscan_runner_rejects_zero_core_dist_jobs(monkeypatch) -> None:
                 "hdbscan_core_dist_n_jobs": 0,
             },
         )
+
+
+def test_analyze_allows_nonfinite_scalar_metrics_as_nulls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db, _database_url = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _df_group_id, snapshot_group_id, embedding_group_id = _prepare_inputs(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    request_group_id = _create_request_group(db, "request_nonfinite_scalar")
+
+    def runner(**_kwargs):
+        return {
+            "scalar_results": {
+                "finite_metric": 1.25,
+                "nan_metric": float("nan"),
+                "pos_inf_metric": float("inf"),
+                "neg_inf_metric": float("-inf"),
+            },
+            "structured_results": {
+                "summary": {
+                    "mean_outlier_score": float("nan"),
+                    "ok_count": 4,
+                }
+            },
+            "artifacts": {"analysis_summary.json": b'{"ok": true}'},
+            "result_ref": "analysis_summary.json",
+        }
+
+    result = analyze(
+        snapshot_group_id,
+        embedding_group_id,
+        method_name="nonfinite_scalar_fixture",
+        run_key="rk_nonfinite_scalar_fixture",
+        request_group_id=request_group_id,
+        db=db,
+        artifact_dir=artifact_dir,
+        method_runner=runner,
+    )
+
+    with db.session_scope() as session:
+        rows = (
+            session.query(AnalysisResult)
+            .filter(AnalysisResult.analysis_group_id == int(result.group_id))
+            .all()
+        )
+        by_key = {str(row.result_key): row for row in rows}
+        assert by_key["finite_metric"].result_value == pytest.approx(1.25)
+        for key in ("nan_metric", "pos_inf_metric", "neg_inf_metric"):
+            assert by_key[key].result_value is None
+            payload = dict(by_key[key].result_json or {})
+            assert payload.get("value") is None
+
+        summary_payload = dict(by_key["summary"].result_json or {}).get("value") or {}
+        assert summary_payload.get("mean_outlier_score") is None
 
 
 def test_analyze_kmeans_normalize_pca_sweep_writes_clustering_summary_no_v1_fields(

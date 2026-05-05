@@ -109,6 +109,60 @@ def test_sharded_request_planner_creates_leaf_reducer_finalize_jobs():
         assert all(j.seed_value is not None for j in leaf_jobs)
 
 
+def test_sharded_request_planner_can_emit_request_finalizer_job():
+    db = _db()
+    with db.session_scope() as session:
+        from study_query_llm.db.models_v2 import OrchestrationJobDependency
+
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        svc.enable_analysis_jobs = True
+        svc.enable_clustering_analysis_jobs = True
+        svc.use_request_finalizer_job = True
+
+        run_key = "dbpedia_engine_a_300_50runs"
+        req_id = svc.create_request(
+            request_name="sharded_req_with_request_finalizer",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={"k_min": 2, "k_max": 2, "n_restarts": 1},
+            parameter_axes={
+                "datasets": ["dbpedia"],
+                "embedding_engines": ["engine/a"],
+            },
+            entry_max=300,
+            execution_mode="sharded",
+            shard_config={"k_ranges": [[2, 2]], "tries_per_k": 1},
+            clustering_analysis_selection=[
+                {
+                    "method_name": "kmeans+fixed-k",
+                    "parameters": {"k": 2},
+                }
+            ],
+            run_key_to_lineage_inputs={
+                run_key: {
+                    "dataset_snapshot_ids": [11],
+                    "embedding_batch_group_id": 22,
+                }
+            },
+        )
+
+        jobs = repo.list_orchestration_jobs(request_group_id=req_id)
+        finalize_request_jobs = [j for j in jobs if j.job_type == "finalize_request"]
+        assert len(finalize_request_jobs) == 1
+        finalize_request_job = finalize_request_jobs[0]
+        assert finalize_request_job.job_key == f"req{int(req_id)}__finalize_request"
+
+        analysis_jobs = [j for j in jobs if j.job_type == "analysis_run"]
+        assert len(analysis_jobs) == 1
+        deps = (
+            session.query(OrchestrationJobDependency)
+            .filter(OrchestrationJobDependency.job_id == int(analysis_jobs[0].id))
+            .all()
+        )
+        dep_ids = {int(dep.depends_on_job_id) for dep in deps}
+        assert dep_ids == {int(finalize_request_job.id)}
+
+
 def test_claim_orchestration_job_batch_respects_limit():
     db = _db()
     with db.session_scope() as session:

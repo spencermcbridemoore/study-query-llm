@@ -289,6 +289,57 @@ def test_clustering_adapter_analysis_jobs_require_lineage_inputs():
     ]
 
 
+def test_clustering_adapter_request_finalizer_job_gates_analysis_jobs_when_enabled():
+    adapter = get_sweep_type_adapter(SWEEP_TYPE_CLUSTERING)
+    run_key_to_target = {
+        "dbpedia_engine_a_50_50runs": {
+            "dataset": "dbpedia",
+            "embedding_engine": "engine/a",
+        }
+    }
+    analysis_catalog = [
+        {
+            "analysis_key": "bundle_eval",
+            "scope": "run",
+            "method_name": "kmeans+normalize+pca+sweep",
+            "method_version": "1.0",
+            "required": False,
+            "blocking": False,
+            "result_keys": [],
+            "parameters": {"top_n": 5},
+        }
+    ]
+    graph = adapter.build_orchestration_graph(
+        request_group_id=18,
+        run_key_to_target=run_key_to_target,
+        fixed_config={"k_min": 2, "k_max": 2, "n_restarts": 1},
+        execution_mode="sharded",
+        shard_config={"k_ranges": [[2, 2]], "tries_per_k": 1},
+        analysis_catalog=analysis_catalog,
+        enable_analysis_jobs=True,
+        lineage_inputs_by_run_key={
+            "dbpedia_engine_a_50_50runs": {
+                "dataset_snapshot_ids": [33],
+                "embedding_batch_group_id": 44,
+            }
+        },
+        use_request_finalizer_job=True,
+    )
+    assert graph.graph_kind == "k_try_reduce_finalize_request"
+    request_finalize_jobs = [node for node in graph.jobs if node.job_type == "finalize_request"]
+    assert len(request_finalize_jobs) == 1
+    request_finalize_job = request_finalize_jobs[0]
+    assert request_finalize_job.job_key == "req18__finalize_request"
+    assert list(request_finalize_job.depends_on_job_keys) == [
+        "dbpedia_engine_a_50_50runs__finalize_run"
+    ]
+    analysis_jobs = [node for node in graph.jobs if node.job_type == "analysis_run"]
+    assert len(analysis_jobs) == 1
+    assert list(analysis_jobs[0].depends_on_job_keys) == ["req18__finalize_request"]
+    assert graph.metadata_updates["request_finalizer_job_enabled"] is True
+    assert graph.metadata_updates["request_finalizer_job_key"] == "req18__finalize_request"
+
+
 def test_mcq_adapter_graph_spec_matches_legacy_shape():
     adapter = get_sweep_type_adapter(SWEEP_TYPE_MCQ)
     run_key_to_target = {
@@ -694,6 +745,7 @@ def test_compute_progress_partial_deliveries(db_connection):
             metadata_json={"run_key": expected_key},
         )
 
+        assert svc.record_delivery(req_id, int(run_id), expected_key) is True
         progress = svc.compute_progress(req_id)
         assert progress["completed_count"] == 1
         assert progress["missing_count"] == 0
@@ -759,9 +811,9 @@ def test_finalize_if_fulfilled_creates_sweep(db_connection):
             metadata_json={"run_key": run_key},
         )
 
-        # Not fulfilled yet (no record_delivery - progress uses DB lookup by run_key)
+        assert svc.record_delivery(req_id, int(run_id), run_key) is True
         sweep_id = svc.finalize_if_fulfilled(req_id)
-        assert sweep_id is not None  # run exists in DB with run_key, so progress sees it
+        assert sweep_id is not None
 
         req = svc.get_request(req_id)
         assert req["request_status"] == REQUEST_STATUS_FULFILLED
@@ -770,6 +822,34 @@ def test_finalize_if_fulfilled_creates_sweep(db_connection):
         sweep_group = repo.get_group_by_id(sweep_id)
         assert sweep_group is not None
         assert sweep_group.group_type == GROUP_TYPE_CLUSTERING_SWEEP
+
+
+def test_finalize_if_fulfilled_requires_request_scoped_delivery_links(db_connection):
+    """A request cannot fulfill until run keys are linked via request contains edges."""
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+
+        axes = {"datasets": ["dbpedia"], "embedding_engines": ["e1"]}
+        req_id = svc.create_request(
+            request_name="request_scoped_finalize_gate",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={"k_min": 2},
+            parameter_axes=axes,
+            entry_max=300,
+        )
+        repo.create_group(
+            group_type=GROUP_TYPE_CLUSTERING_RUN,
+            name="unlinked_global_run",
+            metadata_json={"run_key": "dbpedia_e1_300_50runs"},
+        )
+
+        sweep_id = svc.finalize_if_fulfilled(req_id)
+        assert sweep_id is None
+        req = svc.get_request(req_id)
+        assert req is not None
+        assert req["request_status"] == REQUEST_STATUS_REQUESTED
+        assert req.get("linked_sweep_id") in (None, 0)
 
 
 def test_finalize_if_fulfilled_preserves_sweep_semantics(db_connection):
@@ -794,6 +874,7 @@ def test_finalize_if_fulfilled_preserves_sweep_semantics(db_connection):
             metadata_json={"run_key": "dbpedia_e1_300_50runs"},
         )
 
+        assert svc.record_delivery(req_id, int(run_id), "dbpedia_e1_300_50runs") is True
         sweep_id = svc.finalize_if_fulfilled(req_id, sweep_name="my_sweep")
         assert sweep_id is not None
 
@@ -830,11 +911,12 @@ def test_finalize_if_fulfilled_is_idempotent(db_connection):
             entry_max=300,
         )
 
-        repo.create_group(
+        run_id = repo.create_group(
             group_type=GROUP_TYPE_CLUSTERING_RUN,
             name="run1",
             metadata_json={"run_key": "dbpedia_e1_300_50runs"},
         )
+        assert svc.record_delivery(req_id, int(run_id), "dbpedia_e1_300_50runs") is True
 
         sweep_id_1 = svc.finalize_if_fulfilled(req_id, sweep_name="idempotent_sweep")
         sweep_id_2 = svc.finalize_if_fulfilled(req_id, sweep_name="idempotent_sweep")
@@ -868,11 +950,12 @@ def test_finalize_if_fulfilled_returns_none_when_missing(db_connection):
         )
 
         # Only one of two runs present
-        repo.create_group(
+        run_id = repo.create_group(
             group_type=GROUP_TYPE_CLUSTERING_RUN,
             name="run1",
             metadata_json={"run_key": "dbpedia_e1_300_50runs"},
         )
+        assert svc.record_delivery(req_id, int(run_id), "dbpedia_e1_300_50runs") is True
 
         sweep_id = svc.finalize_if_fulfilled(req_id)
         assert sweep_id is None

@@ -2,6 +2,7 @@
 
 from .job_payload_models import (
     AnalysisRunPayload,
+    FinalizeRequestPayload,
     FinalizeRunPayload,
     JobSnapshot,
     LangGraphRunPayload,
@@ -9,6 +10,7 @@ from .job_payload_models import (
     ReduceKPayload,
     RunKTryPayload,
     parse_analysis_run_payload,
+    parse_finalize_request_payload,
     parse_finalize_run_payload,
     parse_job_snapshot,
     parse_mcq_run_payload,
@@ -20,6 +22,7 @@ from .job_reducer_service import JobReducerService
 from .job_runner_factory import create_job_runner, get_supported_job_types, register_job_runner
 from .job_runners import (
     AnalysisRunRunner,
+    FinalizeRequestRunner,
     FinalizeRunRunner,
     JobRunContext,
     JobRunOutcome,
@@ -39,8 +42,10 @@ from .reducer_plugin import (
 
 __all__ = [
     "FinalizeRunRunner",
+    "FinalizeRequestRunner",
     "AnalysisRunRunner",
     "AnalysisRunPayload",
+    "FinalizeRequestPayload",
     "FinalizeRunPayload",
     "JobReducerService",
     "JobRunContext",
@@ -63,6 +68,7 @@ __all__ = [
     "parse_mcq_run_payload",
     "parse_langgraph_run_payload",
     "parse_reduce_k_payload",
+    "parse_finalize_request_payload",
     "parse_finalize_run_payload",
     "parse_run_k_try_payload",
     "build_p0_baseline_snapshot",

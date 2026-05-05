@@ -124,6 +124,7 @@ class SweepTypeAdapter(Protocol):
         analysis_catalog: List[Dict[str, Any]],
         enable_analysis_jobs: bool,
         lineage_inputs_by_run_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        use_request_finalizer_job: bool = False,
     ) -> OrchestrationGraphSpec:
         ...
 
@@ -324,6 +325,7 @@ class ClusteringSweepAdapter:
         analysis_catalog: List[Dict[str, Any]],
         enable_analysis_jobs: bool,
         lineage_inputs_by_run_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        use_request_finalizer_job: bool = False,
     ) -> OrchestrationGraphSpec:
         lineage_inputs_by_run_key = dict(lineage_inputs_by_run_key or {})
         resolved_shard_config = dict(shard_config or {})
@@ -419,6 +421,23 @@ class ClusteringSweepAdapter:
                 )
             )
 
+        request_finalize_job_key: Optional[str] = None
+        if use_request_finalizer_job:
+            request_finalize_job_key = f"req{int(request_group_id)}__finalize_request"
+            jobs.append(
+                OrchestrationJobSpec(
+                    job_type="finalize_request",
+                    job_key=request_finalize_job_key,
+                    base_run_key=None,
+                    payload_json={
+                        "request_id": int(request_group_id),
+                        "sweep_type": SWEEP_TYPE_CLUSTERING,
+                    },
+                    max_attempts=max_attempts,
+                    depends_on_job_keys=tuple(sorted(finalize_key_by_run_key.values())),
+                )
+            )
+
         analysis_job_count = 0
         skipped_analysis_jobs: Dict[str, List[Dict[str, Any]]] = {}
         if enable_analysis_jobs and analysis_catalog:
@@ -488,12 +507,19 @@ class ClusteringSweepAdapter:
                             base_run_key=run_key,
                             payload_json=payload,
                             max_attempts=max_attempts,
-                            depends_on_job_keys=(finalize_job_key,),
+                            depends_on_job_keys=(
+                                (request_finalize_job_key,)
+                                if request_finalize_job_key
+                                else (finalize_job_key,)
+                            ),
                         )
                     )
                     analysis_job_count += 1
 
         metadata_updates: Dict[str, Any] = {}
+        metadata_updates["request_finalizer_job_enabled"] = bool(use_request_finalizer_job)
+        if request_finalize_job_key:
+            metadata_updates["request_finalizer_job_key"] = request_finalize_job_key
         if analysis_catalog:
             metadata_updates["analysis_execution_mode"] = (
                 "orchestration_jobs" if enable_analysis_jobs else "compatibility_only"
@@ -503,7 +529,11 @@ class ClusteringSweepAdapter:
                 metadata_updates["analysis_skipped_run_keys"] = skipped_analysis_jobs
 
         return OrchestrationGraphSpec(
-            graph_kind="k_try_reduce_finalize",
+            graph_kind=(
+                "k_try_reduce_finalize_request"
+                if use_request_finalizer_job
+                else "k_try_reduce_finalize"
+            ),
             jobs=tuple(jobs),
             metadata_updates=metadata_updates,
         )
@@ -637,8 +667,9 @@ class McqSweepAdapter:
         analysis_catalog: List[Dict[str, Any]],
         enable_analysis_jobs: bool,
         lineage_inputs_by_run_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        use_request_finalizer_job: bool = False,
     ) -> OrchestrationGraphSpec:
-        del execution_mode, shard_config, lineage_inputs_by_run_key
+        del execution_mode, shard_config, lineage_inputs_by_run_key, use_request_finalizer_job
         max_attempts = max(1, _safe_int(fixed_config.get("max_attempts"), 3))
 
         jobs: List[OrchestrationJobSpec] = []

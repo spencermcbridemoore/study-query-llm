@@ -85,6 +85,7 @@ class SweepRequestService:
         )
         self.record_analysis_parity = _env_flag("SQ_RECORD_ANALYSIS_PARITY", True)
         self.unified_execution_writes = _env_flag("SQ_UNIFIED_EXECUTION_WRITES", True)
+        self.use_request_finalizer_job = _env_flag("SQ_USE_REQUEST_FINALIZER_JOB", False)
 
     @staticmethod
     def _request_group_types() -> set[str]:
@@ -621,6 +622,9 @@ class SweepRequestService:
             analysis_catalog=analysis_catalog,
             enable_analysis_jobs=enable_analysis_jobs,
             lineage_inputs_by_run_key=lineage_inputs_by_run_key,
+            use_request_finalizer_job=bool(
+                sweep_type == SWEEP_TYPE_CLUSTERING and self.use_request_finalizer_job
+            ),
         )
         planned = self._enqueue_graph_spec(
             request_group_id=request_group_id,
@@ -890,7 +894,7 @@ class SweepRequestService:
         return out
 
     def compute_progress(self, request_id: int) -> Dict[str, Any]:
-        """Compute completed/missing runs for a request from run groups."""
+        """Compute completed/missing runs for a request from request-scoped deliveries."""
         req = self.get_request(request_id)
         if not req:
             return {
@@ -915,24 +919,47 @@ class SweepRequestService:
             }
 
         from study_query_llm.db.models_v2 import Group
+        from study_query_llm.db.models_v2 import GroupLink
 
-        expected_set = set(expected_keys)
-        completed_run_keys: List[str] = []
-        completed_run_ids: List[int] = []
-
-        all_runs = (
-            self.repository.session.query(Group)
-            .filter(Group.group_type == adapter.run_group_type)
+        links = (
+            self.repository.session.query(GroupLink)
+            .filter(
+                GroupLink.parent_group_id == int(request_id),
+                GroupLink.link_type == "contains",
+            )
             .all()
         )
-        for run in all_runs:
-            run_key = str((run.metadata_json or {}).get("run_key") or "")
-            if run_key and run_key in expected_set:
-                completed_run_keys.append(run_key)
-                completed_run_ids.append(int(run.id))
+        delivered_run_ids = sorted({int(link.child_group_id) for link in links})
+        if not delivered_run_ids:
+            return {
+                "expected_count": len(expected_keys),
+                "completed_count": 0,
+                "missing_count": len(expected_keys),
+                "completed_run_keys": [],
+                "missing_run_keys": expected_keys,
+                "completed_run_ids": [],
+            }
 
-        seen_keys = set(completed_run_keys)
-        missing_run_keys = [rk for rk in expected_keys if rk not in seen_keys]
+        delivered_runs = (
+            self.repository.session.query(Group)
+            .filter(
+                Group.id.in_(delivered_run_ids),
+                Group.group_type == adapter.run_group_type,
+            )
+            .all()
+        )
+        run_id_by_key: Dict[str, int] = {}
+        for run in delivered_runs:
+            run_key = str((run.metadata_json or {}).get("run_key") or "").strip()
+            if not run_key:
+                continue
+            if run_key not in expected_keys:
+                continue
+            run_id_by_key.setdefault(run_key, int(run.id))
+
+        completed_run_keys = [rk for rk in expected_keys if rk in run_id_by_key]
+        completed_run_ids = [int(run_id_by_key[rk]) for rk in completed_run_keys]
+        missing_run_keys = [rk for rk in expected_keys if rk not in run_id_by_key]
         return {
             "expected_count": len(expected_keys),
             "completed_count": len(completed_run_keys),

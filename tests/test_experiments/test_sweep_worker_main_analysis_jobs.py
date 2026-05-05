@@ -190,3 +190,84 @@ def test_run_one_analysis_run_job_clustering_rejects_non_registry_method() -> No
     assert job_id == 43
     assert result_ref is None
     assert str(error or "").startswith("unsupported_clustering_analysis_method:")
+
+
+def test_run_one_analysis_run_job_clustering_requires_request_delivery_link_and_recovers(
+    monkeypatch,
+) -> None:
+    db = _db()
+    run_key = "dbpedia_engine_a_50_50runs"
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        request_id = svc.create_request(
+            request_name="cluster_analysis_requires_delivery_link",
+            algorithm="cosine_kllmeans_no_pca",
+            fixed_config={"k_min": 2, "k_max": 2, "n_restarts": 1},
+            parameter_axes={
+                "datasets": ["dbpedia"],
+                "embedding_engines": ["engine/a"],
+            },
+            entry_max=50,
+        )
+        run_id = repo.create_group(
+            group_type="clustering_run",
+            name="run_without_request_link",
+            metadata_json={
+                "run_key": run_key,
+                "dataset_snapshot_ids": [101],
+                "embedding_batch_group_id": 202,
+            },
+        )
+
+    captured: dict = {}
+
+    def _fake_analyze(**kwargs):  # noqa: ANN003
+        captured.update(dict(kwargs))
+        return None
+
+    monkeypatch.setattr(worker_main, "run_pipeline_analyze", _fake_analyze)
+
+    job_snapshot = {
+        "id": 44,
+        "request_group_id": int(request_id),
+        "job_type": "analysis_run",
+        "job_key": f"req{int(request_id)}__{run_key}__analysis__bundle_eval",
+        "base_run_key": run_key,
+        "payload_json": {
+            "request_id": int(request_id),
+            "sweep_type": "clustering",
+            "analysis_key": "bundle_eval",
+            "run_key": run_key,
+            "method_name": "kmeans+normalize+pca+sweep",
+            "method_version": "1.0",
+            "parameters": {"top_n": 5},
+            "force": False,
+        },
+    }
+    job_id, result_ref, error = worker_main.run_one_analysis_run_job(
+        job_snapshot=job_snapshot,
+        db=db,
+        worker_label="test-worker",
+    )
+    assert job_id == 44
+    assert result_ref is None
+    assert str(error or "").startswith(
+        ("no_delivered_runs_for_request:", "missing_clustering_run_for_request:")
+    )
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        svc = SweepRequestService(repo)
+        assert svc.record_delivery(int(request_id), int(run_id), run_key) is True
+
+    job_id_2, result_ref_2, error_2 = worker_main.run_one_analysis_run_job(
+        job_snapshot=job_snapshot,
+        db=db,
+        worker_label="test-worker",
+    )
+    assert job_id_2 == 44
+    assert error_2 is None
+    assert result_ref_2 == f"analysis:bundle_eval:{run_key}__analysis__bundle_eval"
+    assert int(captured.get("snapshot_group_id") or -1) == 101
+    assert int(captured.get("embedding_batch_group_id") or -1) == 202

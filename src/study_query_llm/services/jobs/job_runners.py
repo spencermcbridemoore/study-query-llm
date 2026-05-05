@@ -150,6 +150,40 @@ class FinalizeRunRunner:
         )
 
 
+class FinalizeRequestRunner:
+    """Runner for finalize_request jobs. Reducer completes job internally."""
+
+    def __init__(self, reducer_plugin: ReducerPlugin) -> None:
+        self._reducer_plugin = reducer_plugin
+
+    def run(self, job_snapshot: Dict[str, Any], context: JobRunContext) -> JobRunOutcome:
+        from .job_payload_models import (
+            parse_finalize_request_payload,
+            parse_job_snapshot,
+        )
+
+        try:
+            parse_job_snapshot(job_snapshot)
+            parse_finalize_request_payload(job_snapshot.get("payload_json") or {})
+        except ValidationError as e:
+            job_id = int(job_snapshot.get("id", 0))
+            return JobRunOutcome(
+                job_id=job_id,
+                result_ref=None,
+                error=f"payload_validation_error: {e}",
+                db_updated_by_runner=False,
+            )
+        reducer_output = self._reducer_plugin.finalize_request(
+            ReducerInput(job_snapshot=job_snapshot, context=context)
+        )
+        return JobRunOutcome(
+            job_id=int(reducer_output.job_id),
+            result_ref=reducer_output.result_ref,
+            error=None,
+            db_updated_by_runner=True,
+        )
+
+
 class McqRunRunner:
     """Runner for mcq_run jobs. Does not update DB; worker does."""
 

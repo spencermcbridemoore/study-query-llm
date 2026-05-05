@@ -180,11 +180,12 @@ def _materialize_runs_and_finalize(
     adapter = get_sweep_type_adapter(req.get("sweep_type"))
     expected_keys = [str(x) for x in (req.get("expected_run_keys") or [])]
     for idx, run_key in enumerate(expected_keys):
-        repo.create_group(
+        run_id = repo.create_group(
             group_type=adapter.run_group_type,
             name=f"baseline_{adapter.sweep_type}_run_{idx + 1}",
             metadata_json={"run_key": run_key},
         )
+        svc.record_delivery(int(request_id), int(run_id), run_key)
     sweep_id = svc.finalize_if_fulfilled(request_id)
     finalized_req = svc.get_request(request_id) or {}
     progress = svc.compute_progress(request_id)

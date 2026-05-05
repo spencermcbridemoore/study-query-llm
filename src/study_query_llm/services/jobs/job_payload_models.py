@@ -58,6 +58,15 @@ class FinalizeRunPayload(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class FinalizeRequestPayload(BaseModel):
+    """Payload for finalize_request jobs."""
+
+    request_id: int
+    sweep_type: str = "clustering"
+
+    model_config = {"extra": "allow"}
+
+
 def parse_job_snapshot(raw: Dict[str, Any]) -> JobSnapshot:
     """Parse and validate job snapshot. Raises ValidationError on invalid data."""
     return JobSnapshot.model_validate(raw)
@@ -127,6 +136,11 @@ def parse_reduce_k_payload(payload_json: Dict[str, Any]) -> ReduceKPayload:
 def parse_finalize_run_payload(payload_json: Dict[str, Any]) -> FinalizeRunPayload:
     """Parse and validate finalize_run payload. Raises ValidationError on invalid data."""
     return FinalizeRunPayload.model_validate(payload_json or {})
+
+
+def parse_finalize_request_payload(payload_json: Dict[str, Any]) -> FinalizeRequestPayload:
+    """Parse and validate finalize_request payload. Raises ValidationError on invalid data."""
+    return FinalizeRequestPayload.model_validate(payload_json or {})
 
 
 def parse_langgraph_run_payload(payload_json: Dict[str, Any]) -> LangGraphRunPayload:

@@ -863,7 +863,7 @@ def _run_sharded_worker_loop(
     job_types = (
         ["mcq_run", "analysis_run"]
         if sweep_type == SWEEP_TYPE_MCQ
-        else ["run_k_try", "reduce_k", "finalize_run", "analysis_run"]
+        else ["run_k_try", "reduce_k", "finalize_run", "finalize_request", "analysis_run"]
     )
     filter_payload = (
         {"embedding_engine": embedding_engine}
@@ -945,6 +945,10 @@ def _run_sharded_worker_loop(
                     print(f"[{worker_id}] REDUCED job {job_key} -> {outcome.result_ref}")
                 elif job_type == "finalize_run":
                     print(f"[{worker_id}] FINALIZED job {job_key} -> run_id={outcome.result_ref}")
+                elif job_type == "finalize_request":
+                    print(
+                        f"[{worker_id}] FINALIZED REQUEST job {job_key} -> sweep_id={outcome.result_ref}"
+                    )
                 last_work_at = time.time()
         except Exception as exc:
             with db.session_scope() as session:

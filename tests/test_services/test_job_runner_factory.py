@@ -9,6 +9,7 @@ import pytest
 from study_query_llm.services.jobs import (
     AnalysisRunRunner,
     ClusteringReducerPlugin,
+    FinalizeRequestRunner,
     FinalizeRunRunner,
     JobRunContext,
     JobRunOutcome,
@@ -53,9 +54,27 @@ def test_create_job_runner_finalize_run():
     class MockReducer:
         def finalize_run_job(self, job_id: int) -> int | None:
             return 42
+        def finalize_request_job(self, job_id: int) -> int | None:
+            return 7
 
     runner = create_job_runner("finalize_run", reducer=MockReducer())
     assert isinstance(runner, FinalizeRunRunner)
+
+
+def test_create_job_runner_finalize_request():
+    class MockReducer:
+        def finalize_run_job(self, job_id: int) -> int | None:
+            return 42
+        def finalize_request_job(self, job_id: int) -> int | None:
+            return 7
+
+    runner = create_job_runner("finalize_request", reducer=MockReducer())
+    assert isinstance(runner, FinalizeRequestRunner)
+
+
+def test_create_job_runner_finalize_request_missing_reducer():
+    with pytest.raises(ValueError, match="reducer_plugin"):
+        create_job_runner("finalize_request")
 
 
 def test_create_job_runner_unsupported():
@@ -100,13 +119,19 @@ def test_clustering_reducer_plugin_wraps_legacy_service():
 
         def finalize_run_job(self, job_id: int) -> int:
             return 77
+        def finalize_request_job(self, job_id: int) -> int:
+            return 88
 
     plugin = ClusteringReducerPlugin(MockReducer())
     reduce_out = plugin.reduce_k(ReducerInput(job_snapshot={"id": 11}, context=None))
     finalize_out = plugin.finalize_run(ReducerInput(job_snapshot={"id": 12}, context=None))
+    finalize_request_out = plugin.finalize_request(
+        ReducerInput(job_snapshot={"id": 13}, context=None)
+    )
     assert isinstance(reduce_out, ReducerOutput)
     assert reduce_out.result_ref == "/tmp/reduce_11.json"
     assert finalize_out.run_id == 77
+    assert finalize_request_out.run_id == 88
 
 
 def test_create_job_runner_langgraph_run():
@@ -121,6 +146,7 @@ def test_get_supported_job_types():
     assert "analysis_run" in types
     assert "reduce_k" in types
     assert "finalize_run" in types
+    assert "finalize_request" in types
     assert "langgraph_run" in types
 
 

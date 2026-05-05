@@ -130,15 +130,17 @@ def _run_cached_job_supervisor(
                 status="ready",
             )
             ready_reduce_finalize = [
-                j for j in jobs if j.job_type in ("reduce_k", "finalize_run")
+                j for j in jobs if j.job_type in ("reduce_k", "finalize_run", "finalize_request")
             ]
         if not ready_reduce_finalize:
             break
         for job in ready_reduce_finalize:
             if job.job_type == "reduce_k":
                 reducer.reduce_k_job(job.id)
-            else:
+            elif job.job_type == "finalize_run":
                 reducer.finalize_run_job(job.id)
+            else:
+                reducer.finalize_request_job(job.id)
 
     for _ in range(worker_count):
         job_queue.put(None)

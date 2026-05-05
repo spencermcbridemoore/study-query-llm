@@ -126,6 +126,7 @@ def test_mcq_progress_and_finalize_creates_mcq_sweep():
             metadata_json={"run_key": run_key},
         )
 
+        assert svc.record_delivery(req_id, int(run_id), run_key) is True
         progress = svc.compute_progress(req_id)
         assert progress["completed_count"] == 1
         assert progress["missing_count"] == 0

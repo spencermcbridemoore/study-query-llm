@@ -6,12 +6,14 @@ import pytest
 from pydantic import ValidationError
 
 from study_query_llm.services.jobs import (
+    FinalizeRequestPayload,
     FinalizeRunPayload,
     JobSnapshot,
     McqRunPayload,
     ReduceKPayload,
     RunKTryPayload,
     parse_analysis_run_payload,
+    parse_finalize_request_payload,
     parse_finalize_run_payload,
     parse_job_snapshot,
     parse_mcq_run_payload,
@@ -194,3 +196,20 @@ def test_parse_finalize_run_payload_valid():
 def test_parse_finalize_run_payload_invalid():
     with pytest.raises(ValidationError):
         parse_finalize_run_payload({"run_key": "rk1"})  # missing required fields
+
+
+def test_parse_finalize_request_payload_valid():
+    payload = parse_finalize_request_payload(
+        {
+            "request_id": 77,
+            "sweep_type": "clustering",
+        }
+    )
+    assert isinstance(payload, FinalizeRequestPayload)
+    assert payload.request_id == 77
+    assert payload.sweep_type == "clustering"
+
+
+def test_parse_finalize_request_payload_invalid():
+    with pytest.raises(ValidationError):
+        parse_finalize_request_payload({"sweep_type": "clustering"})  # missing request_id

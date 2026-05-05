@@ -32,6 +32,9 @@ class ReducerPlugin(Protocol):
     def finalize_run(self, reducer_input: ReducerInput) -> ReducerOutput:
         ...
 
+    def finalize_request(self, reducer_input: ReducerInput) -> ReducerOutput:
+        ...
+
 
 class ClusteringReducerPlugin:
     """Default reducer plugin that wraps the existing JobReducerService behavior."""
@@ -51,5 +54,14 @@ class ClusteringReducerPlugin:
             job_id=job_id,
             result_ref=str(run_id) if run_id is not None else None,
             run_id=run_id,
+        )
+
+    def finalize_request(self, reducer_input: ReducerInput) -> ReducerOutput:
+        job_id = int(reducer_input.job_snapshot["id"])
+        sweep_id = self._reducer_service.finalize_request_job(job_id)
+        return ReducerOutput(
+            job_id=job_id,
+            result_ref=str(sweep_id) if sweep_id is not None else None,
+            run_id=sweep_id,
         )
 

@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Optional
 
 from .job_runners import (
     AnalysisRunRunner,
+    FinalizeRequestRunner,
     FinalizeRunRunner,
     JobRunner,
     McqRunRunner,
@@ -62,6 +63,18 @@ def _build_finalize_run_runner(
     return FinalizeRunRunner(reducer_plugin=plugin)
 
 
+def _build_finalize_request_runner(
+    *,
+    reducer_plugin: Optional[ReducerPlugin],
+    reducer: Optional[Any],
+    **_: Any,
+) -> JobRunner:
+    plugin = reducer_plugin or (ClusteringReducerPlugin(reducer) if reducer is not None else None)
+    if plugin is None:
+        raise ValueError("reducer_plugin (or reducer) required for job_type finalize_request")
+    return FinalizeRequestRunner(reducer_plugin=plugin)
+
+
 def _build_langgraph_runner(**_: Any) -> JobRunner:
     return LangGraphJobRunner()
 
@@ -72,6 +85,7 @@ _JOB_RUNNER_REGISTRY: Dict[str, JobRunnerBuilder] = {
     "analysis_run": _build_analysis_run_runner,
     "reduce_k": _build_reduce_k_runner,
     "finalize_run": _build_finalize_run_runner,
+    "finalize_request": _build_finalize_request_runner,
     "langgraph_run": _build_langgraph_runner,
 }
 
@@ -96,7 +110,7 @@ def create_job_runner(
     """Create a job runner for the given job_type.
 
     Args:
-        job_type: "run_k_try", "mcq_run", "analysis_run", "reduce_k", "finalize_run", or "langgraph_run"
+        job_type: "run_k_try", "mcq_run", "analysis_run", "reduce_k", "finalize_run", "finalize_request", or "langgraph_run"
         run_k_try_fn: Callable for run_k_try (required when job_type is run_k_try)
         mcq_run_fn: Callable for mcq_run (required when job_type is mcq_run)
         analysis_run_fn: Callable for analysis_run (required when job_type is analysis_run)
@@ -133,5 +147,6 @@ def get_supported_job_types() -> list[str]:
         "analysis_run",
         "reduce_k",
         "finalize_run",
+        "finalize_request",
         "langgraph_run",
     ]

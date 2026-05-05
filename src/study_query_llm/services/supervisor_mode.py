@@ -46,6 +46,7 @@ def _engine_pending_jobs_count(
                 "run_k_try",
                 "reduce_k",
                 "finalize_run",
+                "finalize_request",
             ):
                 total_pending += 1
             if (

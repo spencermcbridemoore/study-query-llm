@@ -30,6 +30,7 @@ from study_query_llm.experiments.ingestion import ingest_result_to_db
 from study_query_llm.experiments.sweep_mcq_standalone import execute_mcq_standalone_run
 from study_query_llm.experiments.sweep_request_types import SWEEP_TYPE_CLUSTERING, SWEEP_TYPE_MCQ
 from study_query_llm.experiments.sweep_io import get_output_dir, serialize_sweep_result
+from study_query_llm.utils.logging_config import get_logger
 from study_query_llm.pipeline.analyze import analyze as run_pipeline_analyze
 from study_query_llm.pipeline.clustering.registry import (
     get_algorithm_spec,
@@ -58,6 +59,7 @@ from study_query_llm.utils.estela_loader import load_estela_dict
 from study_query_llm.utils.text_utils import flatten_prompt_dict
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+logger = get_logger(__name__)
 
 # Populated by main() before run_worker / helper functions use it.
 db: Optional[DatabaseConnectionV2] = None  # type: ignore[assignment]

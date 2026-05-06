@@ -410,3 +410,117 @@ def test_finalize_run_job_duplicate_finalize_paths_keep_single_delivery_link(
             .all()
         )
         assert len(links) == 1
+
+
+def test_reduce_k_job_collects_sorted_tries_from_leaf_shards(tmp_path: Path) -> None:
+    db = _db()
+    objectives = [0.8, 0.3, 0.5]
+    try_indices = [2, 0, 1]
+    shard_refs: list[str] = []
+    for i, (obj, tidx) in enumerate(zip(objectives, try_indices)):
+        path = tmp_path / f"leaf_{i}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "pca": {},
+                    "by_k": {
+                        "2": {
+                            "labels": [0, 1],
+                            "objective": obj,
+                            "representatives": ["a", "b"],
+                        }
+                    },
+                    "try_idx": tidx,
+                    "seed_value": 100 + tidx,
+                    "profiling": {"run_sweep_seconds": float(tidx)},
+                }
+            ),
+            encoding="utf-8",
+        )
+        shard_refs.append(str(path))
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        req_id = repo.create_group(
+            group_type="clustering_sweep_request",
+            name="reduce_tries_req",
+            metadata_json={},
+        )
+        leaf_ids: list[int] = []
+        for ref in shard_refs:
+            lid = int(
+                repo.enqueue_orchestration_job(
+                    request_group_id=int(req_id),
+                    job_type="run_k_try",
+                    job_key=f"rk_try_{Path(ref).stem}",
+                    payload_json={},
+                )
+            )
+            repo.complete_orchestration_job(lid, result_ref=ref)
+            leaf_ids.append(lid)
+        rid = int(
+            repo.enqueue_orchestration_job(
+                request_group_id=int(req_id),
+                job_type="reduce_k",
+                job_key="rk_reduce_tries",
+                depends_on_job_ids=leaf_ids,
+            )
+        )
+
+    reducer = JobReducerService(db, artifacts_dir=tmp_path)
+    out_ref = reducer.reduce_k_job(rid)
+    payload = json.loads(Path(out_ref).read_text(encoding="utf-8"))
+    tries = payload["by_k"]["2"]["tries"]
+    assert len(tries) == 3
+    assert [t["try_idx"] for t in tries] == [0, 1, 2]
+    assert payload["by_k"]["2"]["objective"] == 0.3
+    assert len(payload["by_k"]["2"]["objectives"]) == 3
+
+
+def test_reduce_k_job_rejects_multi_k_leaf_shard(tmp_path: Path) -> None:
+    db = _db()
+    path = tmp_path / "leaf_multi.json"
+    path.write_text(
+        json.dumps(
+            {
+                "by_k": {
+                    "2": {"labels": [0, 1], "objective": 0.5},
+                    "3": {"labels": [0, 1, 0], "objective": 0.4},
+                },
+                "try_idx": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        req_id = repo.create_group(
+            group_type="clustering_sweep_request",
+            name="bad_shard_req",
+            metadata_json={},
+        )
+        lid = int(
+            repo.enqueue_orchestration_job(
+                request_group_id=int(req_id),
+                job_type="run_k_try",
+                job_key="rk_bad",
+                payload_json={},
+            )
+        )
+        repo.complete_orchestration_job(lid, result_ref=str(path))
+        rid = int(
+            repo.enqueue_orchestration_job(
+                request_group_id=int(req_id),
+                job_type="reduce_k",
+                job_key="rk_reduce_bad",
+                depends_on_job_ids=[lid],
+            )
+        )
+
+    reducer = JobReducerService(db, artifacts_dir=tmp_path)
+    try:
+        reducer.reduce_k_job(rid)
+    except RuntimeError as exc:
+        assert "exactly one k bucket" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")

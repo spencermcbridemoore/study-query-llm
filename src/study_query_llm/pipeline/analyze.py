@@ -684,6 +684,13 @@ def _synthesize_v1_pipeline_for_bundled_method(
         },
     ]
 
+    default_k_range = [2, 3, 5, 8, 10, 15, 20, 30, 50]
+    raw_k_range = parameters.get("k_range")
+    if isinstance(raw_k_range, (list, tuple)) and raw_k_range:
+        sweep_k_range = [int(v) for v in raw_k_range]
+    else:
+        sweep_k_range = list(default_k_range)
+
     if base_algorithm == "kmeans":
         terminal_params: dict[str, Any] = {
             "n_init": 20,
@@ -693,7 +700,7 @@ def _synthesize_v1_pipeline_for_bundled_method(
             "distance_metric": str(
                 parameters.get("kmeans_distance_metric") or "cosine"
             ),
-            "k_range": [2, 3, 5, 8, 10, 15, 20, 30, 50],
+            "k_range": sweep_k_range,
             "selection_metric": "silhouette",
             "selection_rule": "kneedle",
         }
@@ -706,7 +713,7 @@ def _synthesize_v1_pipeline_for_bundled_method(
             "covariance_type": str(
                 parameters.get("gmm_covariance_type") or "full"
             ),
-            "k_range": [2, 3, 5, 8, 10, 15, 20, 30, 50],
+            "k_range": sweep_k_range,
             "selection_metric": "bic",
             "selection_rule": "argmin",
         }

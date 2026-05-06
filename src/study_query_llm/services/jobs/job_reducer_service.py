@@ -164,10 +164,26 @@ class JobReducerService:
             best_obj = float("inf")
             labels_all: List[List[int]] = []
             objectives: List[float] = []
-            for ref in completed_refs:
+            tries_payload: List[Dict[str, Any]] = []
+            k_key_resolved: Optional[str] = None
+
+            for ref in sorted(completed_refs):
                 payload = self._load_json(ref)
-                k_key = next(iter(payload.get("by_k", {}).keys()))
-                k_payload = payload["by_k"][k_key]
+                by_k = payload.get("by_k") or {}
+                if len(by_k) != 1:
+                    raise RuntimeError(
+                        f"reduce_k job {job_id}: expected exactly one k bucket per leaf shard "
+                        f"(artifact {ref}); got {sorted(by_k.keys())!r}. "
+                        "Non-singleton k_range shards violate reducer assumptions."
+                    )
+                k_key, k_payload = next(iter(by_k.items()))
+                if k_key_resolved is None:
+                    k_key_resolved = str(k_key)
+                elif str(k_key) != str(k_key_resolved):
+                    raise RuntimeError(
+                        f"reduce_k job {job_id}: mismatched k keys across shards "
+                        f"({k_key_resolved!r} vs {k_key!r}) for artifact {ref}"
+                    )
                 obj = float(k_payload.get("objective", 1e18))
                 objectives.append(obj)
                 labels = k_payload.get("labels", [])
@@ -176,11 +192,22 @@ class JobReducerService:
                 if obj < best_obj:
                     best_obj = obj
                     best = payload
+                tries_payload.append(
+                    {
+                        "try_idx": int(payload.get("try_idx", 0)),
+                        "seed_value": payload.get("seed_value"),
+                        "objective": k_payload.get("objective"),
+                        "labels": k_payload.get("labels"),
+                        "profiling": payload.get("profiling"),
+                        "k_payload": dict(k_payload),
+                    }
+                )
 
             if best is None:
                 raise RuntimeError(f"reduce_k job {job_id} failed to select best try")
 
-            k_key = next(iter(best.get("by_k", {}).keys()))
+            k_key = str(k_key_resolved or next(iter(best.get("by_k", {}).keys())))
+            tries_payload.sort(key=lambda row: int(row.get("try_idx") or 0))
             out = {
                 "pca": best.get("pca", {}),
                 "by_k": {
@@ -188,6 +215,7 @@ class JobReducerService:
                         **best["by_k"][k_key],
                         "objectives": objectives,
                         "labels_all": labels_all if len(labels_all) > 1 else None,
+                        "tries": tries_payload,
                     }
                 },
                 "reduced_at": datetime.now(timezone.utc).isoformat(),

@@ -90,6 +90,10 @@ batches) — not to remove provenance. Timing instrumentation on claim and
 complete paths (see `raw_call_repository.py` and `sweep_worker_main.py`) makes
 this visible in logs.
 
+## Reducer Aggregates vs Leaf Try Payloads
+
+`reduce_k` is intentionally **aggregating**: it selects best objective labels/metadata across sibling leaf shards while still emitting audit-grade summaries (`objectives`, `labels_all`). After this update it also preserves **every** leaf shard’s structured try row under `by_k[*].tries` (including profiling markers such as `try_idx`, `seed_value`, and the full `k_payload` blob). Leaf shards are therefore expected to carry exactly **one** `by_k` bucket each; multi-`k` leaf payloads violate reducer assumptions and raise `RuntimeError`.
+
 ## See Also
 
 - [STANDING_ORDERS.md](../STANDING_ORDERS.md) — Method Definitions and Provenance conventions

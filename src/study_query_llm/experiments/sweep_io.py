@@ -70,6 +70,7 @@ def serialize_sweep_result(result: Any) -> Dict[str, Any]:
             "selection_evidence": k_data.get("selection_evidence"),
             "pipeline_effective_hash": k_data.get("pipeline_effective_hash"),
             "recipe_hash": k_data.get("recipe_hash"),
+            "tries": k_data.get("tries"),
         }
 
     return data

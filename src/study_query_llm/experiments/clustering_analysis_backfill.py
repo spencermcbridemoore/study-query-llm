@@ -599,6 +599,65 @@ def validate_registry_expansion_or_raise(
         )
 
 
+def ok_snapshot_ids_from_manifest(manifest: Mapping[str, Any]) -> list[int]:
+    """Return sorted unique ``dataset_snapshot`` group ids with manifest pair ``status=="ok"``.
+
+    Used to shard backfill work across worker processes without overlapping snapshots.
+    """
+    out: list[int] = []
+    for p in manifest.get("pairs") or []:
+        if not isinstance(p, dict):
+            continue
+        if p.get("status") != "ok":
+            continue
+        sid = p.get("snapshot_group_id")
+        if sid is None:
+            continue
+        try:
+            out.append(int(sid))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
+def round_robin_shard_snapshot_ids(
+    snapshot_ids: Sequence[int],
+    shard_count: int,
+) -> list[list[int]]:
+    """Partition snapshot ids into ``shard_count`` disjoint round-robin shards.
+
+    Shards are deterministic given sorted input ids: shard ``i`` receives ids at
+    indices ``i, i+N, i+2N, ...`` after sorting deduplicated ids ascending.
+    """
+    n = int(shard_count)
+    if n < 1:
+        raise ValueError("shard_count must be >= 1")
+    ids = sorted({int(x) for x in snapshot_ids})
+    return [ids[i::n] for i in range(n)]
+
+
+def validate_shards_partition_exact(
+    snapshot_ids: Sequence[int],
+    shards: Sequence[Sequence[int]],
+) -> None:
+    """Raise ``ValueError`` if shards overlap or their union != ``snapshot_ids``."""
+    universe = set(int(x) for x in snapshot_ids)
+    seen: set[int] = set()
+    for shard in shards:
+        for x in shard:
+            xi = int(x)
+            if xi in seen:
+                raise ValueError(f"overlapping snapshot id across shards: {xi}")
+            seen.add(xi)
+    if seen != universe:
+        missing = sorted(universe - seen)
+        extra = sorted(seen - universe)
+        raise ValueError(
+            "shard partition mismatch: "
+            f"missing={missing!r} extra={extra!r}"
+        )
+
+
 def preflight_manifest_blocking_issues(manifest: Mapping[str, Any]) -> list[str]:
     """Human-readable blockers for CLI exit codes (collisions, duplicates, empty scope)."""
     issues: list[str] = []

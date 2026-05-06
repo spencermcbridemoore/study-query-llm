@@ -10,9 +10,12 @@ from study_query_llm.experiments.clustering_analysis_backfill import (
     build_all_targets,
     build_manifest,
     expand_parameter_variants,
+    ok_snapshot_ids_from_manifest,
     preflight_manifest_blocking_issues,
+    round_robin_shard_snapshot_ids,
     validate_parameters_for_method,
     validate_registry_expansion_or_raise,
+    validate_shards_partition_exact,
 )
 from study_query_llm.pipeline.clustering.registry import get_algorithm_spec, iter_algorithm_specs
 
@@ -99,6 +102,27 @@ def test_build_manifest_halts_on_batch_collision() -> None:
     issues = preflight_manifest_blocking_issues(manifest)
     assert issues
     assert manifest["collisions"]
+
+
+def test_ok_snapshot_ids_from_manifest_filters_ok_pairs() -> None:
+    manifest = {
+        "pairs": [
+            {"status": "ok", "snapshot_group_id": 3},
+            {"status": "no_embedding_batch", "snapshot_group_id": 9},
+            {"status": "ok", "snapshot_group_id": 3},
+            {"status": "ok", "snapshot_group_id": 1},
+        ]
+    }
+    assert ok_snapshot_ids_from_manifest(manifest) == [1, 3]
+
+
+def test_round_robin_shard_partition_is_exact() -> None:
+    ids = list(range(10))
+    shards = round_robin_shard_snapshot_ids(ids, 8)
+    assert len(shards) == 8
+    validate_shards_partition_exact(ids, shards)
+    flat = sorted(x for s in shards for x in s)
+    assert flat == ids
 
 
 def test_build_all_targets_unique_analysis_keys() -> None:

@@ -73,6 +73,15 @@ def main(argv: list[str] | None = None) -> int:
         help="optional subset of dataset_snapshot group ids (default: all snapshots)",
     )
     p.add_argument(
+        "--snapshot-ids-file",
+        type=Path,
+        default=None,
+        help=(
+            "JSON file {\"snapshot_ids\": [int, ...]} for large shard lists "
+            "(alternative to --snapshot-ids)"
+        ),
+    )
+    p.add_argument(
         "--manifest-out",
         type=Path,
         default=None,
@@ -110,6 +119,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
+    snapshot_ids_arg: list[int] | None = None
+    if args.snapshot_ids_file is not None:
+        if args.snapshot_ids is not None:
+            raise SystemExit("Use only one of --snapshot-ids or --snapshot-ids-file")
+        raw = json.loads(Path(args.snapshot_ids_file).read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise SystemExit("--snapshot-ids-file must contain a JSON object")
+        ids = raw.get("snapshot_ids")
+        if not isinstance(ids, list):
+            raise SystemExit("--snapshot-ids-file requires key snapshot_ids (list)")
+        snapshot_ids_arg = []
+        for x in ids:
+            try:
+                snapshot_ids_arg.append(int(x))
+            except (TypeError, ValueError) as exc:
+                raise SystemExit(f"invalid snapshot id in file: {x!r}") from exc
+    elif args.snapshot_ids is not None:
+        snapshot_ids_arg = list(args.snapshot_ids)
+
     if args.validate_registry_only:
         validate_registry_expansion_or_raise()
         print("registry expansion validation OK")
@@ -138,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
             session,
             embedding_engine=str(args.embedding_engine),
             provider=args.provider,
-            snapshot_ids=args.snapshot_ids,
+            snapshot_ids=snapshot_ids_arg,
         )
 
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

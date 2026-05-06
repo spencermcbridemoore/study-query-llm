@@ -61,6 +61,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 
 ## Sweep / Orchestration
 
+- Clustering analysis backfill (two engines, sharded workers): [`BACKFILL_CLUSTERING_TWO_ENGINE_SHARDED.md`](BACKFILL_CLUSTERING_TWO_ENGINE_SHARDED.md)
 - [`docs/SWEEP_MIGRATION_RUNBOOK.md`](../SWEEP_MIGRATION_RUNBOOK.md)
 - [`docs/LANGGRAPH_JOB_EXECUTION.md`](../LANGGRAPH_JOB_EXECUTION.md)
 - [`docs/TESTING_CHECKLIST.md`](../TESTING_CHECKLIST.md)

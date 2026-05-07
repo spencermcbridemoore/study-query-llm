@@ -20,6 +20,30 @@ Orchestrator [`scripts/living/run_two_engine_backfill_sharded.py`](../../scripts
 
 Override with `--engines ...`.
 
+### Fixed snapshot subset (optional)
+
+Pass `--snapshot-ids-file path.json` where the file is `{"snapshot_ids": [int, ...]}`.
+This scopes **preflight** and **verify** (final manifest) to the same snapshot set
+that execute-time shard files will cover. Execute children still receive per-shard
+`--snapshot-ids-file` JSON written under `--work-dir`.
+
+```powershell
+python scripts/living/run_two_engine_backfill_sharded.py preflight `
+  --work-dir <DIR> --snapshot-ids-file ./snapshots.json
+```
+
+## Overnight five-snapshot queue (6 / 9 / 10 / 21 / 22)
+
+For a resumable multi-``(provider, embedding_engine)`` roster (intersection across
+snapshots), explicit runnable vs blocked queue, per-pair work directories, and a
+24h wall-clock budget with a floor before starting the next pair, use
+[`scripts/living/run_overnight_fivesnap_backfill.py`](../../scripts/living/run_overnight_fivesnap_backfill.py):
+
+- `init` — `snapshots.json` + `pairs.candidate.json`
+- `preflight` — `preflight/<pair_id>.json` + `queue.json`
+- `execute` — timeboxed sequential `run_two_engine_backfill_sharded.py all` (8/8) per runnable pair
+- `verify-package` — `CONSOLIDATED_SUMMARY.json` + `RESUME_COMMANDS.md`
+
 ## One-shot workflow
 
 From repo root (PowerShell):
@@ -63,4 +87,5 @@ Use the same `--work-dir` path across phases.
 ## Related code
 
 - [`scripts/living/backfill_all_variant_clustering_analysis.py`](../../scripts/living/backfill_all_variant_clustering_analysis.py) — single-engine planner/executor; `--snapshot-ids-file` for shard inputs.
+- [`scripts/living/run_overnight_fivesnap_backfill.py`](../../scripts/living/run_overnight_fivesnap_backfill.py) — fixed-snapshot multi-pair overnight orchestration (calls the sharded runner with `--snapshot-ids-file`).
 - [`src/study_query_llm/experiments/clustering_analysis_backfill.py`](../../src/study_query_llm/experiments/clustering_analysis_backfill.py) — manifest math, sharding helpers, resume state.

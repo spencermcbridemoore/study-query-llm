@@ -54,6 +54,15 @@ _BACKFILL_SCRIPT = PROJECT_ROOT / "scripts" / "living" / "backfill_all_variant_c
 DEFAULT_ENGINES: tuple[str, ...] = ("text-embedding-3-large", "embed-v-4-0")
 
 
+def _snapshot_ids_file_args(snapshot_ids_file: Path | None) -> list[str]:
+    if snapshot_ids_file is None:
+        return []
+    p = Path(snapshot_ids_file)
+    if not p.is_file():
+        raise SystemExit(f"--snapshot-ids-file not found: {p}")
+    return ["--snapshot-ids-file", str(p)]
+
+
 def _resolve_database_url(explicit: str | None) -> str:
     env_file = dotenv_values(PROJECT_ROOT / ".env")
     for key in ("CANONICAL_DATABASE_URL", "DATABASE_URL"):
@@ -86,6 +95,7 @@ def cmd_preflight(
     work_dir: Path,
     provider: str | None,
     database_url: str | None,
+    snapshot_ids_file: Path | None,
 ) -> dict[str, Any]:
     validate_registry_expansion_or_raise()
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -104,6 +114,7 @@ def cmd_preflight(
             cmd.extend(["--provider", provider])
         if database_url:
             cmd.extend(["--database-url", database_url])
+        cmd.extend(_snapshot_ids_file_args(snapshot_ids_file))
         rc, text = _run_backfill_subprocess(cmd)
         print(text)
         if rc != 0:
@@ -249,6 +260,7 @@ def cmd_verify(
     work_dir: Path,
     provider: str | None,
     database_url: str | None,
+    snapshot_ids_file: Path | None,
 ) -> dict[str, Any]:
     db = DatabaseConnectionV2(_resolve_database_url(database_url), enable_pgvector=False)
     report: dict[str, Any] = {}
@@ -266,6 +278,7 @@ def cmd_verify(
             cmd.extend(["--provider", provider])
         if database_url:
             cmd.extend(["--database-url", database_url])
+        cmd.extend(_snapshot_ids_file_args(snapshot_ids_file))
         rc, text = _run_backfill_subprocess(cmd)
         print(text)
         if rc != 0:
@@ -350,6 +363,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--provider", default=None)
     p.add_argument("--database-url", default=None)
     p.add_argument(
+        "--snapshot-ids-file",
+        type=Path,
+        default=None,
+        help=(
+            "JSON file {\"snapshot_ids\": [int, ...]} passed to child backfill for "
+            "preflight/final-manifest phases (subset of snapshots)"
+        ),
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="for execute phase: pass --dry-run to children (no analyze writes)",
@@ -380,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
             work_dir=work_dir,
             provider=args.provider,
             database_url=args.database_url,
+            snapshot_ids_file=args.snapshot_ids_file,
         )
         return 0
 
@@ -406,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             work_dir=work_dir,
             provider=args.provider,
             database_url=args.database_url,
+            snapshot_ids_file=args.snapshot_ids_file,
         )
         verify_report_path.write_text(json.dumps(rep, indent=2), encoding="utf-8")
         return 0
@@ -423,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
         work_dir=work_dir,
         provider=args.provider,
         database_url=args.database_url,
+        snapshot_ids_file=args.snapshot_ids_file,
     )
     cmd_shard(engines=engines, work_dir=work_dir, shard_count=shard_count)
     cmd_execute(
@@ -440,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         work_dir=work_dir,
         provider=args.provider,
         database_url=args.database_url,
+        snapshot_ids_file=args.snapshot_ids_file,
     )
     verify_report_path.write_text(json.dumps(rep, indent=2), encoding="utf-8")
     cmd_acceptance(engines=engines, work_dir=work_dir, verify_report=rep)

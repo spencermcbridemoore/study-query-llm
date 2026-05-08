@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from study_query_llm.algorithms.inference_methods import (
+    INFERENCE_METHODS,
+    MATURITY_RUNNER_WIRED,
+)
 from study_query_llm.services.method_runtime_registry import (
     MethodRunnerContext,
     MethodRunnerResult,
@@ -22,6 +26,20 @@ def test_default_runtime_registry_contains_stage1_and_stage2_specs():
     logprobs = get_method_runtime("inference.logprobs.basic", "0.1")
     assert perturb is not None
     assert logprobs is not None
+
+
+def test_runtime_methods_are_marked_runner_wired_in_catalog():
+    """Inference catalog maturity should match runtime dispatch wiring."""
+    runtime_identities = {
+        ("perturbation_then_inference.basic", "0.1"),
+        ("inference.logprobs.basic", "0.1"),
+    }
+    maturity_by_identity = {
+        (str(item["name"]), str(item["version"])): str(item.get("maturity") or "")
+        for item in INFERENCE_METHODS
+    }
+    for identity in runtime_identities:
+        assert maturity_by_identity.get(identity) == MATURITY_RUNNER_WIRED
 
 
 def test_register_runtime_duplicate_raises_without_overwrite():

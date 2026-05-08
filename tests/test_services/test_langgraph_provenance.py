@@ -110,3 +110,36 @@ def test_record_langgraph_job_outcome_success():
         )
         assert len(execution_rows) == 1
         assert execution_rows[0].run_kind == "execution"
+
+
+def test_record_langgraph_job_outcome_missing_method_fails_loud():
+    """Missing method identity should raise instead of silently skipping provenance."""
+    from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+    from study_query_llm.db.raw_call_repository import RawCallRepository
+    from study_query_llm.services.method_service import MethodService
+    from study_query_llm.services.provenanced_run_service import ProvenancedRunService
+
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_svc = MethodService(repo)
+        run_svc = ProvenancedRunService(repo)
+        req_id = repo.create_group(
+            group_type="clustering_sweep_request",
+            name="provenance_test_missing_method",
+            metadata_json={},
+        )
+
+        with pytest.raises(ValueError, match="not registered"):
+            record_langgraph_job_outcome(
+                method_svc=method_svc,
+                provenanced_run_svc=run_svc,
+                request_group_id=req_id,
+                job_id=101,
+                job_key="lg_test_missing",
+                payload_json={"prompt": "test"},
+                status="completed",
+                result_ref="/tmp/out.json",
+            )

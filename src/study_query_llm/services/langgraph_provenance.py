@@ -1,7 +1,7 @@
 """LangGraph method provenance helper.
 
 Centralizes method resolution, parameter redaction, and result envelope assembly
-for langgraph_run job provenance recording. Best-effort; failures log warnings.
+for langgraph_run job provenance recording.
 """
 
 from __future__ import annotations
@@ -63,17 +63,16 @@ def _ensure_method_registered(
     method_svc: Any,
     name: str,
     version: str,
-) -> Optional[int]:
-    """Get pre-registered method definition id. Returns None when missing."""
+) -> int:
+    """Get pre-registered method definition id; fail loud when missing."""
     method = method_svc.get_method(name=name, version=version)
     if method is not None:
         return int(method.id)
-    logger.warning(
-        "LangGraph provenance skipped because method is not pre-registered: %s@%s",
-        name,
-        version,
+    raise ValueError(
+        "langgraph provenance method is not registered: "
+        f"{name}@{version}. "
+        "Pre-register via scripts/register_orchestration_methods.py"
     )
-    return None
 
 
 def build_result_envelope(
@@ -137,9 +136,6 @@ def record_langgraph_job_outcome(
     """
     name, version = _resolve_method_identity(payload_json, job_key)
     method_id = _ensure_method_registered(method_svc, name, version)
-    if method_id is None:
-        logger.warning("Skipping provenance record: could not resolve method for job %s", job_id)
-        return None
 
     envelope = build_result_envelope(
         job_id=job_id,

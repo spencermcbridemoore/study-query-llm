@@ -17,6 +17,23 @@ from study_query_llm.services.method_service import MethodService
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+def _register_langgraph_default_method(repo: RawCallRepository) -> None:
+    """Ensure register-first contract for langgraph provenance in worker tests."""
+    MethodService(repo).register_method(
+        name="langgraph_run.default",
+        version="1",
+        code_ref="src/study_query_llm/services/jobs/langgraph_job_runner.py",
+        description="Default LangGraph job outcome method identity.",
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "config": {"type": "object"},
+            },
+        },
+    )
+
+
 def test_langgraph_worker_help():
     result = subprocess.run(
         [
@@ -46,6 +63,7 @@ def test_langgraph_worker_claim_complete_smoke(monkeypatch):
 
         with db.session_scope() as session:
             repo = RawCallRepository(session)
+            _register_langgraph_default_method(repo)
             req_id = repo.create_group(
                 group_type="clustering_sweep_request",
                 name="langgraph_smoke",
@@ -114,6 +132,7 @@ def test_langgraph_worker_failure_records_provenance(monkeypatch):
 
         with db.session_scope() as session:
             repo = RawCallRepository(session)
+            _register_langgraph_default_method(repo)
             req_id = repo.create_group(
                 group_type="clustering_sweep_request",
                 name="langgraph_fail",
@@ -180,6 +199,7 @@ def test_langgraph_worker_redacts_sensitive_parameters(monkeypatch):
 
         with db.session_scope() as session:
             repo = RawCallRepository(session)
+            _register_langgraph_default_method(repo)
             req_id = repo.create_group(
                 group_type="clustering_sweep_request",
                 name="langgraph_redact",

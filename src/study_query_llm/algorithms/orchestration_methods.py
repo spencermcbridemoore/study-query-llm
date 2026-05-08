@@ -12,6 +12,9 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+# Legacy orchestration/MCQ methods still execute through analysis/experiment flows
+# rather than dedicated method-runner modules. Keep code_ref anchored to the
+# closest implementation module (not call-site consumer services).
 ORCHESTRATION_METHODS: List[Dict[str, Any]] = [
     {
         "name": "langgraph_run.default",
@@ -29,7 +32,7 @@ ORCHESTRATION_METHODS: List[Dict[str, Any]] = [
     {
         "name": "mcq_answer_position_probe",
         "version": "1.0",
-        "code_ref": "src/study_query_llm/experiments/mcq_run_persistence.py",
+        "code_ref": "src/study_query_llm/experiments/mcq_answer_position_probe.py",
         "description": "MCQ answer-position probe execution method.",
         "parameters_schema": {
             "type": "object",
@@ -49,7 +52,7 @@ ORCHESTRATION_METHODS: List[Dict[str, Any]] = [
     {
         "name": "mcq_compliance_metrics",
         "version": "1.0",
-        "code_ref": "src/study_query_llm/services/sweep_request_service.py",
+        "code_ref": "src/study_query_llm/analysis/mcq_from_run.py",
         "description": "MCQ compliance analysis result method identity.",
         "parameters_schema": {
             "type": "object",
@@ -62,7 +65,7 @@ ORCHESTRATION_METHODS: List[Dict[str, Any]] = [
     {
         "name": "mcq_answer_position_distribution",
         "version": "1.0",
-        "code_ref": "src/study_query_llm/services/sweep_request_service.py",
+        "code_ref": "src/study_query_llm/analysis/mcq_from_run.py",
         "description": "MCQ answer-position distribution analysis method identity.",
         "parameters_schema": {
             "type": "object",
@@ -75,7 +78,7 @@ ORCHESTRATION_METHODS: List[Dict[str, Any]] = [
     {
         "name": "mcq_answer_position_chi_square",
         "version": "1.0",
-        "code_ref": "src/study_query_llm/services/sweep_request_service.py",
+        "code_ref": "src/study_query_llm/analysis/mcq_from_run.py",
         "description": "MCQ chi-square answer-position analysis method identity.",
         "parameters_schema": {
             "type": "object",

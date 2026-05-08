@@ -77,7 +77,7 @@ INFERENCE_METHODS: List[Dict[str, Any]] = [
                 "metadata": {"type": "object"},
             },
         },
-        "maturity": MATURITY_REGISTERED_ONLY,
+        "maturity": MATURITY_RUNNER_WIRED,
     },
 ]
 

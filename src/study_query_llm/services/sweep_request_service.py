@@ -1223,20 +1223,12 @@ class SweepRequestService:
         method_version = str(spec.get("method_version") or "1.0")
         method = self.method_service.get_method(method_name, version=method_version)
         if method is None:
-            method_id = self.method_service.register_method(
-                name=method_name,
-                version=method_version,
-                description=f"Auto-registered for analysis_key={analysis_key}",
-                parameters_schema={
-                    "type": "object",
-                    "properties": {
-                        "analysis_key": {"type": "string"},
-                        "request_id": {"type": "integer"},
-                    },
-                },
+            raise ValueError(
+                "analysis method is not registered: "
+                f"{method_name}@{method_version}. "
+                "Pre-register methods before recording analysis results."
             )
-        else:
-            method_id = int(method.id)
+        method_id = int(method.id)
 
         payload_json = dict(result_json or {})
         payload_json.setdefault(

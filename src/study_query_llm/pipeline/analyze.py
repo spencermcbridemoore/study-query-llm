@@ -400,13 +400,11 @@ def _resolve_method_definition_id(
     if method_row is None and method_version is None:
         method_row = method_service.get_method(method_name)
     if method_row is None:
-        registered_id = method_service.register_method(
-            name=method_name,
-            version=method_version or "v1",
-            code_ref="study_query_llm.pipeline.analyze",
-            description=f"Auto-registered by pipeline.analyze for {method_name}",
+        raise ValueError(
+            "analysis method is not registered: "
+            f"{method_name}@{method_version or 'active'}. "
+            "Pre-register methods before invoking pipeline.analyze."
         )
-        return int(registered_id)
     return int(method_row.id)
 
 

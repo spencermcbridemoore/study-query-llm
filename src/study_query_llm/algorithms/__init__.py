@@ -42,6 +42,15 @@ from .text_classification_methods import (
     TEXT_CLASSIFICATION_METHODS,
     register_text_classification_methods,
 )
+from .inference_methods import (
+    MATURITY_RUNNER_WIRED,
+    INFERENCE_METHODS,
+    register_inference_methods,
+)
+from .orchestration_methods import (
+    ORCHESTRATION_METHODS,
+    register_orchestration_methods,
+)
 from .canonical_configs import (
     CANONICAL_CONFIG_BUILDERS,
     CanonicalConfigBuilder,
@@ -87,6 +96,13 @@ __all__ = [
     "MATURITY_REGISTERED_ONLY",
     "TEXT_CLASSIFICATION_METHODS",
     "register_text_classification_methods",
+    # Inference methods (polymorphic lane)
+    "MATURITY_RUNNER_WIRED",
+    "INFERENCE_METHODS",
+    "register_inference_methods",
+    # Orchestration/MCQ methods (register-first)
+    "ORCHESTRATION_METHODS",
+    "register_orchestration_methods",
     # Canonical-config builders (currently unused; future enforcement spot)
     "CANONICAL_CONFIG_BUILDERS",
     "CanonicalConfigBuilder",

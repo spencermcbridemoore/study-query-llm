@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Idempotently register clustering component methods and the composite recipe.
+"""Idempotently register clustering methods and composite recipes.
 
 Registers the 4 component MethodDefinition rows
 (``mean_pool_tokens``, ``pca_svd_project``, ``kmeanspp_init``,
 ``k_llmmeans``) and ensures the composite ``cosine_kllmeans_no_pca`` method
 carries its canonical recipe.
+
+Also registers all registry-backed clustering runtime method identities from
+``pipeline.clustering.registry`` (e.g., bundled grammar methods like
+``kmeans+normalize+pca+sweep``, ``gmm+normalize+pca+sweep``, and fixed-k
+variants). This closes the register-first gap for ``pipeline.analyze`` after
+lazy fallback retirement.
 
 Safe to re-run: component registration skips rows already present at the
 same ``(name, version)`` pair, and the composite recipe is only attached
@@ -41,8 +47,50 @@ from study_query_llm.algorithms.recipes import (
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.db.write_intent import WriteIntent
-from study_query_llm.pipeline.clustering.registry import get_algorithm_spec
+from study_query_llm.pipeline.clustering.registry import (
+    get_algorithm_spec,
+    iter_algorithm_specs,
+    resolve_clustering_method_version,
+)
 from study_query_llm.services.method_service import MethodService
+
+
+def _register_registry_methods(method_svc: MethodService) -> dict[str, int]:
+    """Register all runtime registry clustering methods idempotently."""
+    registered: dict[str, int] = {}
+    for spec in iter_algorithm_specs():
+        version = resolve_clustering_method_version(spec.method_name, None)
+        key = f"{spec.method_name}@{version}"
+        existing = method_svc.get_method(spec.method_name, version=version)
+        if existing is not None:
+            registered[key] = int(existing.id)
+            continue
+        runner_module = str(getattr(spec.runner, "__module__", "")).strip()
+        code_ref = (
+            f"src/{runner_module.replace('.', '/')}.py"
+            if runner_module
+            else "src/study_query_llm/pipeline/clustering/registry.py"
+        )
+        chain = "+".join(spec.preprocessing_chain) or "none"
+        method_id = method_svc.register_method(
+            name=spec.method_name,
+            version=version,
+            code_ref=code_ref,
+            description=(
+                f"Registry-backed clustering runtime method "
+                f"(base_algorithm={spec.base_algorithm}, fit_mode={spec.fit_mode}, "
+                f"preprocessing_chain={chain})."
+            ),
+            input_schema={
+                "required_inputs": {
+                    "snapshot": True,
+                    "embedding_batch": bool(spec.requires_embeddings),
+                }
+            },
+            parameters_schema=dict(spec.parameters_schema or {}),
+        )
+        registered[key] = int(method_id)
+    return registered
 
 
 def main() -> int:
@@ -66,7 +114,7 @@ def main() -> int:
         return 1
 
     print("=" * 60)
-    print("Registering clustering component methods + composite recipe")
+    print("Registering clustering component/runtime methods + composite recipe")
     print(f"DATABASE_URL set: yes  dry_run={args.dry_run}")
     print("=" * 60)
 
@@ -90,6 +138,13 @@ def main() -> int:
                 )
                 status = "present" if existing is not None else "missing"
                 print(f"  - {key}: {status}")
+            print("[dry-run] Registry runtime methods that would be registered if missing:")
+            for spec in iter_algorithm_specs():
+                version = resolve_clustering_method_version(spec.method_name, None)
+                key = f"{spec.method_name}@{version}"
+                existing = method_svc.get_method(spec.method_name, version=version)
+                status = "present" if existing is not None else "missing"
+                print(f"  - {key}: {status}")
             print("[dry-run] Composite recipes that would be ensured:")
             for composite_name in COMPOSITE_RECIPES:
                 existing = method_svc.get_method(composite_name, version="1.0")
@@ -106,6 +161,11 @@ def main() -> int:
         registered = register_clustering_components(method_svc)
         print("Component method ids:")
         for key, mid in sorted(registered.items()):
+            print(f"  - {key}: id={mid}")
+
+        runtime_registered = _register_registry_methods(method_svc)
+        print("Registry runtime method ids:")
+        for key, mid in sorted(runtime_registered.items()):
             print(f"  - {key}: id={mid}")
 
         print("Composite recipes:")

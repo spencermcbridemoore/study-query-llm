@@ -209,6 +209,12 @@ def test_mcq_analysis_status_and_result_recording():
             name="analysis_source_run",
             metadata_json={"run_key": "rk"},
         )
+        MethodService(repo).register_method(
+            name="mcq_compliance_metrics",
+            version="1.0",
+            code_ref="tests.test_services.test_sweep_request_service_mcq",
+            description="pre-registered for analysis result recording test",
+        )
 
         # Fail one required analysis, then complete both required analyses.
         assert svc.mark_analysis_failed(req_id, "mcq_compliance", "parse error")

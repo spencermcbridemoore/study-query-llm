@@ -38,6 +38,11 @@ from .summarization_service import (
 from .artifact_service import ArtifactService
 from .data_quality_service import DataQualityService
 from .sweep_request_service import SweepRequestService
+from .method_execution_service import (
+    MethodExecutionService,
+    MethodExecutionOutcome,
+    compose_method_run_key,
+)
 
 __all__ = [
     "InferenceService",
@@ -59,4 +64,7 @@ __all__ = [
     "ArtifactService",
     "DataQualityService",
     "SweepRequestService",
+    "MethodExecutionService",
+    "MethodExecutionOutcome",
+    "compose_method_run_key",
 ]

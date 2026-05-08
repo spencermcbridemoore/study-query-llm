@@ -74,6 +74,25 @@ def _db(tmp_path: Path) -> tuple[DatabaseConnectionV2, str]:
     database_url = f"sqlite:///{db_path.as_posix()}"
     db = DatabaseConnectionV2(database_url, enable_pgvector=False)
     db.init_db()
+    with db.session_scope() as session:
+        method_service = MethodService(RawCallRepository(session))
+        for method_name in (
+            "status_method",
+            "auto_request_method",
+            "analysis_run_key_method_a",
+            "analysis_run_key_method_b",
+            "fp_method",
+            "nonfinite_scalar_fixture",
+            "agglomerative+fixed-k",
+        ):
+            if method_service.get_method(method_name, version="1.0") is not None:
+                continue
+            method_service.register_method(
+                name=method_name,
+                version="1.0",
+                code_ref="tests.pipeline.test_analyze",
+                description="pre-registered fixture method",
+            )
     return db, database_url
 
 

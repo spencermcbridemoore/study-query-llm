@@ -105,6 +105,35 @@ async def test_complete_omits_max_tokens_when_none(provider):
     assert "max_tokens" not in call_kwargs.kwargs
 
 
+@pytest.mark.asyncio
+async def test_complete_forwards_provider_specific_kwargs(provider):
+    """Provider-specific kwargs should be forwarded to OpenAI-compatible API."""
+    provider._mock_client.chat.completions.create = AsyncMock(
+        return_value=_mock_chat_response()
+    )
+    await provider.complete(
+        "prompt",
+        temperature=0.2,
+        max_tokens=128,
+        logprobs=True,
+        top_logprobs=5,
+        seed=123,
+    )
+    call_kwargs = provider._mock_client.chat.completions.create.call_args
+    assert call_kwargs.kwargs["temperature"] == 0.2
+    assert call_kwargs.kwargs["max_tokens"] == 128
+    assert call_kwargs.kwargs["logprobs"] is True
+    assert call_kwargs.kwargs["top_logprobs"] == 5
+    assert call_kwargs.kwargs["seed"] == 123
+
+
+@pytest.mark.asyncio
+async def test_complete_rejects_model_override_in_kwargs(provider):
+    """Callers may not override model/messages envelope via kwargs."""
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        await provider.complete("prompt", model="other-model")
+
+
 def test_get_provider_name_returns_label():
     """Provider name matches the label passed at construction."""
     with patch(

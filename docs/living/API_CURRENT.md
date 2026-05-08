@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-05
+Last reviewed: 2026-05-08
 
 ## Configuration
 
@@ -26,11 +26,12 @@ Notes:
 - `ProviderFactory.create()` remains in code but does not represent the full chat-provider surface.
 - Prefer the explicit chat/embedding factory methods above for new integrations.
 - OpenRouter deployment listing returns runtime catalog metadata (for example context length/modalities/pricing), cached by `ModelRegistry`.
+- `OpenAICompatibleChatProvider.complete(...)` now forwards provider-specific `**kwargs` to `chat.completions.create(...)` (except reserved envelope keys `model`/`messages`; explicit `temperature`/`max_tokens` args remain authoritative).
 
 ## Core Services
 
 - Inference:
-  - `InferenceService.run_inference(prompt, temperature=..., max_tokens=...)`
+  - `InferenceService.run_inference(prompt, temperature=..., max_tokens=..., **provider_kwargs)`
   - `InferenceService.run_sampling_inference(prompt, n=..., batch_id=...)`
 - Analytics:
   - `StudyService(repository=RawCallRepository(...))`
@@ -38,6 +39,14 @@ Notes:
 - Method contract helpers:
   - `MethodService.resolve_method_input_requirements(name, version=None)` normalizes `input_schema.required_inputs` with backward-compatible defaults (`snapshot=true`, `embedding_batch=true` when absent/malformed).
   - `MethodService.register_method(..., input_schema=...)` validates `input_schema.required_inputs` on new writes (`required_inputs` must be an object; `snapshot` and `embedding_batch` must be booleans when present).
+- Method execution lane:
+  - `MethodExecutionService.execute(..., request_group_id, base_run_key, method_name, method_version, parameters, invocation_id=None, node_id=None, imported_run_id=None, force=False)`
+  - Runtime dispatch seam: `method_runtime_registry` (`MethodRuntimeSpec` / `MethodRunnerResult`) with built-ins:
+    - `perturbation_then_inference.basic@0.1`
+    - `inference.logprobs.basic@0.1`
+  - Deterministic run-key composition contract:
+    - `<base_run_key>__method__<name>@<version>[__node__<node_id>][__inv__<invocation_id>]`
+  - Boundary validation is request-edge only: payload shape + `invocation_id` UUID + imported-run metadata shape (when provided).
 
 ## Database Access (Canonical)
 
@@ -58,10 +67,12 @@ Notes:
   - `SweepRequestService.list_requests(status=..., include_fulfilled=..., sweep_type=...)`
   - Planner behavior: adapter-driven orchestration graph specs are enqueued via `SweepRequestService.ensure_orchestration_jobs(...)` (no planner-type hardcoding in service branches).
   - Clustering axes and payload identity are dataset+embedding scoped; `summarizer` is not part of request axes, run-key composition, or clustering orchestration payloads.
+  - `SweepRequestService.record_analysis_result(...)` is register-first only: missing `MethodDefinition` rows now fail loud (no write-time auto-registration fallback).
 - Unified execution records:
   - `ProvenancedRunService.record_method_execution(...)`
   - `ProvenancedRunService.record_analysis_execution(...)`
-  - Canonical writes use `run_kind=execution`; semantic role is in `metadata_json.execution_role`.
+  - Canonical writes use `run_kind=execution`; semantic role remains in `metadata_json.execution_role`.
+  - Method-execution stage semantics are separate in `metadata_json.pipeline_stage_role` (`source` / `imported` / `subset` / `export`) with optional `metadata_json.pipeline_stage_context`.
 - Orchestration job types:
   - Clustering: `run_k_try`, `reduce_k`, `finalize_run`, optional `finalize_request` (flag-gated), plus optional `analysis_run` jobs for clustering analysis catalog entries.
   - MCQ: `mcq_run`, `analysis_run`
@@ -69,6 +80,7 @@ Notes:
   - Clustering `analysis_run` payloads include both base `run_key` (lineage lookup key) and `analysis_run_key = "{run_key}__analysis__{analysis_key}"` (analysis execution idempotency key).
   - Terminology: these are `orchestration_job` types (control-plane units), not `algorithm_iteration` records; `run_k_try` represents a seeded `restart_try` work unit.
   - Job runner dispatch is registry-based (`create_job_runner(...)`); reduce/finalize runners consume the typed reducer plugin seam (`ReducerPlugin` / `ClusteringReducerPlugin`).
+  - LangGraph outcome recording is register-first (`record_langgraph_job_outcome` no longer lazily registers missing methods).
   - Reducer `reduce_k` aggregates clustering sweep leaf shards (`run_k_try`): `JobReducerService.reduce_k_job` selects the best objective across shards while retaining backward-compatible `objectives` / `labels_all` summary lists **and** appends a sorted `tries` array per `k` (`try_idx`, `seed_value`, `objective`, `labels`, `profiling`, full `k_payload`). Leaf shards must contain exactly one `by_k` bucket (non-singleton ranges raise `RuntimeError`).
   - `study_query_llm.experiments.sweep_io.serialize_sweep_result` preserves optional `by_k[*].tries` so finalize ingestion blob payloads retain full per-restart records (alongside existing sweep keys).
 - CLI compatibility surfaces:
@@ -85,6 +97,7 @@ Notes:
   - BANK77 strategy CLI tokens (`hdbscan`, `kmeans_silhouette_kneedle`, `gmm_bic_argmin`) are kept stable for operator continuity by attaching them as `strategy_aliases` on the bundled-grammar specs in the registry; the alias index resolves them to the bundled-grammar method names.
   - The bundled `kmeans+normalize+pca+sweep` and `gmm+normalize+pca+sweep` methods always include `normalize -> pca -> <algorithm>` in the effective pipeline (the legacy `<= 200` PCA-skip branch was dropped). `pca_n_components` is a method parameter (default 100, clamped at runtime); `kmeans_distance_metric` defaults to `cosine` and `gmm_covariance_type` defaults to `full`.
   - Input requirements are resolved from `MethodDefinition.input_schema.required_inputs`; default behavior remains embedding-required when contract metadata is absent.
+  - For non-composite methods, missing `MethodDefinition` rows fail loud; `analyze` no longer auto-registers unknown methods in the execution path.
   - Snapshot-only methods (`required_inputs.embedding_batch=false`) execute without embedding artifacts and persist `config_json.analysis_input_mode=snapshot_only` for explicit provenance/fingerprint mode identity.
 
 Embedding sweep runner (snapshot -> provider model sweep):
@@ -109,6 +122,14 @@ Execution-model feature flags:
 - `SQ_USE_REQUEST_FINALIZER_JOB` (default: disabled)
 - `SQ_RECORD_ANALYSIS_PARITY` (default: enabled)
 - `SQ_UNIFIED_EXECUTION_WRITES` (default: enabled)
+
+## Register-First Scripts
+
+- Inference polymorphic lane: `scripts/register_inference_methods.py`
+- Orchestration + MCQ analysis methods: `scripts/register_orchestration_methods.py`
+- Clustering methods/composites: `scripts/register_clustering_methods.py`
+  - Registers component methods, registry-backed clustering runtime methods, and composite recipe rows.
+- Register-only text classification catalog: `scripts/register_text_classification_methods.py`
 
 ## Legacy Reference
 

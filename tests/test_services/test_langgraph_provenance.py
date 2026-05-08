@@ -76,6 +76,12 @@ def test_record_langgraph_job_outcome_success():
         repo = RawCallRepository(session)
         method_svc = MethodService(repo)
         run_svc = ProvenancedRunService(repo)
+        method_svc.register_method(
+            name="langgraph_run.default",
+            version="1",
+            code_ref="tests.test_services.test_langgraph_provenance",
+            description="pre-registered for test",
+        )
         req_id = repo.create_group(
             group_type="clustering_sweep_request",
             name="provenance_test",

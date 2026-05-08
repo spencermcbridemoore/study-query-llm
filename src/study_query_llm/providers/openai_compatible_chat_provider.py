@@ -76,20 +76,36 @@ class OpenAICompatibleChatProvider(BaseLLMProvider):
             temperature: Sampling temperature (0.0–2.0).
             max_tokens: Maximum tokens to generate.  ``None`` lets the
                         server use its default.
-            **kwargs: Ignored; accepted for interface compatibility.
+            **kwargs: Provider-specific request params forwarded to the
+                OpenAI-compatible ``chat.completions.create`` call.
 
         Returns:
             ``ProviderResponse`` with the assistant reply and metadata.
         """
         start_time = time.time()
 
-        params: dict = {
+        params: dict[str, Any] = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
         }
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
+        extra_params = dict(kwargs or {})
+
+        # Guard core envelope fields; provider-specific controls can pass through.
+        for blocked_key in ("model", "messages"):
+            if blocked_key in extra_params:
+                raise ValueError(
+                    f"'{blocked_key}' is controlled by provider configuration and "
+                    "cannot be overridden via kwargs"
+                )
+
+        # Explicit positional args remain authoritative for these controls.
+        extra_params.pop("temperature", None)
+        if max_tokens is not None:
+            extra_params.pop("max_tokens", None)
+        params.update(extra_params)
 
         response = await self._client.chat.completions.create(**params)
 
@@ -110,6 +126,7 @@ class OpenAICompatibleChatProvider(BaseLLMProvider):
                 "finish_reason": choice.finish_reason,
                 "prompt_tokens": usage.prompt_tokens if usage else None,
                 "completion_tokens": usage.completion_tokens if usage else None,
+                "forwarded_param_keys": sorted(extra_params.keys()),
             },
             raw_response=response,
         )

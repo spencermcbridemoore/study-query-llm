@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-04
+Last reviewed: 2026-05-08
 
 ## System Shape
 
@@ -19,14 +19,14 @@ jobRuntimes --> repoLayer
 ## Current Layer Responsibilities
 
 - `panel_app/`: user-facing analytics/exploration workflows (Inference tab is intentionally disabled in current safe-mode runtime posture).
-- `src/study_query_llm/services/`: orchestration/business logic (`InferenceService`, `StudyService`, sweep/provenance/jobs).
+- `src/study_query_llm/services/`: orchestration/business logic (`InferenceService`, `StudyService`, sweep/provenance/jobs, method execution runtime lane).
 - `src/study_query_llm/providers/`: provider abstraction and factory entrypoints.
 - `src/study_query_llm/db/raw_call_repository.py`: canonical data access for v2 capture and grouping.
 - `src/study_query_llm/db/models_v2.py`: canonical schema for immutable calls + mutable grouping relationships.
 - `src/study_query_llm/db/_base_connection.py`: canonical DB chokepoint (lane resolution, explicit write intent, lane/intent enforcement, canonical identity conflict checks).
 - `src/study_query_llm/pipeline/`: canonical five-stage dataset flow (`acquire`, `parse`, `snapshot`, `embed`, `analyze`) with contract enforcement via `run_stage`.
 - `src/study_query_llm/services/artifact_service.py`: artifact persistence abstraction with backend governance; canonical write intent is fail-closed to Azure Blob storage.
-- `provenanced_runs`: first-class execution provenance row using canonical `run_kind=execution`, with role semantics in `metadata_json.execution_role`, linked to `method_definitions` for versioned method identity.
+- `provenanced_runs`: first-class execution provenance row using canonical `run_kind=execution`, with role semantics in `metadata_json.execution_role` and method-stage semantics in `metadata_json.pipeline_stage_role`, linked to `method_definitions` for versioned method identity.
 
 ## Current Execution Surfaces
 
@@ -67,6 +67,8 @@ Known transitional boundary mismatch (documented, not hidden):
 - For non-empty clustering selection, planning enforces complete caller-supplied lineage inputs (`run_key_to_lineage_inputs`) and raises `lineage_required_for_selection` when `dataset_snapshot_ids` / required `embedding_batch_group_id` coverage is missing.
 - MCQ orchestration uses per-run `mcq_run` jobs plus dependent `analysis_run` jobs in the same control plane.
 - Job execution dispatch is registry-based in `job_runner_factory.py`; `langgraph_run` remains a first-class registry entry.
+- Polymorphic non-clustering method dispatch is service-owned in `MethodExecutionService` + `method_runtime_registry` (single invocation -> single runner -> single canonical execution row).
+- Method-execution idempotency identity is deterministic and suffix-ordered: `<base_run_key>__method__<name>@<version>[__node__<node_id>][__inv__<invocation_id>]`.
 - Clustering `analysis_run` execution separates lineage identity from analysis idempotency identity: payload keeps base `run_key` for lineage lookup and carries `analysis_run_key = "{run_key}__analysis__{analysis_key}"`; worker enforces registry-only clustering methods before analyze dispatch, and `analyze` uses `analysis_run_key` for lock/upsert/run-stage keys to prevent cross-method collisions on the same base run.
 - Reducer/finalizer execution uses a typed plugin seam (`ReducerPlugin`) with a default clustering adapter that wraps `JobReducerService`.
 - `analyze` CLI remains as compatibility UX, but now enqueues/claims/executes orchestration `analysis_run` jobs instead of a separate non-orchestrated write path.
@@ -76,6 +78,10 @@ Known transitional boundary mismatch (documented, not hidden):
 - Each `provenanced_runs` row carries a **canonical run fingerprint** (`fingerprint_json`/`fingerprint_hash`) that captures algorithmic identity independent of scheduling granularity. See `canonical_run_fingerprint()` and `fingerprints_match()` in `provenanced_run_service.py`.
 - The boundary between schedulable units and in-job provenance events is documented in [SCHEDULING_PROVENANCE_BOUNDARY.md](SCHEDULING_PROVENANCE_BOUNDARY.md).
 - Composite/pipeline methods (e.g. `cosine_kllmeans_no_pca`) carry a **method recipe** on `method_definitions.recipe_json` that lists ordered component stages by `(name, version)`. The recipe is descriptive metadata; execution remains monolithic within `run_sweep`. The `recipe_hash` enters the run fingerprint via `config_json["recipe_hash"]`, so structurally different pipelines produce distinct fingerprints without any change to the fingerprint tuple shape. See [METHOD_RECIPES.md](METHOD_RECIPES.md).
+- Register-first discipline is enforced on previously lazy fallback surfaces:
+  - `pipeline.analyze._resolve_method_definition_id` now fails loud for missing non-composite method rows.
+  - `SweepRequestService.record_analysis_result` now fails loud for missing analysis method rows.
+  - `langgraph_provenance.record_langgraph_job_outcome` now fails loud for missing method rows.
 - `src/study_query_llm/pipeline/clustering/` is the **Bundled Clustering Subsystem**: the permanent module home for bundled clustering methods registered through `pipeline/clustering/registry.py`. Bundled methods emit `cluster_labels`, `summary_metrics`, and `recipe_hash` and remain permanently self-contained. After Slice 1.5 every registry spec ships with `provenance_envelope="none"`; the legacy `clustering_v1` envelope (YAML resolver/validators/identity-decorated `clustering_summary`) was retired and the legacy method names (`hdbscan`, `kmeans+silhouette+kneedle`, `gmm+bic+argmin`) were renamed to `hdbscan+fixed`, `kmeans+normalize+pca+sweep`, and `gmm+normalize+pca+sweep` with algorithmic identity preserved. A loud-fail deprecation guard (`raise_if_deprecated_clustering_method`) at the top of `pipeline.analyze()` rejects the legacy names so explicit `method_runner` injection cannot bypass it. `src/study_query_llm/pipeline/transforms/` is reserved for future DR-as-method transformed-embedding artifacts; no implementations exist there in this rollout, and adding any requires a separate explicitly scoped design. See [METHOD_RECIPES.md](METHOD_RECIPES.md) § Bundled Clustering Subsystem.
 - For the registry-menu vs per-request catalog distinction used by bundled clustering scheduling, see [METHOD_RECIPES.md](METHOD_RECIPES.md) § Registry, catalog, and per-request selection.
 - Terminology guardrail: use `provenance_stage`, `algorithm_iteration`, `restart_try`, and `orchestration_job` in architecture prose; keep legacy schema literals (`step_name`, `clustering_step`) only when quoted.

@@ -64,27 +64,16 @@ def _ensure_method_registered(
     name: str,
     version: str,
 ) -> Optional[int]:
-    """Get or register method definition. Returns method_id or None on failure."""
+    """Get pre-registered method definition id. Returns None when missing."""
     method = method_svc.get_method(name=name, version=version)
     if method is not None:
         return int(method.id)
-    try:
-        return method_svc.register_method(
-            name=name,
-            version=version,
-            code_ref="src/study_query_llm/services/jobs/langgraph_job_runner.py",
-            description="LangGraph run (minimal echo or custom graph)",
-            parameters_schema={
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string"},
-                    "config": {"type": "object"},
-                },
-            },
-        )
-    except Exception as e:
-        logger.warning("Failed to register method %s@%s: %s", name, version, e)
-        return None
+    logger.warning(
+        "LangGraph provenance skipped because method is not pre-registered: %s@%s",
+        name,
+        version,
+    )
+    return None
 
 
 def build_result_envelope(

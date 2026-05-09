@@ -36,6 +36,19 @@ _EXTERNAL_IMAGE_URL_REGEX = re.compile(
 )
 _SAFE_TOKEN_REGEX = re.compile(r"[^A-Za-z0-9._-]+")
 
+# Keys MethodRunnerResult.metadata_json sets from runner state; caller metadata cannot override.
+_MCQ_LOGPROB_RUNNER_METADATA_PROTECTED_KEYS: frozenset[str] = frozenset(
+    {
+        "dataset_name",
+        "dataset_version",
+        "imported_run_id",
+        "provider",
+        "model",
+        "permutation_strategy",
+        "prompt_template_version",
+    }
+)
+
 _OPTION_LABELS: tuple[str, ...] = ("A", "B", "C", "D", "E")
 _RATE_LIMIT_BACKOFF_SECONDS: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0)
 _FORMAT_SUFFIXES: tuple[str, ...] = ("Answer:", "Answer: ", "The correct answer is ")
@@ -698,6 +711,22 @@ async def run_mcq_logprob_basic(
     )
     artifact_uri = _call_artifact_uri_by_id(context, int(artifact_id))
 
+    caller_meta = dict(parsed.metadata or {})
+    runner_meta = {
+        "dataset_name": dataset_name,
+        "dataset_version": dataset_version,
+        "imported_run_id": int(context.imported_run_id or 0),
+        "provider": parsed.provider,
+        "model": parsed.model,
+        "permutation_strategy": parsed.permutation_strategy,
+        "prompt_template_version": parsed.prompt_template_version,
+    }
+    # Caller keys win unless they collide with runner-protected keys (runner invariants win).
+    merged_metadata: dict[str, Any] = {
+        k: v for k, v in caller_meta.items() if k not in _MCQ_LOGPROB_RUNNER_METADATA_PROTECTED_KEYS
+    }
+    merged_metadata.update(runner_meta)
+
     return MethodRunnerResult(
         output_json={
             "artifact_id": int(artifact_id),
@@ -717,15 +746,7 @@ async def run_mcq_logprob_basic(
             "format_idx": int(parsed.format_idx),
             "row_count": int(len(artifact_frame)),
         },
-        metadata_json={
-            "dataset_name": dataset_name,
-            "dataset_version": dataset_version,
-            "imported_run_id": int(context.imported_run_id or 0),
-            "provider": parsed.provider,
-            "model": parsed.model,
-            "permutation_strategy": parsed.permutation_strategy,
-            "prompt_template_version": parsed.prompt_template_version,
-        },
+        metadata_json=merged_metadata,
     )
 
 

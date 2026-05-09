@@ -407,6 +407,139 @@ async def test_runner_minimal_end_to_end_writes_parquet_artifact(
 
 
 @pytest.mark.asyncio
+async def test_runner_metadata_merges_experiment_label_from_parameters_metadata(
+    db_connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.chdir(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    frame = _build_midterm_like_frame()
+
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        request_group_id = int(
+            repo.create_group(
+                group_type="analysis_request",
+                name="mcq-metadata-merge-test",
+                metadata_json={},
+            )
+        )
+        imported_run_id = _seed_imported_run(
+            repo=repo,
+            request_group_id=request_group_id,
+            artifact_dir=artifact_dir,
+            frame=frame,
+        )
+
+        provider = _CapturingProvider()
+        from study_query_llm.providers.factory import ProviderFactory
+
+        monkeypatch.setattr(
+            ProviderFactory,
+            "create_chat_provider",
+            lambda _self, provider_name, model: provider,
+        )
+
+        context = MethodRunnerContext(
+            repository=repo,
+            request_group_id=int(request_group_id),
+            source_group_id=int(request_group_id),
+            method_name="inference.mcq_logprob.basic",
+            method_version="0.1",
+            run_key="rk",
+            imported_run_id=int(imported_run_id),
+            imported_run_metadata={
+                "dataset_name": "midterm2_questions",
+                "dataset_version": "v1",
+            },
+        )
+        label = "mcq_logprob_format0_2026_05_09"
+        out = await run_mcq_logprob_basic(
+            {
+                "provider": "openrouter",
+                "model": "openai/gpt-4o-mini",
+                "permutation_strategy": "single_latin_square_5",
+                "format_idx": 0,
+                "concurrency_cap": 2,
+                "max_questions": 1,
+                "metadata": {"experiment_label": label},
+            },
+            context,
+        )
+
+        assert out.metadata_json.get("experiment_label") == label
+        assert out.metadata_json.get("dataset_name") == "midterm2_questions"
+
+
+@pytest.mark.asyncio
+async def test_runner_metadata_collision_runner_owned_keys_win(
+    db_connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.chdir(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    frame = _build_midterm_like_frame()
+
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        request_group_id = int(
+            repo.create_group(
+                group_type="analysis_request",
+                name="mcq-metadata-collision-test",
+                metadata_json={},
+            )
+        )
+        imported_run_id = _seed_imported_run(
+            repo=repo,
+            request_group_id=request_group_id,
+            artifact_dir=artifact_dir,
+            frame=frame,
+        )
+
+        provider = _CapturingProvider()
+        from study_query_llm.providers.factory import ProviderFactory
+
+        monkeypatch.setattr(
+            ProviderFactory,
+            "create_chat_provider",
+            lambda _self, provider_name, model: provider,
+        )
+
+        context = MethodRunnerContext(
+            repository=repo,
+            request_group_id=int(request_group_id),
+            source_group_id=int(request_group_id),
+            method_name="inference.mcq_logprob.basic",
+            method_version="0.1",
+            run_key="rk",
+            imported_run_id=int(imported_run_id),
+            imported_run_metadata={
+                "dataset_name": "midterm2_questions",
+                "dataset_version": "v1",
+            },
+        )
+        out = await run_mcq_logprob_basic(
+            {
+                "provider": "openrouter",
+                "model": "openai/gpt-4o-mini",
+                "permutation_strategy": "single_latin_square_5",
+                "format_idx": 0,
+                "concurrency_cap": 2,
+                "max_questions": 1,
+                "metadata": {"dataset_name": "should_not_override", "experiment_label": "ok"},
+            },
+            context,
+        )
+
+        assert out.metadata_json.get("dataset_name") == "midterm2_questions"
+        assert out.metadata_json.get("experiment_label") == "ok"
+
+
+@pytest.mark.asyncio
 async def test_hard_fail_status_raises_for_auth_or_missing():
     service = _ScriptedInferenceService(outcomes=[_FakeHttpError(401)])
     with pytest.raises(HardFailureError, match="hard_fail_http_401"):

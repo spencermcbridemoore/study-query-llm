@@ -17,6 +17,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Sweep/job workers and supervisors under `src/study_query_llm/services/jobs/` and `src/study_query_llm/experiments/`.
 - Root `scripts/run_*.py` entrypoints are compatibility surfaces; canonical worker/supervisor/sweep runtime behavior is implemented in `src/study_query_llm/**`.
 - Generic file-ingestion operator wrapper `scripts/ingest_file.py` is active for method-execution source/imported dataset onboarding (`file_artifact.basic` + optional chained `csv_parse.basic`).
+- Phase 2 MCQ logprob orchestrator `scripts/run_mcq_logprob_experiment.py` is active for operator-driven OpenRouter runs: optional concurrency probe (`probe_rate_limits_per_model`), cached probe markdown under `scratch/`, preflight spend/runtime guardrails, and fan-out `inference.mcq_logprob.basic@0.1` executions keyed by `node_id` per model on top of the Phase 1 runner (midterm2 default `imported_run_id=1049`).
 
 ### Database Model
 
@@ -52,7 +53,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Provenance, artifacts, sweep request lifecycle, and job orchestration services are implemented in `src/study_query_llm/services/`.
 - Polymorphic method execution lane is active for non-clustering methods:
   - Dispatch seam: `MethodExecutionService` + `method_runtime_registry`.
-  - Built-in runtime methods: `perturbation_then_inference.basic@0.1`, `inference.logprobs.basic@0.1`, `file_artifact.basic@0.1`, and `csv_parse.basic@0.1`.
+  - Built-in runtime methods: `perturbation_then_inference.basic@0.1`, `inference.logprobs.basic@0.1`, `inference.mcq_logprob.basic@0.1`, `file_artifact.basic@0.1`, and `csv_parse.basic@0.1`.
   - Idempotency/run-key contract uses ordered suffixes:
     - `<base_run_key>__method__<name>@<version>[__node__<node_id>][__inv__<invocation_id>]`.
   - Data-ingestion method contract supports `source` -> `imported` chaining through `imported_run_id`, with imported dataset schema captured in `metadata_json.pipeline_stage_context`.

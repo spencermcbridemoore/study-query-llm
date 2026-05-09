@@ -44,10 +44,12 @@ Notes:
   - Runtime dispatch seam: `method_runtime_registry` (`MethodRuntimeSpec` / `MethodRunnerResult`) with built-ins:
     - `perturbation_then_inference.basic@0.1`
     - `inference.logprobs.basic@0.1`
+    - `inference.mcq_logprob.basic@0.1` (MCQ first-token logprob runner over deterministic permutations; caller `parameters.metadata` merges into persisted execution `metadata_json` with runner-owned keys winning on collision — for example `experiment_label`)
     - `file_artifact.basic@0.1`
     - `csv_parse.basic@0.1`
   - Generic operator wrapper for source/imported dataset ingestion:
     - `python scripts/ingest_file.py --path ... --name ... --version ... --content-type ... [--parse-as csv]`
+  - Phase 2 MCQ OpenRouter orchestration (concurrency probe + fan-out execute): `python scripts/run_mcq_logprob_experiment.py --experiment-label ... [--imported-run-id 1049] [--dry-run] [--skip-probe] [--probe-max-age-hours 24] [--max-spend ...] [--max-runtime-hours ...]` — writes `scratch/mcq_logprob_concurrency_probe.md`, registers inference methods idempotently, dispatches `MethodExecutionService.execute()` per model with shared `request_group_id`, `node_id` slug per model, and `imported_run_id` dataset binding.
   - Deterministic run-key composition contract:
     - `<base_run_key>__method__<name>@<version>[__node__<node_id>][__inv__<invocation_id>]`
   - Boundary validation is request-edge only: payload shape + `invocation_id` UUID + imported-run metadata shape (when provided).

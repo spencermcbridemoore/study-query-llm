@@ -79,6 +79,30 @@ INFERENCE_METHODS: List[Dict[str, Any]] = [
         },
         "maturity": MATURITY_RUNNER_WIRED,
     },
+    {
+        "name": "inference.mcq_logprob.basic",
+        "version": "0.1",
+        "role": "method_execution",
+        "code_ref": "src/study_query_llm/services/method_runners/mcq_logprob_basic.py",
+        "description": (
+            "Run first-token MCQ logprob probing over deterministic option "
+            "permutations and persist one execution artifact per invocation."
+        ),
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "provider": {"type": "string"},
+                "model": {"type": "string"},
+                "permutation_strategy": {"type": "string"},
+                "format_idx": {"type": "integer"},
+                "prompt_template_version": {"type": "string"},
+                "concurrency_cap": {"type": "integer"},
+                "max_questions": {"type": "integer"},
+                "metadata": {"type": "object"},
+            },
+        },
+        "maturity": MATURITY_RUNNER_WIRED,
+    },
 ]
 
 

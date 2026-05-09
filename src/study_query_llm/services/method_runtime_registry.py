@@ -123,6 +123,7 @@ def ensure_default_method_runtimes_registered() -> None:
     )
     from .method_runners.file_artifact_basic import run_file_artifact_basic
     from .method_runners.csv_parse_basic import run_csv_parse_basic
+    from .method_runners.mcq_logprob_basic import run_mcq_logprob_basic
 
     defaults = (
         MethodRuntimeSpec(
@@ -148,6 +149,12 @@ def ensure_default_method_runtimes_registered() -> None:
             method_version="0.1",
             runner=run_csv_parse_basic,
             description="Imported-stage CSV-to-parquet transform runner.",
+        ),
+        MethodRuntimeSpec(
+            method_name="inference.mcq_logprob.basic",
+            method_version="0.1",
+            runner=run_mcq_logprob_basic,
+            description="Phase-1 MCQ first-token logprob runner foundations.",
         ),
     )
     for spec in defaults:

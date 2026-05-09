@@ -28,10 +28,12 @@ def test_default_runtime_registry_contains_built_in_specs():
     ensure_default_method_runtimes_registered()
     perturb = get_method_runtime("perturbation_then_inference.basic", "0.1")
     logprobs = get_method_runtime("inference.logprobs.basic", "0.1")
+    mcq_logprob = get_method_runtime("inference.mcq_logprob.basic", "0.1")
     file_artifact = get_method_runtime("file_artifact.basic", "0.1")
     csv_parse = get_method_runtime("csv_parse.basic", "0.1")
     assert perturb is not None
     assert logprobs is not None
+    assert mcq_logprob is not None
     assert file_artifact is not None
     assert csv_parse is not None
 
@@ -41,6 +43,7 @@ def test_runtime_methods_are_marked_runner_wired_in_catalog():
     runtime_identities = {
         ("perturbation_then_inference.basic", "0.1"),
         ("inference.logprobs.basic", "0.1"),
+        ("inference.mcq_logprob.basic", "0.1"),
     }
     maturity_by_identity = {
         (str(item["name"]), str(item["version"])): str(item.get("maturity") or "")

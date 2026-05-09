@@ -145,7 +145,9 @@ class MethodExecutionService:
         if method_row is None:
             raise ValueError(
                 f"method_not_registered:{req.method_name}@{req.method_version}; "
-                "register methods via scripts/register_inference_methods.py"
+                "register methods via family registration scripts "
+                "(for example scripts/register_inference_methods.py, "
+                "scripts/register_data_methods.py)"
             )
 
         runtime_spec = get_method_runtime(req.method_name, req.method_version)

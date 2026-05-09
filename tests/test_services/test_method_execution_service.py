@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
+from study_query_llm.algorithms.data_methods import register_data_methods
 from study_query_llm.algorithms.inference_methods import register_inference_methods
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
@@ -315,4 +318,71 @@ async def test_execute_validates_imported_run_metadata_boundary(db_connection):
                 parameters={"prompt": "p"},
                 imported_run_id=int(imported_run_id),
             )
+
+
+@pytest.mark.asyncio
+async def test_execute_source_to_imported_chain_captures_schema_context(
+    db_connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.chdir(tmp_path)
+
+    csv_path = tmp_path / "midterm_sample.csv"
+    csv_path.write_text(
+        "ItemID,Prompt,Correct\n1,What is 2+2?,4\n2,Capital of France?,Paris\n",
+        encoding="utf-8",
+    )
+    expected_sha256 = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        method_service = MethodService(repo)
+        register_data_methods(method_service)
+        req_group_id = _create_request_group(repo)
+
+        svc = MethodExecutionService(repo)
+        source = await svc.execute(
+            request_group_id=req_group_id,
+            base_run_key="ingest_midterm_sample",
+            method_name="file_artifact.basic",
+            method_version="0.1",
+            parameters={
+                "file_path": str(csv_path),
+                "registered_name": "midterm_sample_questions",
+                "registered_version": "v1",
+                "content_type": "text/csv",
+                "expected_sha256": expected_sha256,
+            },
+        )
+        assert source.pipeline_stage_role == "source"
+        assert source.result_ref
+
+        imported = await svc.execute(
+            request_group_id=req_group_id,
+            base_run_key="ingest_midterm_sample",
+            method_name="csv_parse.basic",
+            method_version="0.1",
+            parameters={
+                "dataset_name": "midterm_sample_questions",
+                "dataset_version": "v1",
+            },
+            imported_run_id=int(source.run_id),
+        )
+        assert imported.pipeline_stage_role == "imported"
+        assert imported.result_ref
+        assert imported.pipeline_stage_context["dataset_name"] == "midterm_sample_questions"
+        assert imported.pipeline_stage_context["row_count"] == 2
+        assert imported.pipeline_stage_context["column_count"] == 3
+        assert [c["name"] for c in imported.pipeline_stage_context["columns"]] == [
+            "ItemID",
+            "Prompt",
+            "Correct",
+        ]
+
+        imported_row = repo.get_provenanced_run_by_id(int(imported.run_id))
+        assert imported_row is not None
+        imported_ref = (imported_row.metadata_json or {}).get("imported_run_ref") or {}
+        assert imported_ref.get("run_id") == int(source.run_id)
 

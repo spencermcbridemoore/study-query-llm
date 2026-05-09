@@ -8,6 +8,10 @@ from study_query_llm.algorithms.inference_methods import (
     INFERENCE_METHODS,
     MATURITY_RUNNER_WIRED,
 )
+from study_query_llm.algorithms.data_methods import (
+    DATA_METHODS,
+    MATURITY_RUNNER_WIRED as DATA_MATURITY_RUNNER_WIRED,
+)
 from study_query_llm.services.method_runtime_registry import (
     MethodRunnerContext,
     MethodRunnerResult,
@@ -19,13 +23,17 @@ from study_query_llm.services.method_runtime_registry import (
 )
 
 
-def test_default_runtime_registry_contains_stage1_and_stage2_specs():
-    """Built-in registry should include stage-1 and stage-2 method identities."""
+def test_default_runtime_registry_contains_built_in_specs():
+    """Built-in registry should include all wired runtime identities."""
     ensure_default_method_runtimes_registered()
     perturb = get_method_runtime("perturbation_then_inference.basic", "0.1")
     logprobs = get_method_runtime("inference.logprobs.basic", "0.1")
+    file_artifact = get_method_runtime("file_artifact.basic", "0.1")
+    csv_parse = get_method_runtime("csv_parse.basic", "0.1")
     assert perturb is not None
     assert logprobs is not None
+    assert file_artifact is not None
+    assert csv_parse is not None
 
 
 def test_runtime_methods_are_marked_runner_wired_in_catalog():
@@ -40,6 +48,20 @@ def test_runtime_methods_are_marked_runner_wired_in_catalog():
     }
     for identity in runtime_identities:
         assert maturity_by_identity.get(identity) == MATURITY_RUNNER_WIRED
+
+
+def test_data_runtime_methods_are_marked_runner_wired_in_catalog():
+    """Data catalog maturity should match runtime dispatch wiring."""
+    runtime_identities = {
+        ("file_artifact.basic", "0.1"),
+        ("csv_parse.basic", "0.1"),
+    }
+    maturity_by_identity = {
+        (str(item["name"]), str(item["version"])): str(item.get("maturity") or "")
+        for item in DATA_METHODS
+    }
+    for identity in runtime_identities:
+        assert maturity_by_identity.get(identity) == DATA_MATURITY_RUNNER_WIRED
 
 
 def test_register_runtime_duplicate_raises_without_overwrite():

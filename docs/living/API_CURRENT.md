@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-08
+Last reviewed: 2026-05-09
 
 ## Configuration
 
@@ -44,6 +44,10 @@ Notes:
   - Runtime dispatch seam: `method_runtime_registry` (`MethodRuntimeSpec` / `MethodRunnerResult`) with built-ins:
     - `perturbation_then_inference.basic@0.1`
     - `inference.logprobs.basic@0.1`
+    - `file_artifact.basic@0.1`
+    - `csv_parse.basic@0.1`
+  - Generic operator wrapper for source/imported dataset ingestion:
+    - `python scripts/ingest_file.py --path ... --name ... --version ... --content-type ... [--parse-as csv]`
   - Deterministic run-key composition contract:
     - `<base_run_key>__method__<name>@<version>[__node__<node_id>][__inv__<invocation_id>]`
   - Boundary validation is request-edge only: payload shape + `invocation_id` UUID + imported-run metadata shape (when provided).
@@ -126,6 +130,7 @@ Execution-model feature flags:
 ## Register-First Scripts
 
 - Inference polymorphic lane: `scripts/register_inference_methods.py`
+- Data ingestion polymorphic lane: `scripts/register_data_methods.py`
 - Orchestration + MCQ analysis methods: `scripts/register_orchestration_methods.py`
 - Clustering methods/composites: `scripts/register_clustering_methods.py`
   - Registers component methods, registry-backed clustering runtime methods, and composite recipe rows.

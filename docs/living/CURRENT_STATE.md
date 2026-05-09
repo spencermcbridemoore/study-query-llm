@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: documentation-maintainers  
-Last reviewed: 2026-05-08
+Last reviewed: 2026-05-09
 
 ## Scope
 
@@ -16,6 +16,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Package CLI entrypoint: `python -m study_query_llm.cli`.
 - Sweep/job workers and supervisors under `src/study_query_llm/services/jobs/` and `src/study_query_llm/experiments/`.
 - Root `scripts/run_*.py` entrypoints are compatibility surfaces; canonical worker/supervisor/sweep runtime behavior is implemented in `src/study_query_llm/**`.
+- Generic file-ingestion operator wrapper `scripts/ingest_file.py` is active for method-execution source/imported dataset onboarding (`file_artifact.basic` + optional chained `csv_parse.basic`).
 
 ### Database Model
 
@@ -51,9 +52,10 @@ This document is the canonical "what exists and works now" summary for the repos
 - Provenance, artifacts, sweep request lifecycle, and job orchestration services are implemented in `src/study_query_llm/services/`.
 - Polymorphic method execution lane is active for non-clustering methods:
   - Dispatch seam: `MethodExecutionService` + `method_runtime_registry`.
-  - Built-in runtime methods: `perturbation_then_inference.basic@0.1` and `inference.logprobs.basic@0.1`.
+  - Built-in runtime methods: `perturbation_then_inference.basic@0.1`, `inference.logprobs.basic@0.1`, `file_artifact.basic@0.1`, and `csv_parse.basic@0.1`.
   - Idempotency/run-key contract uses ordered suffixes:
     - `<base_run_key>__method__<name>@<version>[__node__<node_id>][__inv__<invocation_id>]`.
+  - Data-ingestion method contract supports `source` -> `imported` chaining through `imported_run_id`, with imported dataset schema captured in `metadata_json.pipeline_stage_context`.
 - `SweepRequestService` supports typed sweep requests (`clustering`, `mcq`), execution-derived analysis state reads, parity diagnostics against legacy metadata fields, and OrchestrationJob planning.
 - Orchestration planning is adapter-driven: sweep-type adapters emit deterministic graph specs (`job_type`, `job_key`, payload shape, dependency edges), and `SweepRequestService` enqueues from spec rather than hardcoded clustering/MCQ planner branches.
 - Temporary planner fallback controls were retired after parity coverage; there is no active legacy-planner environment toggle in the current control plane.
@@ -114,7 +116,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - For chat providers: use `create_chat_provider` path, not legacy assumptions about `create()`.
 - For operational execution: prefer package CLI subcommands over legacy script wrappers.
 - For scripts-vs-runtime boundaries: treat `scripts/run_*.py` as compatibility wrappers and place new orchestration/pipeline runtime logic in `src/study_query_llm/**`.
-- For method onboarding: use register-first scripts (`scripts/register_inference_methods.py`, `scripts/register_orchestration_methods.py`, `scripts/register_clustering_methods.py`, `scripts/register_text_classification_methods.py`) before runtime execution surfaces.
+- For method onboarding: use register-first scripts (`scripts/register_inference_methods.py`, `scripts/register_data_methods.py`, `scripts/register_orchestration_methods.py`, `scripts/register_clustering_methods.py`, `scripts/register_text_classification_methods.py`) before runtime execution surfaces.
 - For DB/tunnel/backup/restore operations: start at `docs/runbooks/README.md` (canonical source-of-truth policy + URL contract).
 - Read-only check that `call_artifacts.uri` Azure blob URLs target the expected container (e.g. `artifacts-dev`): `scripts/verify_call_artifact_blob_lanes.py`.
 - Data pipeline behavior/acceptance criteria are documented in `docs/DATA_PIPELINE.md`; use this as the canonical contract for acquisition/snapshot/embedding/analysis behavior.

@@ -121,6 +121,8 @@ def ensure_default_method_runtimes_registered() -> None:
     from .method_runners.perturb_then_infer_basic import (
         run_perturbation_then_inference_basic,
     )
+    from .method_runners.file_artifact_basic import run_file_artifact_basic
+    from .method_runners.csv_parse_basic import run_csv_parse_basic
 
     defaults = (
         MethodRuntimeSpec(
@@ -134,6 +136,18 @@ def ensure_default_method_runtimes_registered() -> None:
             method_version="0.1",
             runner=run_logprobs_basic,
             description="Stage-2 logprobs pressure-test runner.",
+        ),
+        MethodRuntimeSpec(
+            method_name="file_artifact.basic",
+            method_version="0.1",
+            runner=run_file_artifact_basic,
+            description="Source-stage file artifact persistence runner.",
+        ),
+        MethodRuntimeSpec(
+            method_name="csv_parse.basic",
+            method_version="0.1",
+            runner=run_csv_parse_basic,
+            description="Imported-stage CSV-to-parquet transform runner.",
         ),
     )
     for spec in defaults:

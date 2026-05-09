@@ -51,6 +51,10 @@ from .orchestration_methods import (
     ORCHESTRATION_METHODS,
     register_orchestration_methods,
 )
+from .data_methods import (
+    DATA_METHODS,
+    register_data_methods,
+)
 from .canonical_configs import (
     CANONICAL_CONFIG_BUILDERS,
     CanonicalConfigBuilder,
@@ -103,6 +107,9 @@ __all__ = [
     # Orchestration/MCQ methods (register-first)
     "ORCHESTRATION_METHODS",
     "register_orchestration_methods",
+    # Data methods (register-first)
+    "DATA_METHODS",
+    "register_data_methods",
     # Canonical-config builders (currently unused; future enforcement spot)
     "CANONICAL_CONFIG_BUILDERS",
     "CanonicalConfigBuilder",

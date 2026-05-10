@@ -556,6 +556,7 @@ async def test_parallel_fanout_uses_asyncio_gather(
     monkeypatch.setattr(mcq_exp_mod, "probe_rate_limits_per_model", _fake_probe)
 
     gather_sizes: list[int] = []
+    top_logprobs_values: list[int] = []
     real_gather = asyncio.gather
 
     async def _spy_gather(*aws, **kwargs):
@@ -565,6 +566,8 @@ async def test_parallel_fanout_uses_asyncio_gather(
     monkeypatch.setattr(mcq_exp_mod.asyncio, "gather", _spy_gather)
 
     async def _fake_execute(_self, **_kwargs):
+        params = dict(_kwargs.get("parameters") or {})
+        top_logprobs_values.append(int(params.get("top_logprobs")))
         return SimpleNamespace(
             run_id=99,
             reused=False,
@@ -593,6 +596,8 @@ async def test_parallel_fanout_uses_asyncio_gather(
     )
     assert rc == 0
     assert 28 in gather_sizes
+    assert len(top_logprobs_values) == 28
+    assert set(top_logprobs_values) == {5}
 
 
 @pytest.mark.asyncio

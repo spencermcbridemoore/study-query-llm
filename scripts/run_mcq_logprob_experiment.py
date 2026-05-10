@@ -65,6 +65,10 @@ PROMPT_V2_SYSTEM_MESSAGE = (
     "Do not explain. Do not output any other text."
 )
 
+# Universal top_logprobs cap: matches observed effective depth across all
+# OpenRouter-backed providers, and stays within Alibaba's strict max-5 limit.
+INFERENCE_TOP_LOGPROBS = 5
+
 _PROBE_JSON_FENCE_START = "```mcq-probe-json\n"
 _PROBE_JSON_FENCE_END = "\n```"
 
@@ -726,7 +730,7 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
                     "format_idx": 0,
                     "concurrency_cap": int(plan.concurrency_cap),
                     "max_questions": max_questions,
-                    "top_logprobs": 20,
+                    "top_logprobs": INFERENCE_TOP_LOGPROBS,
                     "system_prompt": plan.system_prompt,
                     "prompt_template_version": plan.prompt_template_version,
                     "metadata": {

@@ -498,7 +498,8 @@ def _extract_first_token_top_logprobs(inference_result: dict[str, Any]) -> list[
 
 
 def _token_matches_letter(token: Any, letter: str) -> bool:
-    normalized = _to_text(token).strip().upper()
+    # Some tokenizers encode leading whitespace as marker glyphs before single-letter options.
+    normalized = _to_text(token).lstrip("▁Ġ \t\r\n\f\v").strip().upper()
     return normalized == letter
 
 

@@ -18,6 +18,7 @@ from study_query_llm.services.artifact_service import ArtifactService
 from study_query_llm.services.method_runners.mcq_logprob_basic import (
     HardFailureError,
     ProbeCallResult,
+    _token_matches_letter,
     _run_inference_with_429_retry,
     apply_midterm2_subset_filter,
     full_120_indices,
@@ -217,6 +218,16 @@ def test_apply_midterm_filter_excludes_non_choice_and_image_rows():
     subset = apply_midterm2_subset_filter(frame)
     assert list(subset["ItemID"].astype(int)) == [101]
     assert set(subset["ItemType"].astype(str).str.lower()) == {"choice"}
+
+
+def test_token_matches_letter_handles_supported_prefix_markers():
+    assert _token_matches_letter("▁A", "A") is True
+    assert _token_matches_letter("ĠA", "A") is True
+    assert _token_matches_letter(" A", "A") is True
+    assert _token_matches_letter("A", "A") is True
+    assert _token_matches_letter("a", "A") is True
+    assert _token_matches_letter("(A", "A") is False
+    assert _token_matches_letter("AA", "A") is False
 
 
 @pytest.mark.asyncio

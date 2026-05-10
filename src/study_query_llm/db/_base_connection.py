@@ -29,6 +29,9 @@ logger = get_logger(__name__)
 _DESTRUCTIVE_DDL_OVERRIDE_ENV = "SQLLM_ALLOW_DESTRUCTIVE_DDL"
 _JETSTREAM_DATABASE_URL_ENV = "JETSTREAM_DATABASE_URL"
 _WRITE_INTENT_ENV = "SQLLM_WRITE_INTENT"
+_DEFAULT_POOL_SIZE_MIN = 30
+_DEFAULT_MAX_OVERFLOW_MIN = 30
+_DEFAULT_POOL_TIMEOUT_MIN = 60
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,16 @@ def _is_sqlite_url(connection_string: str) -> bool:
     """Return True when the SQLAlchemy URL scheme is sqlite."""
     scheme = (urlparse((connection_string or "").strip()).scheme or "").lower()
     return scheme.startswith("sqlite")
+
+
+def _coerce_int_or_none(value: object) -> int | None:
+    """Best-effort int coercion for SQLAlchemy engine kwarg values."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_write_intent(raw_or_enum: WriteIntent | str | None) -> WriteIntent | None:
@@ -227,6 +240,29 @@ class BaseDatabaseConnection:
                 write_intent=self.write_intent,
                 source_var=self.canonical_source_var,
             )
+
+        if not _is_sqlite_url(connection_string):
+            pool_size = _coerce_int_or_none(engine_kwargs.get("pool_size"))
+            engine_kwargs["pool_size"] = max(
+                _DEFAULT_POOL_SIZE_MIN,
+                pool_size if pool_size is not None else _DEFAULT_POOL_SIZE_MIN,
+            )
+
+            max_overflow = _coerce_int_or_none(engine_kwargs.get("max_overflow"))
+            engine_kwargs["max_overflow"] = max(
+                _DEFAULT_MAX_OVERFLOW_MIN,
+                max_overflow if max_overflow is not None else _DEFAULT_MAX_OVERFLOW_MIN,
+            )
+
+            pool_timeout = _coerce_int_or_none(engine_kwargs.get("pool_timeout"))
+            engine_kwargs["pool_timeout"] = max(
+                _DEFAULT_POOL_TIMEOUT_MIN,
+                pool_timeout if pool_timeout is not None else _DEFAULT_POOL_TIMEOUT_MIN,
+            )
+
+            # Defensively detect and recycle stale TCP connections.
+            engine_kwargs["pool_pre_ping"] = True
+
         self.connection_string = connection_string
         self.engine = create_engine(connection_string, echo=echo, **engine_kwargs)
         self.SessionLocal = sessionmaker(

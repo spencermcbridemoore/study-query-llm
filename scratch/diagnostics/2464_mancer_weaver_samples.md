@@ -1,0 +1,181 @@
+# Raw payload samples — mancer/weaver
+
+### Row 1
+- question_idx: 0
+- permutation_idx: 0
+- correct_letter: A
+- predicted_letter: null
+- is_correct: null
+- error: null
+- rate_limit_retry_count: 0
+- first_token_top_logprobs_json (parsed):
+  - token=▁To, logprob=-0.9203934073448181, token_id=null
+  - token=▁The, logprob=-1.420393466949463, token_id=null
+  - token=▁Let, logprob=-2.545393466949463, token_id=null
+  - token=▁B, logprob=-3.045393466949463, token_id=null
+  - token=▁We, logprob=-3.170393466949463, token_id=null
+  - token=▁A, logprob=-3.232893466949463, token_id=null
+  - token=▁First, logprob=-3.545393466949463, token_id=null
+  - token=▁D, logprob=-4.170393466949463, token_id=null
+  - token=▁, logprob=-4.420393466949463, token_id=null
+  - token=▁Using, logprob=-4.545393466949463, token_id=null
+  - token=▁Given, logprob=-4.607893466949463, token_id=null
+  - token=▁As, logprob=-4.732893466949463, token_id=null
+  - token=▁C, logprob=-4.795393466949463, token_id=null
+  - token=▁Since, logprob=-5.045393466949463, token_id=null
+  - token=▁In, logprob=-5.170393466949463, token_id=null
+  - token=▁Solution, logprob=-5.482893466949463, token_id=null
+  - token=▁E, logprob=-5.482893466949463, token_id=null
+  - token=▁You, logprob=-5.607893466949463, token_id=null
+  - token=▁Based, logprob=-6.045393466949463, token_id=null
+  - token=▁F, logprob=-6.107893466949463, token_id=null
+- candidate_logprobs_json (parsed):
+  - A=null
+  - B=null
+  - C=null
+  - D=null
+  - E=null
+
+### Row 2
+- question_idx: 1
+- permutation_idx: 0
+- correct_letter: A
+- predicted_letter: null
+- is_correct: null
+- error: null
+- rate_limit_retry_count: 0
+- first_token_top_logprobs_json (parsed):
+  - token=▁The, logprob=-1.2003167867660522, token_id=null
+  - token=▁To, logprob=-1.2003167867660522, token_id=null
+  - token=▁Let, logprob=-2.325316905975342, token_id=null
+  - token=▁We, logprob=-2.950316905975342, token_id=null
+  - token=▁B, logprob=-3.075316905975342, token_id=null
+  - token=▁A, logprob=-3.262816905975342, token_id=null
+  - token=▁First, logprob=-3.325316905975342, token_id=null
+  - token=▁As, logprob=-3.825316905975342, token_id=null
+  - token=▁D, logprob=-4.262816905975342, token_id=null
+  - token=▁C, logprob=-4.575316905975342, token_id=null
+  - token=▁, logprob=-4.700316905975342, token_id=null
+  - token=▁Since, logprob=-4.700316905975342, token_id=null
+  - token=▁In, logprob=-4.825316905975342, token_id=null
+  - token=▁Using, logprob=-5.200316905975342, token_id=null
+  - token=▁Solution, logprob=-5.387816905975342, token_id=null
+  - token=▁F, logprob=-5.512816905975342, token_id=null
+  - token=▁Given, logprob=-5.575316905975342, token_id=null
+  - token=▁You, logprob=-5.637816905975342, token_id=null
+  - token=▁Option, logprob=-6.200316905975342, token_id=null
+  - token=▁[, logprob=-6.450316905975342, token_id=null
+- candidate_logprobs_json (parsed):
+  - A=null
+  - B=null
+  - C=null
+  - D=null
+  - E=null
+
+### Row 3
+- question_idx: 2
+- permutation_idx: 0
+- correct_letter: A
+- predicted_letter: null
+- is_correct: null
+- error: null
+- rate_limit_retry_count: 0
+- first_token_top_logprobs_json (parsed):
+  - token=▁To, logprob=-0.9321286678314209, token_id=null
+  - token=▁The, logprob=-1.182128667831421, token_id=null
+  - token=▁Let, logprob=-2.682128667831421, token_id=null
+  - token=▁B, logprob=-3.057128667831421, token_id=null
+  - token=▁We, logprob=-3.494628667831421, token_id=null
+  - token=▁A, logprob=-3.619628667831421, token_id=null
+  - token=▁First, logprob=-3.932128667831421, token_id=null
+  - token=▁Using, logprob=-4.30712890625, token_id=null
+  - token=▁C, logprob=-4.61962890625, token_id=null
+  - token=▁Given, logprob=-4.74462890625, token_id=null
+  - token=▁Since, logprob=-4.80712890625, token_id=null
+  - token=▁As, logprob=-4.93212890625, token_id=null
+  - token=▁D, logprob=-4.99462890625, token_id=null
+  - token=▁, logprob=-5.11962890625, token_id=null
+  - token=▁In, logprob=-5.24462890625, token_id=null
+  - token=▁Solution, logprob=-5.49462890625, token_id=null
+  - token=▁You, logprob=-5.80712890625, token_id=null
+  - token=▁From, logprob=-5.80712890625, token_id=null
+  - token=▁This, logprob=-5.93212890625, token_id=null
+  - token=▁Based, logprob=-6.05712890625, token_id=null
+- candidate_logprobs_json (parsed):
+  - A=null
+  - B=null
+  - C=null
+  - D=null
+  - E=null
+
+### Row 4
+- question_idx: 3
+- permutation_idx: 0
+- correct_letter: A
+- predicted_letter: null
+- is_correct: null
+- error: null
+- rate_limit_retry_count: 0
+- first_token_top_logprobs_json (parsed):
+  - token=▁To, logprob=-1.147452712059021, token_id=null
+  - token=▁The, logprob=-1.147452712059021, token_id=null
+  - token=▁Let, logprob=-2.2724528312683105, token_id=null
+  - token=▁We, logprob=-3.0849528312683105, token_id=null
+  - token=▁A, logprob=-3.2724528312683105, token_id=null
+  - token=▁B, logprob=-3.3974528312683105, token_id=null
+  - token=▁First, logprob=-3.4599528312683105, token_id=null
+  - token=▁As, logprob=-4.3349528312683105, token_id=null
+  - token=▁D, logprob=-4.5849528312683105, token_id=null
+  - token=▁Given, logprob=-4.6474528312683105, token_id=null
+  - token=▁Using, logprob=-4.8349528312683105, token_id=null
+  - token=▁In, logprob=-4.8974528312683105, token_id=null
+  - token=▁Since, logprob=-4.8974528312683105, token_id=null
+  - token=▁Solution, logprob=-5.4599528312683105, token_id=null
+  - token=▁C, logprob=-5.4599528312683105, token_id=null
+  - token=▁You, logprob=-5.4599528312683105, token_id=null
+  - token=▁F, logprob=-5.5849528312683105, token_id=null
+  - token=▁, logprob=-5.5849528312683105, token_id=null
+  - token=▁Based, logprob=-6.0849528312683105, token_id=null
+  - token=▁This, logprob=-6.0849528312683105, token_id=null
+- candidate_logprobs_json (parsed):
+  - A=null
+  - B=null
+  - C=null
+  - D=null
+  - E=null
+
+### Row 5
+- question_idx: 4
+- permutation_idx: 0
+- correct_letter: A
+- predicted_letter: null
+- is_correct: null
+- error: null
+- rate_limit_retry_count: 0
+- first_token_top_logprobs_json (parsed):
+  - token=▁To, logprob=-1.25262451171875, token_id=null
+  - token=▁The, logprob=-1.37762451171875, token_id=null
+  - token=▁Let, logprob=-1.75262451171875, token_id=null
+  - token=▁We, logprob=-2.69012451171875, token_id=null
+  - token=▁First, logprob=-3.06512451171875, token_id=null
+  - token=▁B, logprob=-3.50262451171875, token_id=null
+  - token=▁A, logprob=-3.56512451171875, token_id=null
+  - token=▁D, logprob=-4.56512451171875, token_id=null
+  - token=▁, logprob=-4.62762451171875, token_id=null
+  - token=▁In, logprob=-4.62762451171875, token_id=null
+  - token=▁As, logprob=-4.69012451171875, token_id=null
+  - token=▁C, logprob=-4.87762451171875, token_id=null
+  - token=▁Using, logprob=-4.94012451171875, token_id=null
+  - token=▁Since, logprob=-4.94012451171875, token_id=null
+  - token=▁You, logprob=-5.25262451171875, token_id=null
+  - token=▁Given, logprob=-5.44012451171875, token_id=null
+  - token=▁F, logprob=-5.56512451171875, token_id=null
+  - token=▁Solution, logprob=-5.69012451171875, token_id=null
+  - token=▁Step, logprob=-5.69012451171875, token_id=null
+  - token=▁From, logprob=-6.12762451171875, token_id=null
+- candidate_logprobs_json (parsed):
+  - A=null
+  - B=null
+  - C=null
+  - D=null
+  - E=null

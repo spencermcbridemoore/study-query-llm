@@ -701,7 +701,8 @@ async def run_mcq_logprob_basic(
     dataset_version = _to_text(imported_meta.get("dataset_version") or "v1")
     logical_filename = (
         f"mcq_logprob_{_safe_token(parsed.model)}_"
-        f"{parsed.permutation_strategy}_{parsed.format_idx}.parquet"
+        f"{parsed.permutation_strategy}_{parsed.format_idx}_"
+        f"{_safe_token(parsed.prompt_template_version)}.parquet"
     )
     artifact_service = ArtifactService(repository=context.repository)
     artifact_id = artifact_service.store_group_blob_artifact(

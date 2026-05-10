@@ -488,6 +488,97 @@ async def test_runner_threads_system_prompt_when_present(
 
 
 @pytest.mark.asyncio
+async def test_runner_logical_filename_includes_prompt_template_version(
+    db_connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.chdir(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    frame = _build_midterm_like_frame()
+
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        request_group_id = int(
+            repo.create_group(
+                group_type="analysis_request",
+                name="mcq-logprob-filename-collision-test",
+                metadata_json={},
+            )
+        )
+        imported_run_id = _seed_imported_run(
+            repo=repo,
+            request_group_id=request_group_id,
+            artifact_dir=artifact_dir,
+            frame=frame,
+        )
+
+        provider = _CapturingProvider()
+        from study_query_llm.providers.factory import ProviderFactory
+
+        monkeypatch.setattr(
+            ProviderFactory,
+            "create_chat_provider",
+            lambda _self, provider_name, model: provider,
+        )
+
+        context = MethodRunnerContext(
+            repository=repo,
+            request_group_id=int(request_group_id),
+            source_group_id=int(request_group_id),
+            method_name="inference.mcq_logprob.basic",
+            method_version="0.1",
+            run_key="rk",
+            imported_run_id=int(imported_run_id),
+            imported_run_metadata={
+                "dataset_name": "midterm2_questions",
+                "dataset_version": "v1",
+            },
+        )
+
+        captured_filenames: list[str] = []
+        original_store = ArtifactService.store_group_blob_artifact
+
+        def _capture_store(self, *args: Any, **kwargs: Any) -> int:
+            captured_filenames.append(str(kwargs.get("logical_filename")))
+            return int(original_store(self, *args, **kwargs))
+
+        monkeypatch.setattr(ArtifactService, "store_group_blob_artifact", _capture_store)
+
+        await run_mcq_logprob_basic(
+            {
+                "provider": "openrouter",
+                "model": "openai/gpt-4o-mini",
+                "permutation_strategy": "single_latin_square_5",
+                "format_idx": 0,
+                "prompt_template_version": "v1",
+                "concurrency_cap": 2,
+                "max_questions": 1,
+            },
+            context,
+        )
+        await run_mcq_logprob_basic(
+            {
+                "provider": "openrouter",
+                "model": "openai/gpt-4o-mini",
+                "permutation_strategy": "single_latin_square_5",
+                "format_idx": 0,
+                "prompt_template_version": "v2_chat_system",
+                "system_prompt": "Reply with exactly one letter.",
+                "concurrency_cap": 2,
+                "max_questions": 1,
+            },
+            context,
+        )
+
+        assert len(captured_filenames) == 2
+        assert captured_filenames[0] != captured_filenames[1]
+        assert captured_filenames[0].endswith("_v1.parquet")
+        assert captured_filenames[1].endswith("_v2_chat_system.parquet")
+
+
+@pytest.mark.asyncio
 async def test_runner_metadata_merges_experiment_label_from_parameters_metadata(
     db_connection,
     tmp_path: Path,

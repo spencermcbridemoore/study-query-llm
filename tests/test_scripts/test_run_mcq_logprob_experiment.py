@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.util
 import io
 import os
@@ -45,6 +46,7 @@ EXPECTED_CHEAP = (
     "thedrummer/unslopnemo-12b",
     "undi95/remm-slerp-l2-13b",
 )
+DEFAULT_FORMATS = ("v1", "v2_chat_system")
 
 
 @pytest.fixture
@@ -151,11 +153,36 @@ def test_survivors_use_probe_resolved_concurrency(mcq_exp_mod) -> None:
                 ),
             ),
         )
-    survivors, excluded = mcq_exp_mod.build_survivors(probe_results, mcq_exp_mod.ALL_14_MODELS)
+    survivors, excluded = mcq_exp_mod.build_survivors(
+        probe_results,
+        mcq_exp_mod.ALL_14_MODELS,
+        smoke=False,
+    )
     assert not excluded
     assert len(survivors) == 14
     for _mid, _strat, conc in survivors:
         assert conc == 7
+
+
+def test_resolve_formats_flag(mcq_exp_mod) -> None:
+    assert mcq_exp_mod.resolve_formats("both") == DEFAULT_FORMATS
+    assert mcq_exp_mod.resolve_formats("v1") == ("v1",)
+    assert mcq_exp_mod.resolve_formats("v2_chat_system") == ("v2_chat_system",)
+
+
+def test_dual_format_expansion_emits_28_invocations(mcq_exp_mod) -> None:
+    survivors = [
+        (
+            m,
+            mcq_exp_mod.permutation_strategy_for_model(m),
+            5,
+        )
+        for m in mcq_exp_mod.ALL_14_MODELS
+    ]
+    plans = mcq_exp_mod.build_invocation_plans(survivors, formats=DEFAULT_FORMATS)
+    assert len(plans) == 28
+    assert {p.prompt_template_version for p in plans} == {"v1", "v2_chat_system"}
+    assert all("__v1" in p.node_id or "__v2_chat_system" in p.node_id for p in plans)
 
 
 def test_probe_report_json_roundtrip(mcq_exp_mod) -> None:
@@ -213,6 +240,8 @@ async def test_skip_probe_missing_file_aborts(mcq_exp_mod, monkeypatch: pytest.M
             request_group_id=None,
             base_run_key=None,
             dry_run=True,
+            formats="both",
+            smoke=False,
         )
     )
     assert rc == 1
@@ -267,6 +296,8 @@ async def test_skip_probe_stale_aborts(
             request_group_id=None,
             base_run_key=None,
             dry_run=True,
+            formats="both",
+            smoke=False,
         )
     )
     assert rc == 1
@@ -305,6 +336,8 @@ async def test_max_spend_halt(mcq_exp_mod, monkeypatch: pytest.MonkeyPatch, tmp_
             request_group_id=None,
             base_run_key=None,
             dry_run=False,
+            formats="both",
+            smoke=False,
         )
     )
     assert rc == 1
@@ -343,6 +376,8 @@ async def test_max_runtime_halt(mcq_exp_mod, monkeypatch: pytest.MonkeyPatch, tm
             request_group_id=None,
             base_run_key=None,
             dry_run=False,
+            formats="both",
+            smoke=False,
         )
     )
     assert rc == 1
@@ -389,6 +424,8 @@ async def test_probe_excluded_threshold_halt(mcq_exp_mod, monkeypatch: pytest.Mo
             request_group_id=None,
             base_run_key=None,
             dry_run=False,
+            formats="both",
+            smoke=False,
         )
     )
     assert rc == 1
@@ -419,6 +456,8 @@ async def test_dry_run_skips_execute(
             request_group_id=None,
             base_run_key=None,
             dry_run=True,
+            formats="both",
+            smoke=False,
         )
     )
     assert rc == 0
@@ -426,7 +465,138 @@ async def test_dry_run_skips_execute(
 
 
 @pytest.mark.asyncio
-async def test_continue_on_failure_second_invocation_raises(
+async def test_smoke_flag_runs_one_model_two_formats_in_dry_run(
+    mcq_exp_mod,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/db.sqlite")
+
+    async def _fake_probe(models, _ceilings, **_kw):
+        assert list(models) == [mcq_exp_mod.SMOKE_MODEL_ID]
+        return {
+            mcq_exp_mod.SMOKE_MODEL_ID: ProbeResult(
+                model=mcq_exp_mod.SMOKE_MODEL_ID,
+                resolved_concurrency=2,
+                excluded_reason=None,
+                reachability_outcome="ok",
+                tier_stats=tuple(),
+            )
+        }
+
+    monkeypatch.setattr(mcq_exp_mod, "probe_rate_limits_per_model", _fake_probe)
+
+    rc = await mcq_exp_mod.run_experiment_async(
+        argparse.Namespace(
+            experiment_label="smoke",
+            imported_run_id=1049,
+            max_questions=45,
+            skip_probe=False,
+            probe_max_age_hours=24.0,
+            probe_report_path=str(tmp_path / "probe_out.md"),
+            max_spend=1e12,
+            max_runtime_hours=1e12,
+            catalog_path=str(tmp_path / "noop.json"),
+            request_group_id=None,
+            base_run_key=None,
+            dry_run=True,
+            formats="v1",
+            smoke=True,
+        )
+    )
+    assert rc == 0
+    stdout = capsys.readouterr().out
+    assert "planned_invocations_count=2" in stdout
+    assert "strategy=single_latin_square_5" in stdout
+    assert "format=v1" in stdout
+    assert "format=v2_chat_system" in stdout
+
+
+@pytest.mark.asyncio
+async def test_parallel_fanout_uses_asyncio_gather(
+    mcq_exp_mod,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/db.sqlite")
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.chdir(tmp_path)
+
+    db_path = tmp_path / "db.sqlite"
+    db_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", db_url)
+
+    db = DatabaseConnectionV2(db_url, enable_pgvector=False)
+    db.init_db()
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        ms = MethodService(repo)
+        register_inference_methods(ms)
+        gid = repo.create_group(
+            group_type="analysis_request",
+            name="mcq-gather",
+            metadata_json={},
+        )
+        imported_id = _seed_imported_dataset(repo, gid, artifact_dir)
+
+    async def _fake_probe(_models, _ceilings, **_kw):
+        return {
+            m: ProbeResult(
+                model=m,
+                resolved_concurrency=1,
+                excluded_reason=None,
+                reachability_outcome="ok",
+                tier_stats=tuple(),
+            )
+            for m in mcq_exp_mod.ALL_14_MODELS
+        }
+
+    monkeypatch.setattr(mcq_exp_mod, "probe_rate_limits_per_model", _fake_probe)
+
+    gather_sizes: list[int] = []
+    real_gather = asyncio.gather
+
+    async def _spy_gather(*aws, **kwargs):
+        gather_sizes.append(len(aws))
+        return await real_gather(*aws, **kwargs)
+
+    monkeypatch.setattr(mcq_exp_mod.asyncio, "gather", _spy_gather)
+
+    async def _fake_execute(_self, **_kwargs):
+        return SimpleNamespace(
+            run_id=99,
+            reused=False,
+            run_key="rk",
+        )
+
+    monkeypatch.setattr(MethodExecutionService, "execute", _fake_execute)
+
+    rc = await mcq_exp_mod.run_experiment_async(
+        argparse.Namespace(
+            experiment_label="gather",
+            imported_run_id=int(imported_id),
+            max_questions=1,
+            skip_probe=False,
+            probe_max_age_hours=24.0,
+            probe_report_path=str(tmp_path / "probe_out.md"),
+            max_spend=1e12,
+            max_runtime_hours=1e12,
+            catalog_path=str(tmp_path / "noop.json"),
+            request_group_id=int(gid),
+            base_run_key="bk_gather",
+            dry_run=False,
+            formats="both",
+            smoke=False,
+        )
+    )
+    assert rc == 0
+    assert 28 in gather_sizes
+
+
+@pytest.mark.asyncio
+async def test_failure_isolation_does_not_cancel_other_parallel_invocations(
     mcq_exp_mod,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -495,11 +665,14 @@ async def test_continue_on_failure_second_invocation_raises(
             request_group_id=int(gid),
             base_run_key="bk_test",
             dry_run=False,
+            formats="both",
+            smoke=False,
         )
     )
     assert rc == 2
-    assert len(calls) == 14
-    assert calls[1] == "anthracite-org_magnum-v4-72b"
+    assert len(calls) == 28
+    assert any(node.endswith("__v1") for node in calls)
+    assert any(node.endswith("__v2_chat_system") for node in calls)
 
 
 def test_main_help_exits_zero() -> None:

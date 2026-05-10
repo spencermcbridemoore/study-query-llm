@@ -407,6 +407,7 @@ async def test_runner_minimal_end_to_end_writes_parquet_artifact(
         assert out.output_json["row_count"] == 5
         assert out.output_json["question_count"] == 1
         assert len(provider.calls) == 5
+        assert all("system_prompt" not in call["kwargs"] for call in provider.calls)
 
         artifact_service = ArtifactService(repository=repo, artifact_dir=artifact_dir)
         artifact_bytes = artifact_service.storage.read_from_uri(str(out.result_ref))
@@ -415,6 +416,75 @@ async def test_runner_minimal_end_to_end_writes_parquet_artifact(
         assert set(artifact_frame["item_id"].astype(int)) == {101}
         assert set(artifact_frame["error"].dropna().astype(str)) == set()
         assert set(artifact_frame["rate_limit_retry_count"].astype(int)) == {0}
+
+
+@pytest.mark.asyncio
+async def test_runner_threads_system_prompt_when_present(
+    db_connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.chdir(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+
+    frame = _build_midterm_like_frame()
+
+    with db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        request_group_id = int(
+            repo.create_group(
+                group_type="analysis_request",
+                name="mcq-logprob-system-prompt-test",
+                metadata_json={},
+            )
+        )
+        imported_run_id = _seed_imported_run(
+            repo=repo,
+            request_group_id=request_group_id,
+            artifact_dir=artifact_dir,
+            frame=frame,
+        )
+
+        provider = _CapturingProvider()
+        from study_query_llm.providers.factory import ProviderFactory
+
+        monkeypatch.setattr(
+            ProviderFactory,
+            "create_chat_provider",
+            lambda _self, provider_name, model: provider,
+        )
+
+        context = MethodRunnerContext(
+            repository=repo,
+            request_group_id=int(request_group_id),
+            source_group_id=int(request_group_id),
+            method_name="inference.mcq_logprob.basic",
+            method_version="0.1",
+            run_key="rk",
+            imported_run_id=int(imported_run_id),
+            imported_run_metadata={
+                "dataset_name": "midterm2_questions",
+                "dataset_version": "v1",
+            },
+        )
+        system_prompt = "Reply with exactly one letter."
+        out = await run_mcq_logprob_basic(
+            {
+                "provider": "openrouter",
+                "model": "openai/gpt-4o-mini",
+                "permutation_strategy": "single_latin_square_5",
+                "format_idx": 0,
+                "concurrency_cap": 2,
+                "max_questions": 1,
+                "system_prompt": system_prompt,
+            },
+            context,
+        )
+
+        assert out.output_json["row_count"] == 5
+        assert len(provider.calls) == 5
+        assert all(call["kwargs"].get("system_prompt") == system_prompt for call in provider.calls)
 
 
 @pytest.mark.asyncio

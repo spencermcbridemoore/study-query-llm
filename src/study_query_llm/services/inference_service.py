@@ -117,6 +117,7 @@ class InferenceService:
         max_tokens: Optional[int] = None,
         template: Optional[str] = None,
         batch_id: Optional[str] = None,
+        system_prompt: Optional[str] = None,
         **kwargs: Any,
     ) -> dict:
         """
@@ -131,6 +132,7 @@ class InferenceService:
             max_tokens: Maximum tokens to generate (None = provider default)
             template: Optional template to wrap prompt (e.g., "You are a tutor. {user_input}")
             batch_id: Optional UUID string to group this run with others in a batch
+            system_prompt: Optional system instruction for chat-style providers
             **kwargs: Additional provider-specific parameters
 
         Returns:
@@ -170,16 +172,23 @@ class InferenceService:
 
         # Build request_json for logging (before call, in case it fails)
         request_json = self._build_request_json(
-            original_prompt, temperature, max_tokens, template
+            original_prompt,
+            temperature,
+            max_tokens,
+            template,
+            system_prompt=system_prompt,
         )
 
         # Call the provider with retry logic
         try:
+            provider_kwargs = dict(kwargs or {})
+            if system_prompt is not None:
+                provider_kwargs["system_prompt"] = system_prompt
             provider_response: ProviderResponse = await self._call_with_retry(
                 prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                **kwargs
+                **provider_kwargs
             )
         except Exception as e:
             # Log failure to v2 database if repository provided
@@ -262,6 +271,7 @@ class InferenceService:
                     max_tokens,
                     template,
                     batch_id,
+                    system_prompt,
                 )
                 
                 result['id'] = persistence_result['id']
@@ -452,6 +462,7 @@ class InferenceService:
         temperature: float,
         max_tokens: Optional[int] = None,
         template: Optional[str] = None,
+        system_prompt: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Build the request_json dictionary for database logging.
@@ -461,6 +472,7 @@ class InferenceService:
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate (optional)
             template: Optional template string (optional)
+            system_prompt: Optional system prompt string for chat providers
 
         Returns:
             Dictionary containing request parameters for logging
@@ -473,6 +485,8 @@ class InferenceService:
             request_json['max_tokens'] = max_tokens
         if template:
             request_json['template'] = template
+        if system_prompt is not None:
+            request_json['system_prompt'] = system_prompt
         return request_json
 
     def _find_or_create_batch_group(
@@ -522,6 +536,7 @@ class InferenceService:
         max_tokens: Optional[int],
         template: Optional[str],
         batch_id: Optional[str],
+        system_prompt: Optional[str],
     ) -> dict[str, Any]:
         """
         Persist successful inference result to database.
@@ -533,13 +548,18 @@ class InferenceService:
             max_tokens: Maximum tokens used (optional)
             template: Template string used (optional)
             batch_id: Optional batch ID for grouping
+            system_prompt: Optional system prompt used for chat providers
 
         Returns:
             Dictionary with 'id' and optionally 'group_id' and 'batch_id' keys
         """
         # Build request_json
         request_json = self._build_request_json(
-            original_prompt, temperature, max_tokens, template
+            original_prompt,
+            temperature,
+            max_tokens,
+            template,
+            system_prompt=system_prompt,
         )
         
         # Build response_json

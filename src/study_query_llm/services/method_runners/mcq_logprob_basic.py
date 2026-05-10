@@ -91,6 +91,7 @@ class McqLogprobBasicParams(BaseModel):
     concurrency_cap: int = Field(default=10, ge=1, le=100)
     top_logprobs: int = Field(default=20, ge=1, le=20)
     max_questions: int | None = Field(default=None, ge=1)
+    system_prompt: str | None = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -102,6 +103,14 @@ class McqLogprobBasicParams(BaseModel):
         if not text:
             raise ValueError("value must be non-empty")
         return text
+
+    @field_validator("system_prompt")
+    @classmethod
+    def _normalize_optional_system_prompt(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
 
 @dataclass(frozen=True)
@@ -347,6 +356,7 @@ async def _run_inference_with_429_retry(
     service: InferenceService,
     prompt: str,
     top_logprobs: int,
+    system_prompt: str | None = None,
     sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> InferenceAttemptOutcome:
     """Run one inference with explicit 429/5xx/timeout policy."""
@@ -361,6 +371,7 @@ async def _run_inference_with_429_retry(
                 prompt=prompt,
                 temperature=0.0,
                 max_tokens=1,
+                system_prompt=system_prompt,
                 logprobs=True,
                 top_logprobs=int(top_logprobs),
             )
@@ -602,6 +613,7 @@ async def run_mcq_logprob_basic(
                 service=service,
                 prompt=prompt,
                 top_logprobs=int(parsed.top_logprobs),
+                system_prompt=parsed.system_prompt,
             )
 
         if outcome.inference_result is None:

@@ -48,3 +48,22 @@ async def test_run_inference_forwards_provider_kwargs():
     assert kwargs["logprobs"] is True
     assert kwargs["top_logprobs"] == 4
 
+
+@pytest.mark.asyncio
+async def test_run_inference_forwards_system_prompt():
+    """InferenceService should thread system_prompt to provider.complete()."""
+    provider = _CapturingProvider()
+    service = InferenceService(provider=provider, repository=None)
+    out = await service.run_inference(
+        prompt="hello",
+        temperature=0.0,
+        max_tokens=4,
+        system_prompt="Reply with one letter only.",
+    )
+    assert out["response"] == "ok"
+    assert len(provider.calls) == 1
+    kwargs = provider.calls[0]["kwargs"]
+    assert kwargs["temperature"] == 0.0
+    assert kwargs["max_tokens"] == 4
+    assert kwargs["system_prompt"] == "Reply with one letter only."
+

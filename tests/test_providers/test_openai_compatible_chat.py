@@ -76,6 +76,44 @@ async def test_complete_passes_model_from_constructor(provider):
 
     call_kwargs = provider._mock_client.chat.completions.create.call_args
     assert call_kwargs.kwargs["model"] == "llama3.1:8b"
+    assert call_kwargs.kwargs["messages"] == [{"role": "user", "content": "test prompt"}]
+
+
+@pytest.mark.asyncio
+async def test_complete_prepends_system_prompt_message(provider):
+    """system_prompt is encoded as a leading system chat message."""
+    provider._mock_client.chat.completions.create = AsyncMock(
+        return_value=_mock_chat_response()
+    )
+
+    result = await provider.complete(
+        "test prompt",
+        system_prompt="Reply with one letter only.",
+    )
+
+    call_kwargs = provider._mock_client.chat.completions.create.call_args
+    assert call_kwargs.kwargs["messages"] == [
+        {"role": "system", "content": "Reply with one letter only."},
+        {"role": "user", "content": "test prompt"},
+    ]
+    assert "system_prompt" not in call_kwargs.kwargs
+    assert "system_prompt" not in result.metadata["forwarded_param_keys"]
+
+
+@pytest.mark.asyncio
+async def test_complete_omits_blank_system_prompt(provider):
+    """Blank/whitespace system prompt should preserve user-only behavior."""
+    provider._mock_client.chat.completions.create = AsyncMock(
+        return_value=_mock_chat_response()
+    )
+
+    await provider.complete(
+        "test prompt",
+        system_prompt="   ",
+    )
+
+    call_kwargs = provider._mock_client.chat.completions.create.call_args
+    assert call_kwargs.kwargs["messages"] == [{"role": "user", "content": "test prompt"}]
 
 
 @pytest.mark.asyncio

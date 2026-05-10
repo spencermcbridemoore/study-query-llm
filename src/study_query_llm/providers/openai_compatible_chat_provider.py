@@ -67,6 +67,7 @@ class OpenAICompatibleChatProvider(BaseLLMProvider):
         prompt: str,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        system_prompt: Optional[str] = None,
         **kwargs: Any,
     ) -> ProviderResponse:
         """Send a chat completion request.
@@ -84,14 +85,26 @@ class OpenAICompatibleChatProvider(BaseLLMProvider):
         """
         start_time = time.time()
 
+        extra_params = dict(kwargs or {})
+        if system_prompt is None and "system_prompt" in extra_params:
+            system_prompt = extra_params.pop("system_prompt")
+        else:
+            extra_params.pop("system_prompt", None)
+
+        system_prompt_text = (
+            str(system_prompt).strip() if system_prompt is not None else ""
+        )
+        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        if system_prompt_text:
+            messages.insert(0, {"role": "system", "content": system_prompt_text})
+
         params: dict[str, Any] = {
             "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "temperature": temperature,
         }
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
-        extra_params = dict(kwargs or {})
 
         # Guard core envelope fields; provider-specific controls can pass through.
         for blocked_key in ("model", "messages"):

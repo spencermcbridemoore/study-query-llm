@@ -7,6 +7,7 @@ import asyncio
 import importlib.util
 import io
 import os
+import re
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -511,6 +512,102 @@ async def test_smoke_flag_runs_one_model_two_formats_in_dry_run(
     assert "strategy=single_latin_square_5" in stdout
     assert "format=v1" in stdout
     assert "format=v2_chat_system" in stdout
+
+
+@pytest.mark.asyncio
+async def test_dry_run_skips_already_completed_run_keys_and_reduces_spend(
+    mcq_exp_mod,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/db.sqlite")
+
+    async def _fake_probe(_models, _ceilings, **_kw):
+        return {
+            m: ProbeResult(
+                model=m,
+                resolved_concurrency=1,
+                excluded_reason=None,
+                reachability_outcome="ok",
+                tier_stats=tuple(),
+            )
+            for m in mcq_exp_mod.ALL_14_MODELS
+        }
+
+    monkeypatch.setattr(mcq_exp_mod, "probe_rate_limits_per_model", _fake_probe)
+
+    survivors = [
+        (
+            m,
+            mcq_exp_mod.permutation_strategy_for_model(m),
+            1,
+        )
+        for m in mcq_exp_mod.ALL_14_MODELS
+    ]
+    plans = mcq_exp_mod.build_invocation_plans(survivors, formats=DEFAULT_FORMATS)
+    base_run_key = "bk_skip_prefight"
+    run_keys = [
+        mcq_exp_mod.compose_method_run_key(
+            base_run_key=base_run_key,
+            method_name=mcq_exp_mod.METHOD_NAME,
+            method_version=mcq_exp_mod.METHOD_VERSION,
+            node_id=plan.node_id,
+            invocation_id=None,
+        )
+        for plan in plans
+    ]
+    skipped_run_keys = set(run_keys[:3])
+
+    def _fake_completed_run_keys(*, db, experiment_label):
+        assert db is not None
+        assert experiment_label == "skip-test"
+        return skipped_run_keys
+
+    monkeypatch.setattr(
+        mcq_exp_mod,
+        "load_completed_execution_run_keys",
+        _fake_completed_run_keys,
+    )
+
+    rc = await mcq_exp_mod.run_experiment_async(
+        argparse.Namespace(
+            experiment_label="skip-test",
+            imported_run_id=1049,
+            max_questions=1,
+            skip_probe=False,
+            probe_max_age_hours=24.0,
+            probe_report_path=str(tmp_path / "probe_out.md"),
+            max_spend=1e12,
+            max_runtime_hours=1e12,
+            catalog_path=str(tmp_path / "noop.json"),
+            request_group_id=None,
+            base_run_key=base_run_key,
+            dry_run=True,
+            formats="both",
+            smoke=False,
+        )
+    )
+    assert rc == 0
+
+    stdout = capsys.readouterr().out
+    assert "planned_invocations: 28" in stdout
+    assert "skipped_already_completed: 3" in stdout
+    assert "to_execute: 25" in stdout
+
+    remaining_plans = [plan for plan, run_key in zip(plans, run_keys) if run_key not in skipped_run_keys]
+    full_spend = mcq_exp_mod.estimate_total_spend_usd(plans, catalog={}, max_questions=1)
+    reduced_spend = mcq_exp_mod.estimate_total_spend_usd(
+        remaining_plans,
+        catalog={},
+        max_questions=1,
+    )
+    assert reduced_spend < full_spend
+
+    match = re.search(r"estimated_spend_usd=([0-9]+(?:\.[0-9]+)?)", stdout)
+    assert match is not None
+    observed_spend = float(match.group(1))
+    assert observed_spend == pytest.approx(reduced_spend, rel=1e-6, abs=1e-6)
 
 
 @pytest.mark.asyncio

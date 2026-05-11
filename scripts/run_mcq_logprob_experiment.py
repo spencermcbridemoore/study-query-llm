@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Literal, Mapping, NamedTuple, Optional, Sequence
 
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -26,7 +27,10 @@ from study_query_llm.algorithms.inference_methods import register_inference_meth
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.db.write_intent import default_write_intent_for_connection
-from study_query_llm.services.method_execution_service import MethodExecutionService
+from study_query_llm.services.method_execution_service import (
+    MethodExecutionService,
+    compose_method_run_key,
+)
 from study_query_llm.services.method_runners.mcq_logprob_basic import (
     ProbeResult,
     ProbeTierStats,
@@ -139,6 +143,12 @@ class InvocationPlan(NamedTuple):
     node_id: str
 
 
+class PreparedInvocation(NamedTuple):
+    invocation: InvocationPlan
+    parameters: dict[str, Any]
+    run_key: str
+
+
 class InvocationOutcome(NamedTuple):
     invocation: InvocationPlan
     status: Literal["success", "failure", "skipped"]
@@ -243,6 +253,100 @@ def build_invocation_plans(
                 )
             )
     return plans
+
+
+def build_invocation_parameters(
+    *,
+    plan: InvocationPlan,
+    max_questions: int,
+    imported_run_id: int,
+    experiment_label: str,
+) -> dict[str, Any]:
+    return {
+        "provider": PROVIDER,
+        "model": plan.model_id,
+        "permutation_strategy": plan.strategy,
+        "format_idx": 0,
+        "concurrency_cap": int(plan.concurrency_cap),
+        "max_questions": int(max_questions),
+        "top_logprobs": INFERENCE_TOP_LOGPROBS,
+        "system_prompt": plan.system_prompt,
+        "prompt_template_version": plan.prompt_template_version,
+        "metadata": {
+            "experiment_label": str(experiment_label),
+            "dataset_name": "midterm2_questions",
+            "dataset_version": "v1",
+            "imported_run_id": int(imported_run_id),
+            "permutation_strategy": plan.strategy,
+        },
+    }
+
+
+def prepare_invocations(
+    plans: Sequence[InvocationPlan],
+    *,
+    base_run_key: str,
+    max_questions: int,
+    imported_run_id: int,
+    experiment_label: str,
+) -> list[PreparedInvocation]:
+    out: list[PreparedInvocation] = []
+    for plan in plans:
+        params = build_invocation_parameters(
+            plan=plan,
+            max_questions=max_questions,
+            imported_run_id=int(imported_run_id),
+            experiment_label=str(experiment_label),
+        )
+        run_key = compose_method_run_key(
+            base_run_key=str(base_run_key),
+            method_name=METHOD_NAME,
+            method_version=METHOD_VERSION,
+            node_id=plan.node_id,
+            invocation_id=None,
+        )
+        out.append(
+            PreparedInvocation(
+                invocation=plan,
+                parameters=params,
+                run_key=run_key,
+            )
+        )
+    return out
+
+
+def load_completed_execution_run_keys(
+    *,
+    db: DatabaseConnectionV2,
+    experiment_label: str,
+) -> set[str]:
+    postgres_query = text(
+        """
+        SELECT run_key
+        FROM provenanced_runs
+        WHERE metadata_json->>'experiment_label' = :experiment_label
+          AND run_kind = 'execution'
+          AND run_status = 'completed'
+        """
+    )
+    sqlite_query = text(
+        """
+        SELECT run_key
+        FROM provenanced_runs
+        WHERE json_extract(metadata_json, '$.experiment_label') = :experiment_label
+          AND run_kind = 'execution'
+          AND run_status = 'completed'
+        """
+    )
+    with db.session_scope() as session:
+        bind = session.get_bind()
+        dialect_name = str(getattr(getattr(bind, "dialect", None), "name", "")).lower()
+        query = sqlite_query if dialect_name == "sqlite" else postgres_query
+        rows = session.execute(
+            query,
+            {"experiment_label": str(experiment_label)},
+        ).fetchall()
+    return {str(row[0]) for row in rows if row and row[0]}
 
 
 def load_catalog_pricing_usd_per_token(
@@ -646,13 +750,45 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
         )
         return 1
 
-    spend = estimate_total_spend_usd(
+    base_run_key = args.base_run_key or f"mcq_logprob__{_slug(args.experiment_label)}"
+    prepared_invocations = prepare_invocations(
         invocation_plans,
+        base_run_key=base_run_key,
+        max_questions=max_questions,
+        imported_run_id=int(args.imported_run_id),
+        experiment_label=str(args.experiment_label),
+    )
+    completed_run_keys = load_completed_execution_run_keys(
+        db=db,
+        experiment_label=str(args.experiment_label),
+    )
+    skipped_precompleted = [
+        prepared
+        for prepared in prepared_invocations
+        if prepared.run_key in completed_run_keys
+    ]
+    invocations_to_execute = [
+        prepared
+        for prepared in prepared_invocations
+        if prepared.run_key not in completed_run_keys
+    ]
+    invocation_plans_to_execute = [
+        prepared.invocation for prepared in invocations_to_execute
+    ]
+
+    print(f"planned_invocations: {len(prepared_invocations)}")
+    print(f"skipped_already_completed: {len(skipped_precompleted)}")
+    for prepared in skipped_precompleted:
+        print(f"  - skipped_already_completed run_key={prepared.run_key}")
+    print(f"to_execute: {len(invocations_to_execute)}")
+
+    spend = estimate_total_spend_usd(
+        invocation_plans_to_execute,
         catalog=catalog_pricing,
         max_questions=max_questions,
     )
     runtime_h = estimate_total_runtime_hours(
-        invocation_plans,
+        invocation_plans_to_execute,
         max_questions=max_questions,
     )
 
@@ -672,8 +808,6 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
             )
             return 1
 
-    base_run_key = args.base_run_key or f"mcq_logprob__{_slug(args.experiment_label)}"
-
     if args.dry_run:
         print("dry-run: no MethodExecutionService.execute calls")
         print(f"request_group_id={'<new>' if args.request_group_id is None else args.request_group_id}")
@@ -684,15 +818,23 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
         print(f"max_questions={max_questions}")
         print(f"estimated_spend_usd={spend:.6f}")
         print(f"estimated_runtime_hours={runtime_h:.6f}")
-        print(f"planned_invocations_count={len(invocation_plans)}")
+        print(f"planned_invocations_count={len(prepared_invocations)}")
+        print(f"to_execute_count={len(invocations_to_execute)}")
         print("planned_invocations:")
-        for plan in invocation_plans:
+        for prepared in invocations_to_execute:
+            plan = prepared.invocation
             print(
                 "  - "
                 f"model={plan.model_id} strategy={plan.strategy} "
                 f"format={plan.prompt_template_version} concurrency_cap={plan.concurrency_cap} "
                 f"node_id={plan.node_id}"
             )
+        return 0
+
+    if not invocations_to_execute:
+        print("INFO: no pending invocations after completed-run-key preflight skip.")
+        print(f"request_group_id={'<none>' if args.request_group_id is None else args.request_group_id}")
+        print(f"base_run_key={base_run_key}")
         return 0
 
     with db.session_scope() as session:
@@ -718,35 +860,18 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
                 )
             )
 
-    async def execute_one(plan: InvocationPlan) -> InvocationOutcome:
+    async def execute_one(prepared: PreparedInvocation) -> InvocationOutcome:
+        plan = prepared.invocation
         try:
             with db.session_scope() as task_session:
                 task_repo = RawCallRepository(task_session)
                 execution = MethodExecutionService(task_repo)
-                params = {
-                    "provider": PROVIDER,
-                    "model": plan.model_id,
-                    "permutation_strategy": plan.strategy,
-                    "format_idx": 0,
-                    "concurrency_cap": int(plan.concurrency_cap),
-                    "max_questions": max_questions,
-                    "top_logprobs": INFERENCE_TOP_LOGPROBS,
-                    "system_prompt": plan.system_prompt,
-                    "prompt_template_version": plan.prompt_template_version,
-                    "metadata": {
-                        "experiment_label": args.experiment_label,
-                        "dataset_name": "midterm2_questions",
-                        "dataset_version": "v1",
-                        "imported_run_id": int(args.imported_run_id),
-                        "permutation_strategy": plan.strategy,
-                    },
-                }
                 outcome = await execution.execute(
                     request_group_id=int(request_group_id),
                     base_run_key=base_run_key,
                     method_name=METHOD_NAME,
                     method_version=METHOD_VERSION,
-                    parameters=params,
+                    parameters=dict(prepared.parameters),
                     source_group_id=int(request_group_id),
                     imported_run_id=int(args.imported_run_id),
                     node_id=plan.node_id,
@@ -765,7 +890,9 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
                 error=str(exc),
             )
 
-    outcomes = await asyncio.gather(*(execute_one(plan) for plan in invocation_plans))
+    outcomes = await asyncio.gather(
+        *(execute_one(prepared) for prepared in invocations_to_execute)
+    )
     failures: list[str] = []
     for outcome in outcomes:
         if outcome.status == "success":

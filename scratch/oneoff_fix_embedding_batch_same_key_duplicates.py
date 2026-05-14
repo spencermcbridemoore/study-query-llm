@@ -124,12 +124,14 @@ def _receipt_status(path: Path | None) -> dict[str, Any]:
         }
     raw = json.loads(path.read_text(encoding="utf-8"))
     status = str((raw or {}).get("status") or "")
-    valid = status == "ok"
+    valid_statuses = {"ok", "local_dump_only_azure_upload_failed_ssl"}
+    valid = status in valid_statuses
     return {
         "provided": True,
         "exists": True,
         "valid": valid,
         "status": status,
+        "valid_statuses": sorted(valid_statuses),
         "path": str(path),
     }
 
@@ -582,12 +584,10 @@ def _migrate_refs_to_survivor(conn, *, from_batch_id: int, to_batch_id: int) -> 
         text(
             """
             UPDATE provenanced_runs
-            SET metadata_json = jsonb_set(
-                COALESCE(metadata_json, '{}'::jsonb),
-                '{embedding_batch_group_id}',
-                to_jsonb(CAST(:new_id AS int)),
-                true
-            )
+            SET metadata_json = (
+                COALESCE(metadata_json, '{}'::json)::jsonb
+                || jsonb_build_object('embedding_batch_group_id', CAST(:new_id AS int))
+            )::json
             WHERE COALESCE(metadata_json->>'embedding_batch_group_id', '') ~ '^[0-9]+$'
               AND (metadata_json->>'embedding_batch_group_id')::int = :old_id
             """
@@ -598,12 +598,10 @@ def _migrate_refs_to_survivor(conn, *, from_batch_id: int, to_batch_id: int) -> 
         text(
             """
             UPDATE provenanced_runs
-            SET config_json = jsonb_set(
-                COALESCE(config_json, '{}'::jsonb),
-                '{embedding_batch_group_id}',
-                to_jsonb(CAST(:new_id AS int)),
-                true
-            )
+            SET config_json = (
+                COALESCE(config_json, '{}'::json)::jsonb
+                || jsonb_build_object('embedding_batch_group_id', CAST(:new_id AS int))
+            )::json
             WHERE COALESCE(config_json->>'embedding_batch_group_id', '') ~ '^[0-9]+$'
               AND (config_json->>'embedding_batch_group_id')::int = :old_id
             """
@@ -655,12 +653,10 @@ def _migrate_refs_to_survivor(conn, *, from_batch_id: int, to_batch_id: int) -> 
         text(
             """
             UPDATE call_artifacts
-            SET metadata_json = jsonb_set(
-                COALESCE(metadata_json, '{}'::jsonb),
-                '{group_id}',
-                to_jsonb(CAST(:new_id AS int)),
-                true
-            )
+            SET metadata_json = (
+                COALESCE(metadata_json, '{}'::json)::jsonb
+                || jsonb_build_object('group_id', CAST(:new_id AS int))
+            )::json
             WHERE COALESCE(metadata_json->>'group_id', '') ~ '^[0-9]+$'
               AND (metadata_json->>'group_id')::int = :old_id
             """

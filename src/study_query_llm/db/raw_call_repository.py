@@ -60,6 +60,19 @@ class RawCallRepository:
         """
         self.session = session
 
+    @staticmethod
+    def _coerce_utc_aware(value: datetime | None) -> datetime | None:
+        """Normalize datetime values to UTC-aware for safe comparisons.
+
+        SQLite may round-trip timezone-aware values back as naive datetimes.
+        Coerce on read boundary so internal lease logic remains unambiguous.
+        """
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
     # ========== WRITE OPERATIONS ==========
 
     def insert_raw_call(
@@ -948,7 +961,8 @@ class RawCallRepository:
             self.session.flush()
             return True
 
-        if lease.lease_owner == owner or lease.lease_expires_at <= now:
+        lease_expiry_utc = self._coerce_utc_aware(lease.lease_expires_at)
+        if lease_expiry_utc is None or lease.lease_owner == owner or lease_expiry_utc <= now:
             lease.lease_owner = owner
             lease.lease_expires_at = expires
             lease.updated_at = now
@@ -973,11 +987,17 @@ class RawCallRepository:
 
     def get_embedding_cache_lease(self, cache_key: str) -> Optional[EmbeddingCacheLease]:
         """Return current lease row if present."""
-        return (
+        lease = (
             self.session.query(EmbeddingCacheLease)
             .filter(EmbeddingCacheLease.cache_key == cache_key)
             .first()
         )
+        if lease is None:
+            return None
+        lease.lease_expires_at = self._coerce_utc_aware(lease.lease_expires_at)
+        lease.created_at = self._coerce_utc_aware(lease.created_at)
+        lease.updated_at = self._coerce_utc_aware(lease.updated_at)
+        return lease
 
     # ========== GROUP LINK OPERATIONS ==========
 

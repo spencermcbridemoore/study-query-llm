@@ -358,3 +358,35 @@ def test_get_total_count(v2_db_connection):
         
         count = repo.get_total_count()
         assert count == 5
+
+
+def test_try_acquire_embedding_cache_lease_handles_sqlite_naive_datetime(v2_db_connection):
+    """Guard against naive/aware lease-expiry comparison failures on SQLite."""
+    cache_key = "lease-naive-datetime-compare"
+
+    with v2_db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+        acquired = repo.try_acquire_embedding_cache_lease(
+            cache_key=cache_key,
+            owner="owner-a",
+            lease_seconds=60,
+        )
+        assert acquired is True
+
+    # Use a fresh session so SQLite round-trips the stored datetime value.
+    with v2_db_connection.session_scope() as session:
+        repo = RawCallRepository(session)
+
+        # Prior regression: this call raised TypeError when lease_expires_at
+        # was naive and compared against aware "now".
+        acquired_by_other_owner = repo.try_acquire_embedding_cache_lease(
+            cache_key=cache_key,
+            owner="owner-b",
+            lease_seconds=60,
+        )
+        assert acquired_by_other_owner is False
+
+        lease = repo.get_embedding_cache_lease(cache_key)
+        assert lease is not None
+        assert lease.lease_expires_at is not None
+        assert lease.lease_expires_at.tzinfo is not None

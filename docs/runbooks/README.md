@@ -2,7 +2,7 @@
 
 Status: living  
 Owner: ops-maintainers  
-Last reviewed: 2026-04-26
+Last reviewed: 2026-05-14
 
 Use this page as the **single procedural entrypoint** for operator workflows.
 
@@ -61,7 +61,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 
 ## Sweep / Orchestration
 
-- Clustering analysis backfill (two engines, sharded workers): [`BACKFILL_CLUSTERING_TWO_ENGINE_SHARDED.md`](BACKFILL_CLUSTERING_TWO_ENGINE_SHARDED.md)
+- Clustering analysis backfill (strict per-pair workers): [`BACKFILL_CLUSTERING_PER_PAIR.md`](BACKFILL_CLUSTERING_PER_PAIR.md)
 - [`docs/SWEEP_MIGRATION_RUNBOOK.md`](../SWEEP_MIGRATION_RUNBOOK.md)
 - [`docs/LANGGRAPH_JOB_EXECUTION.md`](../LANGGRAPH_JOB_EXECUTION.md)
 - [`docs/TESTING_CHECKLIST.md`](../TESTING_CHECKLIST.md)

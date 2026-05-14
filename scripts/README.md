@@ -70,7 +70,8 @@ Move set v1.3 applied the `a81cfde` triage matrix lane moves:
   `download_embedding_models.py`, `download_summarizer_models.py`,
   `fill_snapshot_embeddings_from_baseline.py`,
   `backfill_all_variant_clustering_analysis.py`,
-  `run_two_engine_backfill_sharded.py`,
+  `run_per_pair_backfill_orchestrator.py`,
+  `run_per_pair_backfill_worker.py`,
   `export_sweep_selection_curve_metrics_csv.py`
 - moved to `scripts/history/`: `export_mcq_sweep_stats.py`,
   `probe_snapshot_long_text_openrouter.py`, `run_prompt_snapshot_llama_openrouter.py`

@@ -43,7 +43,7 @@ class SnapshotLineage:
 
     @property
     def lineage_key(self) -> tuple[int, int]:
-        return (int(self.source_dataframe_group_id), int(self.snapshot_row_count))
+        return (int(self.source_dataframe_group_id), int(self.source_dataframe_row_count))
 
 
 @dataclass

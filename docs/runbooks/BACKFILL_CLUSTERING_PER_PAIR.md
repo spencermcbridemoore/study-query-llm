@@ -54,6 +54,24 @@ python scripts/living/run_per_pair_backfill_orchestrator.py `
   --accept-budget
 ```
 
+## Same-Key Embedding Batch Remediation (One-Off)
+
+When per-pair dry-run infeasible output shows `collision_multiple_batches` for
+embedding-backed lineages, run the approved one-off cleanup workflow:
+
+1. Backup gate:
+   - `python scripts/dump_postgres_for_jetstream_migration.py --from-jetstream --output "<campaign>/pre_cleanup/db/jetstream_pre_cleanup.dump"`
+   - `python scripts/backup_jetstream_full_state.py --skip-artifact-backup --dump-path "<campaign>/pre_cleanup/db/jetstream_pre_cleanup.dump" --receipt-path "<campaign>/pre_cleanup/db/backup_receipt.json"`
+2. Inventory:
+   - `python scratch/readonly_embedding_batch_duplicate_inventory.py --run-stamp <run-stamp>`
+3. Dry-run cleanup plan:
+   - `python scratch/oneoff_fix_embedding_batch_same_key_duplicates.py --dry-run --run-stamp <run-stamp> --target-lineage <sdf:entry_max> ...`
+4. Apply cleanup after operator approval:
+   - `python scratch/oneoff_fix_embedding_batch_same_key_duplicates.py --apply --run-stamp <run-stamp> --target-lineage <sdf:entry_max> ... --receipt-path "<campaign>/pre_cleanup/db/backup_receipt.json" --confirm-token APPLY_EMBEDDING_BATCH_SAME_KEY_DUPLICATES`
+
+Expected apply behavior for an approved dry-run: same in-scope set count,
+delete-candidate count, and `0` conflict/blocked sets.
+
 Optional controls:
 
 - `--halt-on-first-permanent`

@@ -62,6 +62,7 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 ## Sweep / Orchestration
 
 - Clustering analysis backfill (strict per-pair workers): [`BACKFILL_CLUSTERING_PER_PAIR.md`](BACKFILL_CLUSTERING_PER_PAIR.md)
+- One-off same-key duplicate `embedding_batch` remediation and verification: [`BACKFILL_CLUSTERING_PER_PAIR.md`](BACKFILL_CLUSTERING_PER_PAIR.md) ("Same-Key Embedding Batch Remediation (One-Off)")
 - [`docs/SWEEP_MIGRATION_RUNBOOK.md`](../SWEEP_MIGRATION_RUNBOOK.md)
 - [`docs/LANGGRAPH_JOB_EXECUTION.md`](../LANGGRAPH_JOB_EXECUTION.md)
 - [`docs/TESTING_CHECKLIST.md`](../TESTING_CHECKLIST.md)

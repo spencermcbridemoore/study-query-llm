@@ -2,7 +2,7 @@
 
 Status: living
 Owner: documentation-maintainers + pipeline maintainers  
-Last reviewed: 2026-05-02
+Last reviewed: 2026-05-14
 
 This document defines the implemented, canonical five-stage dataset pipeline and its persistence/idempotency contracts.
 
@@ -71,6 +71,11 @@ Canonical order: `acquire -> parse -> snapshot -> embed -> analyze`.
 - **Dataset key:** `dataframe:<dataframe_group_id>:full`
 - **Idempotency key:** existing `embedding_matrix` lookup over
   `(dataset_key, embedding_engine, provider, entry_max, key_version)`
+- **Concurrency/idempotency guard:** matrix-level lease single-flight via
+  `EmbeddingCacheLease` (`embed_matrix:{dataset_key}:{embedding_engine}:{provider}:{entry_max}:{key_version}`).
+  The lease holder performs a second post-acquire lookup and is the only writer
+  for a new `embedding_batch`; followers poll/reuse winner output rather than
+  creating duplicate same-key `embedding_batch` rows.
 - **Key metadata:** `source_dataframe_group_id`, `dataset_key`, `representation=full`
 
 ### Stage 5: `analyze`

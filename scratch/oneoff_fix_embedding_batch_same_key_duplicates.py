@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -130,6 +131,263 @@ def _receipt_status(path: Path | None) -> dict[str, Any]:
         "valid": valid,
         "status": status,
         "path": str(path),
+    }
+
+
+def _progress(message: str) -> None:
+    print(message, flush=True)
+
+
+def _zero_required_counts() -> dict[str, int]:
+    return {
+        "provenanced_runs_metadata_ref_count": 0,
+        "provenanced_runs_config_ref_count": 0,
+        "provenanced_runs_source_group_ref_count": 0,
+        "group_links_parent_ref_count": 0,
+        "group_links_child_ref_count": 0,
+        "call_artifacts_group_ref_count": 0,
+        "provenanced_runs_total_ref_count": 0,
+        "group_links_total_ref_count": 0,
+        "required_ref_total": 0,
+    }
+
+
+def _build_bulk_reference_index(conn, candidate_ids: list[int]) -> dict[str, Any]:
+    """Load all reference paths once and index in memory by embedding_batch id."""
+    candidate_ids_sorted = sorted({int(x) for x in candidate_ids})
+    candidate_id_set = set(candidate_ids_sorted)
+    analysis_rows_by_batch: dict[int, list[dict[str, Any]]] = {
+        batch_id: [] for batch_id in candidate_ids_sorted
+    }
+    required_counts_by_batch: dict[int, dict[str, int]] = {
+        batch_id: _zero_required_counts() for batch_id in candidate_ids_sorted
+    }
+    stats: dict[str, int] = {
+        "candidate_batch_count": len(candidate_ids_sorted),
+        "provenanced_runs_rows_scanned": 0,
+        "analysis_reference_rows_indexed": 0,
+    }
+    if not candidate_ids_sorted:
+        return {
+            "analysis_rows_by_batch": analysis_rows_by_batch,
+            "required_counts_by_batch": required_counts_by_batch,
+            "stats": stats,
+        }
+
+    _progress(
+        "loading provenanced_runs reference index in bulk "
+        f"(candidate batches={len(candidate_ids_sorted)})"
+    )
+    t0 = time.perf_counter()
+    provenanced_rows = conn.execute(
+        text(
+            """
+            SELECT
+                pr.id AS provenanced_run_id,
+                pr.run_key AS run_key,
+                pr.created_at AS created_at,
+                pr.run_status AS run_status,
+                pr.run_kind AS run_kind,
+                COALESCE(pr.metadata_json->>'execution_role', '') AS execution_role,
+                CASE
+                  WHEN COALESCE(pr.metadata_json->>'embedding_batch_group_id', '') ~ '^[0-9]+$'
+                  THEN (pr.metadata_json->>'embedding_batch_group_id')::int
+                  ELSE NULL
+                END AS metadata_batch_id,
+                CASE
+                  WHEN COALESCE(pr.config_json->>'embedding_batch_group_id', '') ~ '^[0-9]+$'
+                  THEN (pr.config_json->>'embedding_batch_group_id')::int
+                  ELSE NULL
+                END AS config_batch_id,
+                pr.source_group_id AS source_group_id,
+                COALESCE(sg.group_type, '') AS source_group_type
+            FROM provenanced_runs pr
+            LEFT JOIN groups sg ON sg.id = pr.source_group_id
+            """
+        )
+    ).mappings().all()
+    elapsed = time.perf_counter() - t0
+    stats["provenanced_runs_rows_scanned"] = int(len(provenanced_rows))
+    _progress(
+        f"loaded {len(provenanced_rows)} provenanced_runs rows in {elapsed:.2f}s"
+    )
+
+    def _is_analysis_ref_row(row: dict[str, Any]) -> bool:
+        run_status = str(row.get("run_status") or "")
+        run_kind = str(row.get("run_kind") or "")
+        execution_role = str(row.get("execution_role") or "")
+        run_key = str(row.get("run_key") or "")
+        return (
+            run_status == "completed"
+            and (
+                run_kind == "analysis_execution"
+                or (run_kind == "execution" and execution_role == "analysis_execution")
+            )
+            and not run_key.startswith("backfill_exec__")
+        )
+
+    for row in provenanced_rows:
+        row_base = {
+            "provenanced_run_id": int(row["provenanced_run_id"]),
+            "run_key": str(row.get("run_key") or ""),
+            "created_at": (
+                row["created_at"].isoformat()
+                if hasattr(row.get("created_at"), "isoformat")
+                else str(row.get("created_at") or "")
+            ),
+        }
+        metadata_batch_id = row.get("metadata_batch_id")
+        config_batch_id = row.get("config_batch_id")
+        source_group_id = row.get("source_group_id")
+        source_group_type = str(row.get("source_group_type") or "")
+        is_analysis_ref = _is_analysis_ref_row(row)
+
+        if metadata_batch_id is not None:
+            metadata_batch_id = int(metadata_batch_id)
+            if metadata_batch_id in candidate_id_set:
+                required_counts_by_batch[metadata_batch_id][
+                    "provenanced_runs_metadata_ref_count"
+                ] += 1
+                if is_analysis_ref:
+                    analysis_rows_by_batch[metadata_batch_id].append(
+                        {
+                            **row_base,
+                            "batch_id": metadata_batch_id,
+                            "ref_field": "provenanced_runs.metadata_json.embedding_batch_group_id",
+                        }
+                    )
+                    stats["analysis_reference_rows_indexed"] += 1
+
+        if config_batch_id is not None:
+            config_batch_id = int(config_batch_id)
+            if config_batch_id in candidate_id_set:
+                required_counts_by_batch[config_batch_id][
+                    "provenanced_runs_config_ref_count"
+                ] += 1
+                if is_analysis_ref:
+                    analysis_rows_by_batch[config_batch_id].append(
+                        {
+                            **row_base,
+                            "batch_id": config_batch_id,
+                            "ref_field": "provenanced_runs.config_json.embedding_batch_group_id",
+                        }
+                    )
+                    stats["analysis_reference_rows_indexed"] += 1
+
+        if (
+            source_group_id is not None
+            and source_group_type == "embedding_batch"
+            and int(source_group_id) in candidate_id_set
+        ):
+            source_group_id_int = int(source_group_id)
+            required_counts_by_batch[source_group_id_int][
+                "provenanced_runs_source_group_ref_count"
+            ] += 1
+            if is_analysis_ref:
+                analysis_rows_by_batch[source_group_id_int].append(
+                    {
+                        **row_base,
+                        "batch_id": source_group_id_int,
+                        "ref_field": "provenanced_runs.source_group_id",
+                    }
+                )
+                stats["analysis_reference_rows_indexed"] += 1
+
+    _progress(
+        "loading group_links parent reference counts in bulk "
+        f"(candidate batches={len(candidate_ids_sorted)})"
+    )
+    parent_rows = conn.execute(
+        text(
+            """
+            SELECT
+                gl.parent_group_id AS batch_id,
+                COUNT(*)::int AS ref_count
+            FROM group_links gl
+            WHERE gl.parent_group_id = ANY(:candidate_ids)
+            GROUP BY gl.parent_group_id
+            """
+        ),
+        {"candidate_ids": candidate_ids_sorted},
+    ).mappings().all()
+    for row in parent_rows:
+        batch_id = int(row["batch_id"])
+        required_counts_by_batch[batch_id]["group_links_parent_ref_count"] = int(
+            row["ref_count"]
+        )
+
+    _progress(
+        "loading group_links child reference counts in bulk "
+        f"(candidate batches={len(candidate_ids_sorted)})"
+    )
+    child_rows = conn.execute(
+        text(
+            """
+            SELECT
+                gl.child_group_id AS batch_id,
+                COUNT(*)::int AS ref_count
+            FROM group_links gl
+            WHERE gl.child_group_id = ANY(:candidate_ids)
+            GROUP BY gl.child_group_id
+            """
+        ),
+        {"candidate_ids": candidate_ids_sorted},
+    ).mappings().all()
+    for row in child_rows:
+        batch_id = int(row["batch_id"])
+        required_counts_by_batch[batch_id]["group_links_child_ref_count"] = int(
+            row["ref_count"]
+        )
+
+    _progress(
+        "loading call_artifacts group_id reference counts in bulk "
+        f"(candidate batches={len(candidate_ids_sorted)})"
+    )
+    artifact_rows = conn.execute(
+        text(
+            """
+            SELECT
+                (ca.metadata_json->>'group_id')::int AS batch_id,
+                COUNT(*)::int AS ref_count
+            FROM call_artifacts ca
+            WHERE COALESCE(ca.metadata_json->>'group_id', '') ~ '^[0-9]+$'
+              AND (ca.metadata_json->>'group_id')::int = ANY(:candidate_ids)
+            GROUP BY (ca.metadata_json->>'group_id')::int
+            """
+        ),
+        {"candidate_ids": candidate_ids_sorted},
+    ).mappings().all()
+    for row in artifact_rows:
+        batch_id = int(row["batch_id"])
+        required_counts_by_batch[batch_id]["call_artifacts_group_ref_count"] = int(
+            row["ref_count"]
+        )
+
+    for batch_id in candidate_ids_sorted:
+        counts = required_counts_by_batch[batch_id]
+        counts["provenanced_runs_total_ref_count"] = (
+            int(counts["provenanced_runs_metadata_ref_count"])
+            + int(counts["provenanced_runs_config_ref_count"])
+            + int(counts["provenanced_runs_source_group_ref_count"])
+        )
+        counts["group_links_total_ref_count"] = int(
+            counts["group_links_parent_ref_count"]
+        ) + int(counts["group_links_child_ref_count"])
+        counts["required_ref_total"] = int(counts["provenanced_runs_total_ref_count"]) + int(
+            counts["group_links_total_ref_count"]
+        )
+        analysis_rows_by_batch[batch_id].sort(
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                int(row.get("provenanced_run_id") or 0),
+                str(row.get("ref_field") or ""),
+            )
+        )
+
+    return {
+        "analysis_rows_by_batch": analysis_rows_by_batch,
+        "required_counts_by_batch": required_counts_by_batch,
+        "stats": stats,
     }
 
 
@@ -548,6 +806,18 @@ def main() -> int:
     inventory_path = _inventory_path_for(str(args.run_stamp))
     inventory_payload = _load_duplicate_inventory(inventory_path)
     inventory_sets = list(inventory_payload.get("duplicate_sets") or [])
+    target_inventory_sets = [
+        raw_set
+        for raw_set in inventory_sets
+        if _set_in_target_scope(dict(raw_set.get("group_key") or {}), target_lineages)
+    ]
+    all_candidate_ids = sorted(
+        {
+            int(batch_id)
+            for raw_set in target_inventory_sets
+            for batch_id in list(raw_set.get("batch_ids") or [])
+        }
+    )
 
     db_url = _load_database_url()
     engine = create_engine(db_url, pool_pre_ping=True)
@@ -559,17 +829,39 @@ def main() -> int:
     blocked = 0
     applied_sets = 0
 
-    for raw_set in inventory_sets:
+    with engine.connect() as conn:
+        reference_index = _build_bulk_reference_index(conn, all_candidate_ids)
+    analysis_rows_by_batch: dict[int, list[dict[str, Any]]] = dict(
+        reference_index["analysis_rows_by_batch"]
+    )
+    required_counts_by_batch: dict[int, dict[str, int]] = dict(
+        reference_index["required_counts_by_batch"]
+    )
+    reference_index_stats = dict(reference_index["stats"])
+
+    total_sets = len(target_inventory_sets)
+    for set_idx, raw_set in enumerate(target_inventory_sets, start=1):
         duplicate_set_id = str(raw_set.get("duplicate_set_id") or "")
         group_key = dict(raw_set.get("group_key") or {})
-        if not _set_in_target_scope(group_key, target_lineages):
-            continue
         candidate_ids = sorted(int(x) for x in list(raw_set.get("batch_ids") or []))
         if len(candidate_ids) <= 1:
             continue
+        _progress(
+            "duplicate set "
+            f"{set_idx}/{total_sets}: key={group_key} candidates={candidate_ids}"
+        )
 
-        with engine.connect() as conn:
-            analysis_ref_rows = _analysis_reference_rows(conn, candidate_ids)
+        analysis_ref_rows: list[dict[str, Any]] = []
+        for batch_id in candidate_ids:
+            _progress(f"checking references for batch {int(batch_id)}")
+            analysis_ref_rows.extend(list(analysis_rows_by_batch.get(int(batch_id), [])))
+        analysis_ref_rows.sort(
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                int(row.get("provenanced_run_id") or 0),
+                str(row.get("ref_field") or ""),
+            )
+        )
 
         survivor_decision = _select_survivor(
             candidate_ids=candidate_ids,
@@ -585,8 +877,7 @@ def main() -> int:
 
         candidate_reports: list[dict[str, Any]] = []
         for batch_id in candidate_ids:
-            with engine.connect() as conn:
-                ref_counts = _required_ref_counts(conn, int(batch_id))
+            ref_counts = dict(required_counts_by_batch.get(int(batch_id)) or _zero_required_counts())
             candidate_reports.append(
                 {
                     "batch_id": int(batch_id),
@@ -691,6 +982,7 @@ def main() -> int:
         "mode": mode,
         "run_stamp": str(args.run_stamp),
         "inventory_path": str(inventory_path),
+        "reference_index_stats": reference_index_stats,
         "target_lineages": [
             {"source_dataframe_group_id": int(sdf), "entry_max": int(entry)}
             for sdf, entry in sorted(target_lineages)

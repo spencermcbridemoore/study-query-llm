@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import os
+import time
 from typing import Callable
 
 import numpy as np
@@ -25,6 +27,111 @@ ARTIFACT_TYPE_EMBEDDING_MATRIX = "embedding_matrix"
 REPRESENTATION_FULL = "full"
 
 EmbeddingFetcher = Callable[..., np.ndarray]
+
+
+def _matrix_lease_key(
+    *,
+    dataset_key: str,
+    embedding_engine: str,
+    provider: str,
+    entry_max: int,
+    key_version: str,
+) -> tuple[str, str]:
+    logical_key = (
+        f"embed_matrix:{dataset_key}:{embedding_engine}:{provider}:"
+        f"{int(entry_max)}:{key_version}"
+    )
+    # EmbeddingCacheLease.cache_key is varchar(64); use stable digest key for storage.
+    digest = hashlib.sha256(logical_key.encode("utf-8")).hexdigest()
+    storage_key = f"embed_matrix:{digest}"[:64]
+    return logical_key, storage_key
+
+
+def _find_existing_matrix_result(
+    *,
+    session,
+    dataset_key: str,
+    deployment: str,
+    provider: str,
+    entry_max: int,
+    key_version: str,
+) -> StageResult | None:
+    repo = RawCallRepository(session)
+    artifacts = ArtifactService(repository=repo)
+    hit = artifacts.find_embedding_matrix_artifact(
+        dataset_key=dataset_key,
+        embedding_engine=deployment,
+        provider=provider,
+        entry_max=int(entry_max),
+        key_version=key_version,
+    )
+    if hit is None:
+        return None
+    group_id = int(hit.get("group_id") or 0)
+    artifact_uris = {"embedding_matrix.npy": str(hit["uri"])}
+    if group_id > 0:
+        artifact_uris = _collect_embedding_artifact_uris(session, group_id)
+        artifact_uris.setdefault("embedding_matrix.npy", str(hit["uri"]))
+    return StageResult(
+        stage_name="embed",
+        group_id=group_id,
+        run_id=None,
+        artifact_uris=artifact_uris,
+        metadata={
+            "reused": True,
+            "dataset_key": dataset_key,
+            "representation": REPRESENTATION_FULL,
+            "matrix_dedupe_reused": True,
+        },
+    )
+
+
+def _wait_for_matrix_winner_result(
+    *,
+    db_conn: DatabaseConnectionV2,
+    dataset_key: str,
+    deployment: str,
+    provider: str,
+    entry_max: int,
+    key_version: str,
+    lease_storage_key: str,
+    lease_logical_key: str,
+    owner: str,
+    singleflight_wait_timeout_seconds: float,
+    singleflight_poll_seconds: float,
+) -> StageResult:
+    start = time.time()
+    while (time.time() - start) < float(singleflight_wait_timeout_seconds):
+        with db_conn.session_scope() as session:
+            hit = _find_existing_matrix_result(
+                session=session,
+                dataset_key=dataset_key,
+                deployment=deployment,
+                provider=provider,
+                entry_max=entry_max,
+                key_version=key_version,
+            )
+            if hit is not None:
+                return hit
+            repo = RawCallRepository(session)
+            reacquired = repo.try_acquire_embedding_cache_lease(
+                cache_key=lease_storage_key,
+                owner=owner,
+                lease_seconds=max(1, int(singleflight_wait_timeout_seconds)),
+            )
+            if reacquired:
+                raise RuntimeError(
+                    "matrix_dedupe_timeout_reacquired_lease_before_winner_result: "
+                    f"lease_key={lease_logical_key} lease_storage_key={lease_storage_key}"
+                )
+        time.sleep(max(0.01, float(singleflight_poll_seconds)))
+    raise RuntimeError(
+        "matrix_dedupe_timeout_waiting_for_winner_result: "
+        f"lease_key={lease_logical_key} lease_storage_key={lease_storage_key} "
+        f"wait_timeout_seconds={singleflight_wait_timeout_seconds} "
+        f"dataset_key={dataset_key} "
+        f"deployment={deployment} provider={provider} entry_max={entry_max} key_version={key_version}"
+    )
 
 
 def _resolve_db(
@@ -200,124 +307,160 @@ def embed(
     initial_entry_max = int(len(texts))
 
     with db_conn.session_scope() as session:
-        repo = RawCallRepository(session)
-        artifacts = ArtifactService(repository=repo, artifact_dir=artifact_dir)
-        hit = artifacts.find_embedding_matrix_artifact(
+        existing = _find_existing_matrix_result(
+            session=session,
             dataset_key=dataset_key,
-            embedding_engine=deployment,
-            provider=provider,
-            entry_max=initial_entry_max,
-            key_version=key_version,
-        )
-        if hit is not None and not force:
-            group_id = int(hit.get("group_id") or 0)
-            artifact_uris = {"embedding_matrix.npy": str(hit["uri"])}
-            if group_id > 0:
-                artifact_uris = _collect_embedding_artifact_uris(session, group_id)
-                artifact_uris.setdefault("embedding_matrix.npy", str(hit["uri"]))
-            return StageResult(
-                stage_name="embed",
-                group_id=group_id,
-                run_id=None,
-                artifact_uris=artifact_uris,
-                metadata={
-                    "reused": True,
-                    "dataset_key": dataset_key,
-                    "representation": canonical_repr,
-                },
-            )
-
-    fetcher = embedding_fetcher or _default_embedding_fetcher
-    matrix = np.asarray(
-        fetcher(
-            texts=texts,
             deployment=deployment,
             provider=provider,
-            db=db_conn,
-            dataset_key=dataset_key,
             entry_max=initial_entry_max,
-            chunk_size=chunk_size,
-            chunk_worker_concurrency=int(chunk_worker_concurrency),
-            chunk_circuit_breaker_enabled=bool(chunk_circuit_breaker_enabled),
-            chunk_failure_fallback_threshold=int(chunk_failure_fallback_threshold),
-            max_retries=int(max_retries),
-            initial_wait=float(initial_wait),
-            max_wait=float(max_wait),
-            singleflight_lease_seconds=int(singleflight_lease_seconds),
-            singleflight_wait_timeout_seconds=float(singleflight_wait_timeout_seconds),
-            singleflight_poll_seconds=float(singleflight_poll_seconds),
-            timeout=timeout,
-        ),
-        dtype=np.float64,
+            key_version=key_version,
+        )
+        if existing is not None and not force:
+            existing.metadata["representation"] = canonical_repr
+            return existing
+
+    lease_logical_key, lease_storage_key = _matrix_lease_key(
+        dataset_key=dataset_key,
+        embedding_engine=deployment,
+        provider=provider,
+        entry_max=initial_entry_max,
+        key_version=key_version,
     )
-    if matrix.ndim != 2:
-        raise ValueError(f"embedding_fetcher returned shape {matrix.shape}, expected 2D")
-    if int(matrix.shape[0]) != len(texts):
-        raise ValueError(
-            "embedding_fetcher row count mismatch: "
-            f"{matrix.shape[0]} vectors for {len(texts)} dataframe rows"
+    owner = f"embed-matrix:{os.getpid()}:{id(dataset_key)}:{time.time_ns()}"
+    lease_holder = False
+    with db_conn.session_scope() as session:
+        repo = RawCallRepository(session)
+        lease_holder = repo.try_acquire_embedding_cache_lease(
+            cache_key=lease_storage_key,
+            owner=owner,
+            lease_seconds=max(1, int(singleflight_lease_seconds)),
         )
 
-    effective_entry_max = int(matrix.shape[0])
-
-    def _write_embedding_artifacts(
-        artifact_service: ArtifactService,
-        identity: StageIdentity,
-    ) -> dict[str, str]:
-        repo = artifact_service.repository
-        if repo is None:
-            raise RuntimeError("ArtifactService requires repository for embed stage writes")
-        matrix_artifact_id = artifact_service.store_embedding_matrix(
-            identity.group_id,
-            matrix,
+    if not lease_holder:
+        return _wait_for_matrix_winner_result(
+            db_conn=db_conn,
             dataset_key=dataset_key,
-            embedding_engine=deployment,
+            deployment=deployment,
             provider=provider,
-            entry_max=effective_entry_max,
+            entry_max=initial_entry_max,
             key_version=key_version,
-            metadata={
+            lease_storage_key=lease_storage_key,
+            lease_logical_key=lease_logical_key,
+            owner=owner,
+            singleflight_wait_timeout_seconds=singleflight_wait_timeout_seconds,
+            singleflight_poll_seconds=singleflight_poll_seconds,
+        )
+
+    try:
+        # Second lookup after lease acquisition for matrix-level single-flight dedupe.
+        with db_conn.session_scope() as session:
+            existing = _find_existing_matrix_result(
+                session=session,
+                dataset_key=dataset_key,
+                deployment=deployment,
+                provider=provider,
+                entry_max=initial_entry_max,
+                key_version=key_version,
+            )
+            if existing is not None and not force:
+                existing.metadata["representation"] = canonical_repr
+                return existing
+
+        fetcher = embedding_fetcher or _default_embedding_fetcher
+        matrix = np.asarray(
+            fetcher(
+                texts=texts,
+                deployment=deployment,
+                provider=provider,
+                db=db_conn,
+                dataset_key=dataset_key,
+                entry_max=initial_entry_max,
+                chunk_size=chunk_size,
+                chunk_worker_concurrency=int(chunk_worker_concurrency),
+                chunk_circuit_breaker_enabled=bool(chunk_circuit_breaker_enabled),
+                chunk_failure_fallback_threshold=int(chunk_failure_fallback_threshold),
+                max_retries=int(max_retries),
+                initial_wait=float(initial_wait),
+                max_wait=float(max_wait),
+                singleflight_lease_seconds=int(singleflight_lease_seconds),
+                singleflight_wait_timeout_seconds=float(singleflight_wait_timeout_seconds),
+                singleflight_poll_seconds=float(singleflight_poll_seconds),
+                timeout=timeout,
+            ),
+            dtype=np.float64,
+        )
+        if matrix.ndim != 2:
+            raise ValueError(f"embedding_fetcher returned shape {matrix.shape}, expected 2D")
+        if int(matrix.shape[0]) != len(texts):
+            raise ValueError(
+                "embedding_fetcher row count mismatch: "
+                f"{matrix.shape[0]} vectors for {len(texts)} dataframe rows"
+            )
+
+        effective_entry_max = int(matrix.shape[0])
+
+        def _write_embedding_artifacts(
+            artifact_service: ArtifactService,
+            identity: StageIdentity,
+        ) -> dict[str, str]:
+            repo = artifact_service.repository
+            if repo is None:
+                raise RuntimeError("ArtifactService requires repository for embed stage writes")
+            matrix_artifact_id = artifact_service.store_embedding_matrix(
+                identity.group_id,
+                matrix,
+                dataset_key=dataset_key,
+                embedding_engine=deployment,
+                provider=provider,
+                entry_max=effective_entry_max,
+                key_version=key_version,
+                metadata={
+                    "representation": canonical_repr,
+                    "source_dataframe_group_id": int(dataframe_group_id),
+                },
+            )
+            return {
+                "embedding_matrix.npy": _call_artifact_uri_by_id(repo, matrix_artifact_id),
+            }
+
+        result = run_stage(
+            db=db_conn,
+            stage_name="embed",
+            group_type="embedding_batch",
+            group_name=f"embed:{dataset_slug}:{dataframe_group_id}:{deployment}:{canonical_repr}",
+            group_description=f"Embedding batch for dataframe {dataframe_group_id}",
+            group_metadata={
+                "dataset_slug": dataset_slug,
+                "dataset_key": dataset_key,
                 "representation": canonical_repr,
+                "provider": provider,
+                "embedding_engine": deployment,
+                "entry_max": effective_entry_max,
+                "chunk_worker_concurrency": int(chunk_worker_concurrency),
+                "chunk_circuit_breaker_enabled": bool(chunk_circuit_breaker_enabled),
+                "chunk_failure_fallback_threshold": int(chunk_failure_fallback_threshold),
+                "key_version": key_version,
                 "source_dataframe_group_id": int(dataframe_group_id),
             },
+            depends_on_group_ids=[int(dataframe_group_id)],
+            artifact_dir=artifact_dir,
+            write_artifacts=_write_embedding_artifacts,
         )
-        return {
-            "embedding_matrix.npy": _call_artifact_uri_by_id(repo, matrix_artifact_id),
-        }
-
-    result = run_stage(
-        db=db_conn,
-        stage_name="embed",
-        group_type="embedding_batch",
-        group_name=f"embed:{dataset_slug}:{dataframe_group_id}:{deployment}:{canonical_repr}",
-        group_description=f"Embedding batch for dataframe {dataframe_group_id}",
-        group_metadata={
-            "dataset_slug": dataset_slug,
-            "dataset_key": dataset_key,
-            "representation": canonical_repr,
-            "provider": provider,
-            "embedding_engine": deployment,
-            "entry_max": effective_entry_max,
-            "chunk_worker_concurrency": int(chunk_worker_concurrency),
-            "chunk_circuit_breaker_enabled": bool(chunk_circuit_breaker_enabled),
-            "chunk_failure_fallback_threshold": int(chunk_failure_fallback_threshold),
-            "key_version": key_version,
-            "source_dataframe_group_id": int(dataframe_group_id),
-        },
-        depends_on_group_ids=[int(dataframe_group_id)],
-        artifact_dir=artifact_dir,
-        write_artifacts=_write_embedding_artifacts,
-    )
-    return StageResult(
-        stage_name=result.stage_name,
-        group_id=result.group_id,
-        run_id=result.run_id,
-        artifact_uris=result.artifact_uris,
-        metadata={
-            **result.metadata,
-            "reused": False,
-            "dataset_key": dataset_key,
-            "representation": canonical_repr,
-            "row_count": int(matrix.shape[0]),
-            "dimension": int(matrix.shape[1]) if matrix.size else 0,
-        },
-    )
+        return StageResult(
+            stage_name=result.stage_name,
+            group_id=result.group_id,
+            run_id=result.run_id,
+            artifact_uris=result.artifact_uris,
+            metadata={
+                **result.metadata,
+                "reused": False,
+                "dataset_key": dataset_key,
+                "representation": canonical_repr,
+                "row_count": int(matrix.shape[0]),
+                "dimension": int(matrix.shape[1]) if matrix.size else 0,
+            },
+        )
+    finally:
+        with db_conn.session_scope() as session:
+            repo = RawCallRepository(session)
+            repo.release_embedding_cache_lease(cache_key=lease_storage_key, owner=owner)

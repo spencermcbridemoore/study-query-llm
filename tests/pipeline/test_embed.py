@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
+import time
 
 import numpy as np
 
@@ -268,3 +271,191 @@ def test_embed_threads_runtime_knobs_to_fetcher(tmp_path: Path, monkeypatch) -> 
     assert captured["singleflight_wait_timeout_seconds"] == 22.0
     assert captured["singleflight_poll_seconds"] == 0.2
     assert captured["timeout"] == 123.0
+
+
+def test_embed_matrix_dedupe_sequential_idempotency(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _dataset_group_id, dataframe_group_id, _snapshot_group_id = _prepare_snapshot(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    calls = {"count": 0}
+
+    def fake_fetcher(**kwargs):
+        calls["count"] += 1
+        texts = kwargs["texts"]
+        return np.asarray([[float(i), float(i + 1)] for i in range(len(texts))], dtype=np.float64)
+
+    first = embed(
+        dataframe_group_id,
+        deployment="test-embedding-model",
+        provider="test-provider",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+    second = embed(
+        dataframe_group_id,
+        deployment="test-embedding-model",
+        provider="test-provider",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+
+    assert calls["count"] == 1
+    assert first.group_id == second.group_id
+    assert second.metadata["reused"] is True
+    assert second.metadata["matrix_dedupe_reused"] is True
+
+
+def test_embed_matrix_dedupe_chunked_mode_reuses_single_batch(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _dataset_group_id, dataframe_group_id, _snapshot_group_id = _prepare_snapshot(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    calls = {"count": 0}
+
+    def fake_fetcher(**kwargs):
+        calls["count"] += 1
+        assert kwargs["chunk_size"] == 2
+        texts = kwargs["texts"]
+        return np.asarray([[float(i), float(i + 1)] for i in range(len(texts))], dtype=np.float64)
+
+    first = embed(
+        dataframe_group_id,
+        deployment="test-embedding-model",
+        provider="test-provider",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+        chunk_size=2,
+    )
+    second = embed(
+        dataframe_group_id,
+        deployment="test-embedding-model",
+        provider="test-provider",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+        chunk_size=2,
+    )
+
+    assert calls["count"] == 1
+    assert first.group_id == second.group_id
+    assert second.metadata["reused"] is True
+
+
+def test_embed_matrix_dedupe_distinct_keys_produce_distinct_batches(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _dataset_group_id, dataframe_group_id, _snapshot_group_id = _prepare_snapshot(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    def fake_fetcher(**kwargs):
+        texts = kwargs["texts"]
+        return np.asarray([[float(i), float(i + 1)] for i in range(len(texts))], dtype=np.float64)
+
+    base = embed(
+        dataframe_group_id,
+        deployment="engine-a",
+        provider="provider-a",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+    changed_engine = embed(
+        dataframe_group_id,
+        deployment="engine-b",
+        provider="provider-a",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+    changed_provider = embed(
+        dataframe_group_id,
+        deployment="engine-a",
+        provider="provider-b",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+    changed_entry_max = embed(
+        dataframe_group_id,
+        deployment="engine-a",
+        provider="provider-a",
+        entry_max=2,
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+    changed_key_version = embed(
+        dataframe_group_id,
+        deployment="engine-a",
+        provider="provider-a",
+        key_version="raw_v2",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+
+    ids = {
+        int(base.group_id),
+        int(changed_engine.group_id),
+        int(changed_provider.group_id),
+        int(changed_entry_max.group_id),
+        int(changed_key_version.group_id),
+    }
+    assert len(ids) == 5
+
+
+def test_embed_matrix_dedupe_concurrent_calls_share_single_batch(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _dataset_group_id, dataframe_group_id, _snapshot_group_id = _prepare_snapshot(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+
+    calls = {"count": 0}
+    lock = threading.Lock()
+
+    def fake_fetcher(**kwargs):
+        with lock:
+            calls["count"] += 1
+        time.sleep(0.2)
+        texts = kwargs["texts"]
+        return np.asarray([[float(i), float(i + 1)] for i in range(len(texts))], dtype=np.float64)
+
+    def run_once():
+        return embed(
+            dataframe_group_id,
+            deployment="test-embedding-model",
+            provider="test-provider",
+            db=db,
+            artifact_dir=artifact_dir,
+            embedding_fetcher=fake_fetcher,
+            singleflight_wait_timeout_seconds=5.0,
+            singleflight_poll_seconds=0.05,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fut_a = pool.submit(run_once)
+        fut_b = pool.submit(run_once)
+        result_a = fut_a.result()
+        result_b = fut_b.result()
+
+    assert calls["count"] == 1
+    assert result_a.group_id == result_b.group_id
+    assert bool(result_a.metadata["reused"]) != bool(result_b.metadata["reused"])

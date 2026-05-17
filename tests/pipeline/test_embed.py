@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import threading
 import time
@@ -12,11 +13,13 @@ import numpy as np
 from study_query_llm.datasets.acquisition import FileFetchSpec
 from study_query_llm.datasets.source_specs.registry import DatasetAcquireConfig
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.models_v2 import EmbeddingCacheLease
 from study_query_llm.pipeline.acquire import acquire
-from study_query_llm.pipeline.embed import embed
+from study_query_llm.pipeline.embed import _matrix_lease_key, embed
 from study_query_llm.pipeline.parse import parse
 from study_query_llm.pipeline.snapshot import snapshot
 from study_query_llm.pipeline.types import SnapshotRow, SubquerySpec
+from study_query_llm.services.embeddings.constants import CACHE_KEY_VERSION
 
 
 def _db(tmp_path: Path) -> DatabaseConnectionV2:
@@ -459,3 +462,60 @@ def test_embed_matrix_dedupe_concurrent_calls_share_single_batch(tmp_path: Path,
     assert calls["count"] == 1
     assert result_a.group_id == result_b.group_id
     assert bool(result_a.metadata["reused"]) != bool(result_b.metadata["reused"])
+
+
+def test_embed_matrix_dedupe_takes_over_expired_lease_without_integrityerror(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    db = _db(tmp_path)
+    artifact_dir = str((tmp_path / "artifacts").resolve())
+    _dataset_group_id, dataframe_group_id, _snapshot_group_id = _prepare_snapshot(
+        db=db,
+        artifact_dir=artifact_dir,
+    )
+    dataset_key = f"dataframe:{int(dataframe_group_id)}:full"
+    _logical_key, stale_storage_key = _matrix_lease_key(
+        dataset_key=dataset_key,
+        embedding_engine="test-embedding-model",
+        provider="test-provider",
+        entry_max=3,
+        key_version=CACHE_KEY_VERSION,
+    )
+    now = datetime.now(timezone.utc)
+    with db.session_scope() as session:
+        session.add(
+            EmbeddingCacheLease(
+                cache_key=stale_storage_key,
+                lease_owner="stale-owner",
+                lease_expires_at=now - timedelta(minutes=5),
+                created_at=now - timedelta(minutes=10),
+                updated_at=now - timedelta(minutes=10),
+            )
+        )
+        session.flush()
+
+    calls = {"count": 0}
+
+    def fake_fetcher(**kwargs):
+        calls["count"] += 1
+        texts = kwargs["texts"]
+        return np.asarray([[float(i), float(i + 1)] for i in range(len(texts))], dtype=np.float64)
+
+    result = embed(
+        dataframe_group_id,
+        deployment="test-embedding-model",
+        provider="test-provider",
+        db=db,
+        artifact_dir=artifact_dir,
+        embedding_fetcher=fake_fetcher,
+    )
+    assert result.metadata["reused"] is False
+    assert calls["count"] == 1
+    with db.session_scope() as session:
+        lease = (
+            session.query(EmbeddingCacheLease)
+            .filter(EmbeddingCacheLease.cache_key == stale_storage_key)
+            .first()
+        )
+        assert lease is None

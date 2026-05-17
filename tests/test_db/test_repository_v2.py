@@ -2,6 +2,9 @@
 Tests for RawCallRepository (v2 schema).
 """
 
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
 import pytest
 from datetime import datetime, timedelta, timezone
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
@@ -390,3 +393,55 @@ def test_try_acquire_embedding_cache_lease_handles_sqlite_naive_datetime(v2_db_c
         assert lease is not None
         assert lease.lease_expires_at is not None
         assert lease.lease_expires_at.tzinfo is not None
+
+
+def test_try_acquire_embedding_cache_lease_concurrent_same_key_no_integrityerror(tmp_path):
+    """Concurrent contenders for same key should not raise uniqueness errors."""
+    db_path = (tmp_path / "lease_race.sqlite3").resolve()
+    database_url = f"sqlite:///{db_path.as_posix()}"
+    db = DatabaseConnectionV2(database_url, enable_pgvector=False)
+    db.init_db()
+    cache_key = "lease-race-same-key"
+    failures: list[str] = []
+    rounds = 100
+
+    for round_idx in range(rounds):
+        barrier = threading.Barrier(3)
+        lock = threading.Lock()
+        results: list[bool] = []
+
+        def _contend(owner: str) -> None:
+            try:
+                with db.session_scope() as session:
+                    repo = RawCallRepository(session)
+                    barrier.wait(timeout=5.0)
+                    acquired = repo.try_acquire_embedding_cache_lease(
+                        cache_key=cache_key,
+                        owner=owner,
+                        lease_seconds=60,
+                    )
+                    with lock:
+                        results.append(bool(acquired))
+            except Exception as exc:  # pragma: no cover - regression capture
+                with lock:
+                    failures.append(f"{type(exc).__name__}: {exc}")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_a = pool.submit(_contend, f"owner-a-{round_idx}")
+            fut_b = pool.submit(_contend, f"owner-b-{round_idx}")
+            barrier.wait(timeout=5.0)
+            fut_a.result(timeout=10.0)
+            fut_b.result(timeout=10.0)
+
+        assert failures == []
+        assert len(results) == 2
+        assert sum(1 for acquired in results if acquired) == 1
+
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            lease = repo.get_embedding_cache_lease(cache_key)
+            assert lease is not None
+            repo.release_embedding_cache_lease(
+                cache_key=cache_key,
+                owner=str(lease.lease_owner),
+            )

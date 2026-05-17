@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_, or_, cast, Float, String, text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from .models_v2 import (
     RawCall,
@@ -944,30 +946,68 @@ class RawCallRepository:
         """
         now = datetime.now(timezone.utc)
         expires = now + timedelta(seconds=max(1, int(lease_seconds)))
-        lease = (
-            self.session.query(EmbeddingCacheLease)
-            .filter(EmbeddingCacheLease.cache_key == cache_key)
-            .first()
-        )
-        if lease is None:
-            lease = EmbeddingCacheLease(
+        bind = self.session.get_bind()
+        if bind is None or bind.dialect is None:
+            raise RuntimeError("session is not bound to an engine/connection")
+        dialect_name = str(bind.dialect.name).lower()
+        if dialect_name == "sqlite":
+            # SQLite stores datetime values without tz; keep predicate/value formats aligned.
+            now_for_sql = now.replace(tzinfo=None)
+            expires_for_sql = expires.replace(tzinfo=None)
+            insert_stmt = sqlite_insert(EmbeddingCacheLease).values(
                 cache_key=cache_key,
                 lease_owner=owner,
-                lease_expires_at=expires,
-                created_at=now,
-                updated_at=now,
+                lease_expires_at=expires_for_sql,
+                created_at=now_for_sql,
+                updated_at=now_for_sql,
             )
-            self.session.add(lease)
-            self.session.flush()
+        elif dialect_name == "postgresql":
+            now_for_sql = now
+            expires_for_sql = expires
+            insert_stmt = postgresql_insert(EmbeddingCacheLease).values(
+                cache_key=cache_key,
+                lease_owner=owner,
+                lease_expires_at=expires_for_sql,
+                created_at=now_for_sql,
+                updated_at=now_for_sql,
+            )
+        else:
+            raise RuntimeError(
+                "try_acquire_embedding_cache_lease requires sqlite or postgresql dialect; "
+                f"got {dialect_name!r}"
+            )
+
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[EmbeddingCacheLease.cache_key],
+            set_={
+                "lease_owner": insert_stmt.excluded.lease_owner,
+                "lease_expires_at": insert_stmt.excluded.lease_expires_at,
+                "updated_at": insert_stmt.excluded.updated_at,
+            },
+            where=or_(
+                EmbeddingCacheLease.lease_owner == owner,
+                EmbeddingCacheLease.lease_expires_at.is_(None),
+                EmbeddingCacheLease.lease_expires_at <= now_for_sql,
+            ),
+        )
+        result = self.session.execute(upsert_stmt)
+        rowcount = int(result.rowcount or 0)
+        if rowcount > 0:
             return True
 
-        lease_expiry_utc = self._coerce_utc_aware(lease.lease_expires_at)
-        if lease_expiry_utc is None or lease.lease_owner == owner or lease_expiry_utc <= now:
-            lease.lease_owner = owner
-            lease.lease_expires_at = expires
-            lease.updated_at = now
-            self.session.flush()
-            return True
+        if rowcount < 0:
+            lease = (
+                self.session.query(EmbeddingCacheLease)
+                .filter(EmbeddingCacheLease.cache_key == cache_key)
+                .first()
+            )
+            if lease is None:
+                return False
+            lease_expiry_utc = self._coerce_utc_aware(lease.lease_expires_at)
+            return bool(
+                lease.lease_owner == owner
+                and (lease_expiry_utc is None or lease_expiry_utc >= now)
+            )
         return False
 
     def release_embedding_cache_lease(self, *, cache_key: str, owner: str) -> None:

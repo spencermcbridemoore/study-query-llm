@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import importlib.util
 import io
+import json
 import os
 import re
 import time
@@ -116,6 +117,154 @@ def _seed_imported_dataset(repo: RawCallRepository, request_group_id: int, artif
             },
         )
     )
+
+
+def test_force_permutation_strategy_applies_to_all_models(mcq_exp_mod) -> None:
+    probe_results: dict[str, ProbeResult] = {}
+    for m in mcq_exp_mod.ALL_14_MODELS:
+        probe_results[m] = ProbeResult(
+            model=m,
+            resolved_concurrency=4,
+            excluded_reason=None,
+            reachability_outcome="ok",
+            tier_stats=tuple(),
+        )
+    survivors, excluded = mcq_exp_mod.build_survivors(
+        probe_results,
+        mcq_exp_mod.ALL_14_MODELS,
+        smoke=False,
+        force_permutation_strategy="full_120",
+    )
+    assert not excluded
+    assert len(survivors) == 14
+    assert {strategy for _mid, strategy, _conc in survivors} == {"full_120"}
+
+
+def test_run_key_parameter_mismatch_detects_divergence(mcq_exp_mod) -> None:
+    row = SimpleNamespace(
+        run_status="completed",
+        config_json={
+            "parameters": {
+                "permutation_strategy": "latin_squares_25",
+                "prompt_template_version": "v1",
+            }
+        },
+        metadata_json={"imported_run_ref": {"run_id": 1049}},
+    )
+    mismatch = mcq_exp_mod.find_run_key_parameter_mismatch(
+        existing_row=row,
+        imported_run_id=2000,
+        permutation_strategy="full_120",
+        prompt_template_version="v2_chat_system",
+    )
+    assert mismatch is not None
+    assert mismatch[0] == "permutation_strategy"
+
+
+def test_load_prompt_tokens_by_format_json(mcq_exp_mod, tmp_path: Path) -> None:
+    payload = {"v1_mean": 102.0, "v2_chat_system_mean": 134.0}
+    path = tmp_path / "tokens.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded = mcq_exp_mod.load_prompt_tokens_by_format(path)
+    assert loaded[mcq_exp_mod.FORMAT_V1] == pytest.approx(102.0)
+    assert loaded[mcq_exp_mod.FORMAT_V2_CHAT_SYSTEM] == pytest.approx(134.0)
+
+
+@pytest.mark.asyncio
+async def test_run_key_mismatch_halt_before_execute(
+    mcq_exp_mod,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/db.sqlite")
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+
+    async def _fake_probe(_models, _ceilings, **_kw):
+        return {
+            mcq_exp_mod.SMOKE_MODEL_ID: ProbeResult(
+                model=mcq_exp_mod.SMOKE_MODEL_ID,
+                resolved_concurrency=2,
+                excluded_reason=None,
+                reachability_outcome="ok",
+                tier_stats=tuple(),
+            )
+        }
+
+    monkeypatch.setattr(mcq_exp_mod, "probe_rate_limits_per_model", _fake_probe)
+
+    db = DatabaseConnectionV2(f"sqlite:///{tmp_path}/db.sqlite", enable_pgvector=False)
+    db.init_db()
+    with db.session_scope() as session:
+        repo = RawCallRepository(session)
+        ms = MethodService(repo)
+        register_inference_methods(ms)
+        request_group_id = repo.create_group(
+            group_type="analysis_request",
+            name="mismatch-test",
+            metadata_json={},
+        )
+        base_run_key = "bk_mismatch"
+        plan = mcq_exp_mod._format_to_invocation(
+            model_id=mcq_exp_mod.SMOKE_MODEL_ID,
+            strategy="single_latin_square_5",
+            concurrency_cap=2,
+            format_name=mcq_exp_mod.FORMAT_V1,
+        )
+        run_key = mcq_exp_mod.compose_method_run_key(
+            base_run_key=base_run_key,
+            method_name=mcq_exp_mod.METHOD_NAME,
+            method_version=mcq_exp_mod.METHOD_VERSION,
+            node_id=plan.node_id,
+            invocation_id=None,
+        )
+        repo.create_provenanced_run(
+            run_kind="execution",
+            run_status="completed",
+            request_group_id=int(request_group_id),
+            source_group_id=int(request_group_id),
+            run_key=run_key,
+            config_json={
+                "parameters": {
+                    "permutation_strategy": "full_120",
+                    "prompt_template_version": "v1",
+                }
+            },
+            metadata_json={
+                "experiment_label": "mismatch-test",
+                "imported_run_ref": {"run_id": 9999},
+            },
+        )
+
+    spy = AsyncMock()
+
+    async def _spy_execute(_self, **_kwargs):
+        spy()
+        return SimpleNamespace(run_id=1, reused=False, run_key="rk")
+
+    monkeypatch.setattr(MethodExecutionService, "execute", _spy_execute)
+
+    rc = await mcq_exp_mod.run_experiment_async(
+        argparse.Namespace(
+            experiment_label="mismatch-test",
+            imported_run_id=1049,
+            max_questions=1,
+            skip_probe=False,
+            probe_max_age_hours=24.0,
+            probe_report_path=str(tmp_path / "probe_out.md"),
+            max_spend=1e12,
+            max_runtime_hours=1e12,
+            catalog_path=str(tmp_path / "noop.json"),
+            request_group_id=int(request_group_id),
+            base_run_key=base_run_key,
+            dry_run=False,
+            formats="both",
+            smoke=True,
+            force_permutation_strategy=None,
+            token_estimate_path=None,
+        )
+    )
+    assert rc == 1
+    spy.assert_not_called()
 
 
 def test_expected_model_roster_and_strategies(mcq_exp_mod) -> None:
@@ -559,15 +708,30 @@ async def test_dry_run_skips_already_completed_run_keys_and_reduces_spend(
     ]
     skipped_run_keys = set(run_keys[:3])
 
-    def _fake_completed_run_keys(*, db, experiment_label):
+    def _fake_completed_rows(*, db, experiment_label):
         assert db is not None
         assert experiment_label == "skip-test"
-        return skipped_run_keys
+        rows: dict[str, SimpleNamespace] = {}
+        for plan, run_key in zip(plans, run_keys):
+            if run_key not in skipped_run_keys:
+                continue
+            rows[run_key] = SimpleNamespace(
+                run_key=run_key,
+                config_json={
+                    "parameters": {
+                        "permutation_strategy": plan.strategy,
+                        "prompt_template_version": plan.prompt_template_version,
+                    }
+                },
+                metadata_json={"imported_run_ref": {"run_id": 1049}},
+                run_status="completed",
+            )
+        return rows
 
     monkeypatch.setattr(
         mcq_exp_mod,
-        "load_completed_execution_run_keys",
-        _fake_completed_run_keys,
+        "load_completed_execution_rows_by_run_key",
+        _fake_completed_rows,
     )
 
     rc = await mcq_exp_mod.run_experiment_async(

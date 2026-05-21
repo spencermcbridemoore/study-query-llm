@@ -12,6 +12,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, Mapping, NamedTuple, Optional, Sequence
 
 from dotenv import load_dotenv
@@ -175,9 +176,16 @@ def permutation_strategy_for_model(model_id: str) -> str:
     raise ValueError(f"unknown_model_not_in_phase2_roster:{model_id}")
 
 
-def permutation_strategy_for_model_mode(*, model_id: str, smoke: bool) -> str:
+def permutation_strategy_for_model_mode(
+    *,
+    model_id: str,
+    smoke: bool,
+    force_permutation_strategy: str | None = None,
+) -> str:
     if smoke and model_id == SMOKE_MODEL_ID:
         return "single_latin_square_5"
+    if force_permutation_strategy:
+        return str(force_permutation_strategy)
     return permutation_strategy_for_model(model_id)
 
 
@@ -315,14 +323,135 @@ def prepare_invocations(
     return out
 
 
+class RunKeyParameterMismatchError(RuntimeError):
+    """Raised when a completed run_key row does not match requested parameters."""
+
+
+def _coerce_json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        parsed = json.loads(value)
+        if isinstance(parsed, dict):
+            return dict(parsed)
+    return {}
+
+
+def _extract_execution_parameters(row: Any) -> dict[str, Any]:
+    config = _coerce_json_dict(getattr(row, "config_json", None))
+    params = config.get("parameters")
+    return dict(params) if isinstance(params, dict) else {}
+
+
+def find_run_key_parameter_mismatch(
+    *,
+    existing_row: Any,
+    imported_run_id: int,
+    permutation_strategy: str,
+    prompt_template_version: str,
+) -> tuple[str, Any, Any] | None:
+    """Return (field_name, stored_value, requested_value) when incompatible."""
+    if existing_row is None:
+        return None
+    if str(getattr(existing_row, "run_status", "") or "") != "completed":
+        return None
+
+    params = _extract_execution_parameters(existing_row)
+    stored_strategy = params.get("permutation_strategy")
+    if str(stored_strategy or "") != str(permutation_strategy):
+        return ("permutation_strategy", stored_strategy, permutation_strategy)
+
+    stored_format = params.get("prompt_template_version")
+    if str(stored_format or "") != str(prompt_template_version):
+        return ("prompt_template_version", stored_format, prompt_template_version)
+
+    metadata = _coerce_json_dict(getattr(existing_row, "metadata_json", None))
+    imported_ref = metadata.get("imported_run_ref")
+    imported_ref = dict(imported_ref) if isinstance(imported_ref, dict) else {}
+    stored_imported_run_id = imported_ref.get("run_id")
+    if int(stored_imported_run_id or 0) != int(imported_run_id):
+        return ("imported_run_id", stored_imported_run_id, int(imported_run_id))
+
+    return None
+
+
+def assert_run_key_parameter_compatible(
+    *,
+    existing_row: Any,
+    run_key: str,
+    imported_run_id: int,
+    permutation_strategy: str,
+    prompt_template_version: str,
+) -> None:
+    mismatch = find_run_key_parameter_mismatch(
+        existing_row=existing_row,
+        imported_run_id=int(imported_run_id),
+        permutation_strategy=str(permutation_strategy),
+        prompt_template_version=str(prompt_template_version),
+    )
+    if mismatch is None:
+        return
+    field_name, stored_value, requested_value = mismatch
+    message = (
+        f"halt:run_key_parameter_mismatch:{run_key} "
+        f"field={field_name} stored={stored_value!r} requested={requested_value!r}"
+    )
+    raise RunKeyParameterMismatchError(message)
+
+
+def load_prompt_tokens_by_format(token_estimate_path: Path | None) -> dict[str, float]:
+    if token_estimate_path is None:
+        return {}
+    path = Path(token_estimate_path).expanduser()
+    if not path.is_absolute():
+        path = (REPO_ROOT / path).resolve()
+    if not path.is_file():
+        raise ValueError(f"token_estimate_path_missing:{path}")
+
+    if path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("token_estimate_json_not_object")
+        return {
+            FORMAT_V1: float(payload.get("v1_mean") or payload.get("v1") or 0.0),
+            FORMAT_V2_CHAT_SYSTEM: float(
+                payload.get("v2_chat_system_mean")
+                or payload.get("v2_chat_system")
+                or 0.0
+            ),
+        }
+
+    text = path.read_text(encoding="utf-8")
+    v1_match = re.search(r"^- v1_mean: `([0-9.]+)`", text, flags=re.MULTILINE)
+    v2_match = re.search(
+        r"^- v2_chat_system_mean: `([0-9.]+)`",
+        text,
+        flags=re.MULTILINE,
+    )
+    if v1_match is None or v2_match is None:
+        raise ValueError("token_estimate_markdown_missing_means")
+    return {
+        FORMAT_V1: float(v1_match.group(1)),
+        FORMAT_V2_CHAT_SYSTEM: float(v2_match.group(1)),
+    }
+
+
 def load_completed_execution_run_keys(
     *,
     db: DatabaseConnectionV2,
     experiment_label: str,
 ) -> set[str]:
+    return set(load_completed_execution_rows_by_run_key(db=db, experiment_label=experiment_label).keys())
+
+
+def load_completed_execution_rows_by_run_key(
+    *,
+    db: DatabaseConnectionV2,
+    experiment_label: str,
+) -> dict[str, Any]:
     postgres_query = text(
         """
-        SELECT run_key
+        SELECT run_key, config_json, metadata_json, run_status
         FROM provenanced_runs
         WHERE metadata_json->>'experiment_label' = :experiment_label
           AND run_kind = 'execution'
@@ -331,13 +460,14 @@ def load_completed_execution_run_keys(
     )
     sqlite_query = text(
         """
-        SELECT run_key
+        SELECT run_key, config_json, metadata_json, run_status
         FROM provenanced_runs
         WHERE json_extract(metadata_json, '$.experiment_label') = :experiment_label
           AND run_kind = 'execution'
           AND run_status = 'completed'
         """
     )
+    out: dict[str, Any] = {}
     with db.session_scope() as session:
         bind = session.get_bind()
         dialect_name = str(getattr(getattr(bind, "dialect", None), "name", "")).lower()
@@ -346,7 +476,16 @@ def load_completed_execution_run_keys(
             query,
             {"experiment_label": str(experiment_label)},
         ).fetchall()
-    return {str(row[0]) for row in rows if row and row[0]}
+    for row in rows:
+        if not row or not row[0]:
+            continue
+        out[str(row[0])] = SimpleNamespace(
+            run_key=str(row[0]),
+            config_json=row[1],
+            metadata_json=row[2],
+            run_status=str(row[3] or ""),
+        )
+    return out
 
 
 def load_catalog_pricing_usd_per_token(
@@ -376,15 +515,36 @@ def load_catalog_pricing_usd_per_token(
     return out
 
 
+def prompt_tokens_for_format(
+    prompt_template_version: str,
+    *,
+    prompt_tokens_by_format: Mapping[str, float] | None = None,
+) -> float:
+    if prompt_tokens_by_format:
+        if prompt_template_version in prompt_tokens_by_format:
+            return float(prompt_tokens_by_format[prompt_template_version])
+        if prompt_template_version == FORMAT_V1 and "v1" in prompt_tokens_by_format:
+            return float(prompt_tokens_by_format["v1"])
+        if (
+            prompt_template_version == FORMAT_V2_CHAT_SYSTEM
+            and "v2_chat_system" in prompt_tokens_by_format
+        ):
+            return float(prompt_tokens_by_format["v2_chat_system"])
+    return float(EST_PROMPT_TOKENS)
+
+
 def price_per_call_usd(
     model_id: str,
     catalog: Mapping[str, tuple[float, float]],
+    *,
+    prompt_tokens: float = EST_PROMPT_TOKENS,
 ) -> float:
     prompt_p, comp_p = catalog.get(model_id) or _FALLBACK_MODEL_PRICING_USD_PER_TOKEN.get(
         model_id, (0.0, 0.0)
     )
     return (
-        float(prompt_p) * float(EST_PROMPT_TOKENS) + float(comp_p) * float(EST_COMPLETION_TOKENS)
+        float(prompt_p) * float(prompt_tokens)
+        + float(comp_p) * float(EST_COMPLETION_TOKENS)
     )
 
 
@@ -393,11 +553,19 @@ def estimate_total_spend_usd(
     *,
     catalog: Mapping[str, tuple[float, float]],
     max_questions: int,
+    prompt_tokens_by_format: Mapping[str, float] | None = None,
 ) -> float:
     total = 0.0
     for invocation in invocations:
         calls = estimate_calls(max_questions, invocation.strategy)
-        per_call = price_per_call_usd(invocation.model_id, catalog)
+        per_call = price_per_call_usd(
+            invocation.model_id,
+            catalog,
+            prompt_tokens=prompt_tokens_for_format(
+                invocation.prompt_template_version,
+                prompt_tokens_by_format=prompt_tokens_by_format,
+            ),
+        )
         total += calls * per_call
     return total
 
@@ -572,6 +740,7 @@ def build_survivors(
     models: Sequence[str],
     *,
     smoke: bool,
+    force_permutation_strategy: str | None = None,
 ) -> tuple[list[tuple[str, str, int]], list[tuple[str, str]]]:
     """Return (survivors, excluded_list)."""
     survivors: list[tuple[str, str, int]] = []
@@ -584,7 +753,11 @@ def build_survivors(
         if r.excluded_reason:
             excluded.append((model_id, r.excluded_reason))
             continue
-        strategy = permutation_strategy_for_model_mode(model_id=model_id, smoke=smoke)
+        strategy = permutation_strategy_for_model_mode(
+            model_id=model_id,
+            smoke=smoke,
+            force_permutation_strategy=force_permutation_strategy,
+        )
         survivors.append((model_id, strategy, int(r.resolved_concurrency)))
     return survivors, excluded
 
@@ -604,6 +777,25 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
         catalog_path = (REPO_ROOT / catalog_path).resolve()
 
     catalog_pricing = load_catalog_pricing_usd_per_token(catalog_path)
+
+    token_estimate_path: Path | None = None
+    if getattr(args, "token_estimate_path", None):
+        token_estimate_path = Path(args.token_estimate_path).expanduser()
+        if not token_estimate_path.is_absolute():
+            token_estimate_path = (REPO_ROOT / token_estimate_path).resolve()
+    try:
+        prompt_tokens_by_format = load_prompt_tokens_by_format(token_estimate_path)
+    except ValueError as exc:
+        print(f"ERROR: halt:token_estimate_invalid — {exc}", file=sys.stderr)
+        return 1
+
+    force_permutation_strategy: str | None = getattr(
+        args, "force_permutation_strategy", None
+    )
+    if force_permutation_strategy is not None:
+        force_permutation_strategy = str(force_permutation_strategy).strip() or None
+        if force_permutation_strategy:
+            permutation_count_for_strategy(force_permutation_strategy)
 
     ensure_default_method_runtimes_registered()
 
@@ -725,6 +917,7 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
         probe_results,
         selected_models,
         smoke=bool(args.smoke),
+        force_permutation_strategy=force_permutation_strategy,
     )
     excluded_count = len(excluded)
     if excluded_count > 3:
@@ -758,20 +951,31 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
         imported_run_id=int(args.imported_run_id),
         experiment_label=str(args.experiment_label),
     )
-    completed_run_keys = load_completed_execution_run_keys(
+    completed_rows_by_run_key = load_completed_execution_rows_by_run_key(
         db=db,
         experiment_label=str(args.experiment_label),
     )
-    skipped_precompleted = [
-        prepared
-        for prepared in prepared_invocations
-        if prepared.run_key in completed_run_keys
-    ]
-    invocations_to_execute = [
-        prepared
-        for prepared in prepared_invocations
-        if prepared.run_key not in completed_run_keys
-    ]
+    completed_run_keys = set(completed_rows_by_run_key.keys())
+    skipped_precompleted: list[PreparedInvocation] = []
+    invocations_to_execute: list[PreparedInvocation] = []
+    for prepared in prepared_invocations:
+        if prepared.run_key not in completed_run_keys:
+            invocations_to_execute.append(prepared)
+            continue
+        existing_row = completed_rows_by_run_key.get(prepared.run_key)
+        plan = prepared.invocation
+        try:
+            assert_run_key_parameter_compatible(
+                existing_row=existing_row,
+                run_key=str(prepared.run_key),
+                imported_run_id=int(args.imported_run_id),
+                permutation_strategy=str(plan.strategy),
+                prompt_template_version=str(plan.prompt_template_version),
+            )
+        except RunKeyParameterMismatchError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        skipped_precompleted.append(prepared)
     invocation_plans_to_execute = [
         prepared.invocation for prepared in invocations_to_execute
     ]
@@ -786,6 +990,7 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
         invocation_plans_to_execute,
         catalog=catalog_pricing,
         max_questions=max_questions,
+        prompt_tokens_by_format=prompt_tokens_by_format or None,
     )
     runtime_h = estimate_total_runtime_hours(
         invocation_plans_to_execute,
@@ -865,6 +1070,18 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
         try:
             with db.session_scope() as task_session:
                 task_repo = RawCallRepository(task_session)
+                existing_row = task_repo.get_provenanced_run_by_request_and_key(
+                    request_group_id=int(request_group_id),
+                    run_key=str(prepared.run_key),
+                    run_kind="execution",
+                )
+                assert_run_key_parameter_compatible(
+                    existing_row=existing_row,
+                    run_key=str(prepared.run_key),
+                    imported_run_id=int(args.imported_run_id),
+                    permutation_strategy=str(plan.strategy),
+                    prompt_template_version=str(plan.prompt_template_version),
+                )
                 execution = MethodExecutionService(task_repo)
                 outcome = await execution.execute(
                     request_group_id=int(request_group_id),
@@ -882,6 +1099,12 @@ async def run_experiment_async(args: argparse.Namespace) -> int:
                 run_id=int(outcome.run_id),
                 reused=bool(outcome.reused),
                 run_key=str(outcome.run_key),
+            )
+        except RunKeyParameterMismatchError as exc:
+            return InvocationOutcome(
+                invocation=plan,
+                status="failure",
+                error=str(exc),
             )
         except Exception as exc:
             return InvocationOutcome(
@@ -1001,6 +1224,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Prompt format selection: v1, v2_chat_system, or both "
             "(default both)."
+        ),
+    )
+    p.add_argument(
+        "--force-permutation-strategy",
+        choices=("full_120", "latin_squares_25", "single_latin_square_5"),
+        default=None,
+        help=(
+            "Override per-model default permutation strategy for all surviving engines "
+            "(ignored for smoke mode except when not using --smoke)."
+        ),
+    )
+    p.add_argument(
+        "--token-estimate-path",
+        default=None,
+        help=(
+            "Optional cl100k token-estimate sidecar (.json or .md) for per-format "
+            "spend preflight (for example scratch/mosart/mosart_midterm2_overlap15_token_estimate.json)."
         ),
     )
     p.add_argument(

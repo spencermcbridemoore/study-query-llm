@@ -133,6 +133,9 @@ scratch/mcq_logprob_concurrency_probe.md
 scratch/local/*
 !scratch/local/README.md
 !scratch/local/jetstream-remote-build-and-restart.ps1
+# Claude (AI assistant) session scratch notes; see scratch/claude/README.md
+scratch/claude/*
+!scratch/claude/README.md
 artifacts/
 
 # Temporary plan files (session-specific, local scratch)

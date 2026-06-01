@@ -11,6 +11,10 @@ set**, maps each living doc to the code surface it governs, and lists the
 **restricted set** (history/deprecated/plans) that must not be opened without
 explicit user instruction. Do not duplicate or override that table here.
 
+Restricted/tombstoned material now lives at tag
+`archive/pre-context-hygiene-cleanup` and is reintroduction-guarded by
+the same restricted-path machinery.
+
 ## Current Work Status
 - **Active Work**: Analysis/Experimentation workflows in `notebooks/`
 - **Development Status (current)**: See `docs/living/CURRENT_STATE.md`

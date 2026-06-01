@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-commit warning for the living-docs-only governance rule.
+"""Pre-commit warning for the living-docs-only tombstone governance rule.
 
 Reads currently staged paths from git and prints a warning to stderr if any
 fall in the restricted set defined by
@@ -51,17 +51,18 @@ def main() -> int:
         return 0
 
     print(
-        "warning: living-docs-only gate -- staged changes touch restricted paths:",
+        "warning: living-docs-only gate -- staged changes touch tombstoned "
+        "restricted paths:",
         file=sys.stderr,
     )
     for path in restricted:
         print(f"  - {path}", file=sys.stderr)
     print(
-        "\nThese paths are 'past/unused workflow' material per "
+        "\nThese paths are archive-backed tombstones per "
         "`.cursor/rules/living-docs-only.mdc`. The commit will proceed, "
         "but CI (`scripts/check_living_docs_drift.py`) will fail unless a "
         f"commit message in the PR contains {ANNOTATION_TOKEN!r}.\n"
-        "If the edit is intentional, include that token in your commit message.",
+        "If reintroduction/edit is intentional, include that token and rationale.",
         file=sys.stderr,
     )
     return 0

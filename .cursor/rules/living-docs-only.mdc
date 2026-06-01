@@ -41,13 +41,20 @@ Parity evidence layer (not a primary source itself):
 - Repo-root: `README.md`, `AGENTS.md`, `.cursorrules`, `CONTRIBUTING.md`, `SECURITY.md`
 - All code: `src/`, `tests/`, `panel_app/`, `scripts/`, `deploy/`, `notebooks/`
 
-## Restricted Reading (requires explicit user instruction)
+## Tombstoned Paths (archive-backed, reintroduction-guarded)
 
-Do **not** open these to inform current implementation work unless the user
-explicitly asks for historical, migration, or deprecated context. The
-"History" and "Deprecated" sections of `docs/README.md` and the lane structure
-in `scripts/README.md` are authoritative for membership. Confirmed restricted
-paths today:
+These paths were removed from `main` in commit `2ed773c9` and archived at tag
+`archive/pre-context-hygiene-cleanup`. Keep them listed as the restricted set
+for two reasons:
+
+- read-time safety (consult only when the user explicitly asks for historical,
+  migration, or deprecation context)
+- reintroduction guard (creating/reintroducing these paths on `main` requires
+  `[restricted-doc-edit-ok]` in a commit message plus rationale)
+
+The "History" and "Deprecated" sections of `docs/README.md` and the lane
+structure in `scripts/README.md` are authoritative for membership. Confirmed
+restricted/tombstoned paths today:
 
 Docs:
 - `docs/history/**`
@@ -65,17 +72,26 @@ Scripts (lane structure mirrors docs):
 - `scripts/history/**` (archived experiment/probe scripts; reproducibility only)
 - `scripts/deprecated/**` (retired compatibility wrappers)
 
+### Archive Retrieval
+
+Use any of the following when you need tombstoned content:
+
+- `git show archive/pre-context-hygiene-cleanup:<path>`
+- `git checkout archive/pre-context-hygiene-cleanup -- <path>`
+- `https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/<path>`
+- `https://github.com/spencermcbridemoore/study-query-llm/tree/archive/pre-context-hygiene-cleanup/<path>`
+
 ## Enforcement
 
 Two scripts back the doc-to-code binding above:
 
 - `scripts/check_living_docs_drift.py` (CI hard check) - fails when a diff
-  range edits restricted paths without `[restricted-doc-edit-ok]` in any
-  commit message in the range. Wired into
+  range edits/reintroduces tombstoned restricted paths without
+  `[restricted-doc-edit-ok]` in any commit message in the range. Wired into
   `.github/workflows/living-docs-drift.yml`.
 - `scripts/warn_restricted_doc_edits.py` (pre-commit warning) - prints staged
-  restricted-path edits to stderr; exits 0 (warning, not block). Optional
-  Git hook at `scripts/git-hooks/pre-commit`; install with
+  restricted-path edits/reintroductions to stderr; exits 0 (warning, not
+  block). Optional Git hook at `scripts/git-hooks/pre-commit`; install with
   `git config core.hooksPath scripts/git-hooks`.
 
 Shared restricted-set source of truth:

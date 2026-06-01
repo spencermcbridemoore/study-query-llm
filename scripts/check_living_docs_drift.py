@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CI hard check for the living-docs-only governance rule.
+"""CI hard check for the living-docs-only tombstone governance rule.
 
 Fails (exit 1) when a git diff range edits restricted paths without the
 annotation token (default: ``[restricted-doc-edit-ok]``) appearing in at
@@ -79,8 +79,8 @@ def commit_messages(base: str, head: str) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Fail if a diff range edits restricted living-docs paths without "
-            "an annotation token in any commit message in the range."
+            "Fail if a diff range edits/reintroduces tombstoned restricted "
+            "paths without an annotation token in any commit message."
         ),
     )
     parser.add_argument(
@@ -133,16 +133,16 @@ def main() -> int:
 
     if messages_contain_annotation(messages, args.annotation_token):
         print(
-            "living-docs-drift: restricted paths edited; annotation token "
-            f"{args.annotation_token!r} present. Allowed."
+            "living-docs-drift: tombstoned restricted paths touched; "
+            f"annotation token {args.annotation_token!r} present. Allowed."
         )
         for path in restricted:
             print(f"  - {path}")
         return 0
 
     print(
-        "living-docs-drift: restricted paths edited without annotation token "
-        f"{args.annotation_token!r} in any commit message in "
+        "living-docs-drift: tombstoned restricted paths touched without "
+        f"annotation token {args.annotation_token!r} in any commit message in "
         f"{args.base}..{args.head}.",
         file=sys.stderr,
     )
@@ -151,11 +151,10 @@ def main() -> int:
         print(f"  - {path}", file=sys.stderr)
     print(
         "\nResolution options:\n"
-        "  1. Move the edits out of restricted paths (preferred for new work).\n"
-        "  2. If the edit is intentional (e.g. archiving a script, recording a\n"
-        "     historical snapshot, or documenting a deprecation), add the\n"
-        f"     token {args.annotation_token!r} to a commit message in the range.\n"
-        "  3. See `.cursor/rules/living-docs-only.mdc` for the binding rule.",
+        "  1. Revert/relocate the path changes (preferred for new work).\n"
+        "  2. If reintroduction or tombstone-path edits are intentional, add\n"
+        f"     token {args.annotation_token!r} to a commit message in range.\n"
+        "  3. See `.cursor/rules/living-docs-only.mdc` for archive-backed policy.",
         file=sys.stderr,
     )
     return 1

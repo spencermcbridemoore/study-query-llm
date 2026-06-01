@@ -1,7 +1,7 @@
-"""Shared restricted-path set for the living-docs-only governance rule.
+"""Shared tombstoned-path set for the living-docs-only governance rule.
 
-This module is the single source of truth for which paths are "restricted
-reading" under `.cursor/rules/living-docs-only.mdc`. Both the CI hard check
+This module is the single source of truth for which paths are tombstoned and
+restricted under `.cursor/rules/living-docs-only.mdc`. Both the CI hard check
 (`scripts/check_living_docs_drift.py`) and the pre-commit warning
 (`scripts/warn_restricted_doc_edits.py`) import from here so the two stay
 in lock-step.
@@ -11,7 +11,7 @@ Membership rules:
 - ``RESTRICTED_PREFIX_DIRS`` matches any path whose POSIX form starts with the
   given directory prefix (terminated by ``/``).
 - ``RESTRICTED_FILES`` matches exact POSIX paths.
-- Update both the constants below AND the ``Restricted Reading`` table in
+- Update both the constants below AND the tombstoned-path table in
   ``.cursor/rules/living-docs-only.mdc`` together.
 """
 
@@ -21,7 +21,7 @@ from collections.abc import Iterable
 
 ANNOTATION_TOKEN: str = "[restricted-doc-edit-ok]"
 """Marker that must appear in at least one commit message in the diff range
-to allow restricted-path edits to land via the CI hard check."""
+to allow restricted/tombstoned-path edits or reintroductions via CI."""
 
 RESTRICTED_PREFIX_DIRS: tuple[str, ...] = (
     "docs/history/",
@@ -50,7 +50,7 @@ def _normalise(path: str) -> str:
 
 
 def is_restricted_path(path: str) -> bool:
-    """Return True if ``path`` is in the restricted-reading set."""
+    """Return True if ``path`` is in the restricted/tombstoned set."""
     if not path:
         return False
     posix = _normalise(path)
@@ -60,7 +60,7 @@ def is_restricted_path(path: str) -> bool:
 
 
 def find_restricted_paths(paths: Iterable[str]) -> list[str]:
-    """Return the sorted, de-duplicated subset of ``paths`` that is restricted."""
+    """Return the sorted, de-duplicated restricted/tombstoned subset."""
     matched: set[str] = set()
     for raw in paths:
         if is_restricted_path(raw):

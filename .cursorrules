@@ -8,6 +8,10 @@ set**, maps each living doc to the code surface it governs, and lists the
 **restricted set** (history/deprecated/plans) that must not be opened without
 explicit user instruction. Do not duplicate or override that table here.
 
+Restricted/tombstoned paths were archived at tag
+`archive/pre-context-hygiene-cleanup`; keep the restricted-set guard active
+for reintroduction checks.
+
 Quick pointers:
 - Implementation status: `docs/living/CURRENT_STATE.md`
 - Current architecture: `docs/living/ARCHITECTURE_CURRENT.md`

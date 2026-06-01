@@ -45,20 +45,22 @@ Last reviewed: 2026-04-18
 
 ### History
 
-- [`docs/history/README.md`](history/README.md)
-- [`docs/IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
-- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
-- [`docs/PHASE1_5_VERIFICATION.md`](PHASE1_5_VERIFICATION.md)
-- [`docs/PLOT_ORGANIZATION.md`](PLOT_ORGANIZATION.md)
-- [`docs/history/USER_GUIDE_V1_LEGACY.md`](history/USER_GUIDE_V1_LEGACY.md)
-- [`docs/experiments/CUSTOM_SWEEP_README.md`](experiments/CUSTOM_SWEEP_README.md)
-- [`docs/plans/README.md`](plans/README.md) (archived planning framework)
+- [`docs/history/README.md`](https://github.com/spencermcbridemoore/study-query-llm/tree/archive/pre-context-hygiene-cleanup/docs/history/README.md)
+- [`docs/IMPLEMENTATION_PLAN.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/IMPLEMENTATION_PLAN.md)
+- [`docs/ARCHITECTURE.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/ARCHITECTURE.md)
+- [`docs/PHASE1_5_VERIFICATION.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/PHASE1_5_VERIFICATION.md)
+- [`docs/PLOT_ORGANIZATION.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/PLOT_ORGANIZATION.md)
+- [`docs/history/USER_GUIDE_V1_LEGACY.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/history/USER_GUIDE_V1_LEGACY.md)
+- [`docs/experiments/CUSTOM_SWEEP_README.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/experiments/CUSTOM_SWEEP_README.md)
+- [`docs/plans/README.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/plans/README.md) (archived planning framework)
+- [`docs/audit/`](https://github.com/spencermcbridemoore/study-query-llm/tree/archive/pre-context-hygiene-cleanup/docs/audit/)
+- [`docs/design/`](https://github.com/spencermcbridemoore/study-query-llm/tree/archive/pre-context-hygiene-cleanup/docs/design/)
 
 ### Deprecated
 
-- [`docs/deprecated/README.md`](deprecated/README.md)
-- [`docs/API.md`](API.md) (replaced by `docs/living/API_CURRENT.md`)
-- [`docs/MIGRATION_GUIDE.md`](MIGRATION_GUIDE.md)
+- [`docs/deprecated/README.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/deprecated/README.md)
+- [`docs/API.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/API.md) (replaced by `docs/living/API_CURRENT.md`)
+- [`docs/MIGRATION_GUIDE.md`](https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/MIGRATION_GUIDE.md)
 
 ### Review Artifacts
 
@@ -71,3 +73,11 @@ Last reviewed: 2026-04-18
 - For DB operations, treat `docs/runbooks/README.md` as the top-level workflow index and URL contract source.
 - Keep `history` for chronology and migration context.
 - Keep `deprecated` for compatibility context; do not use for new implementation decisions.
+
+## Archived material
+
+Historical, deprecated, plan, experiment, audit, and design material is
+archived at tag `archive/pre-context-hygiene-cleanup`. Use:
+
+- `https://github.com/spencermcbridemoore/study-query-llm/tree/archive/pre-context-hygiene-cleanup/docs/`
+- `https://github.com/spencermcbridemoore/study-query-llm/blob/archive/pre-context-hygiene-cleanup/docs/<path>`

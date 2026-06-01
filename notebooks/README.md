@@ -2,18 +2,15 @@
 
 Status: living  
 Owner: analytics-maintainers  
-Last reviewed: 2026-04-19
+Last reviewed: 2026-06-01
 
-This directory contains active working notebooks plus archived snapshots used by
-history docs.
+Active working notebooks. Sweep *execution* now lives in tested `scripts/` and
+the Panel app (`panel_app/`); the notebooks here are for embedding backfill and
+result inspection only.
 
-## Local GPU 300 Sweep Notebook Policy
+- `colab_embeddings.ipynb` — Embed-if-missing backfill of Estela prompts into the v2 DB from Colab.
+- `pca_kllmeans_analysis.ipynb` — Analysis of PCA k-LLMeans sweep result pickles.
+- `mcq_recent_1000_big_run_visualizer.ipynb` — QC visualizer for the v2 MCQ big-run groups.
 
-- Canonical working notebook: `notebooks/local_gpu_300_sweep.ipynb`
-- Historical snapshot retained for history docs: `notebooks/archive/local_gpu_300_sweep.ipynb`
-- Current diff between the two files is metadata-only (`kernelspec.display_name`
-  and `language_info.version`), not analysis logic.
-
-When updating the local GPU 300 sweep workflow, apply edits to the canonical
-working notebook first. Keep the archive copy unchanged unless intentionally
-capturing a new historical snapshot and updating linked history docs.
+`estela_prompt_data.pkl` is load-bearing input data (consumed by
+`src/study_query_llm/experiments/` and the sweep scripts); do not remove it.

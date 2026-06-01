@@ -57,7 +57,6 @@ Use this page as the **single procedural entrypoint** for operator workflows.
 ## Application / Infrastructure Runbooks
 
 - [`docs/DEPLOYMENT.md`](../DEPLOYMENT.md) (repo-root Docker stack; not Jetstream VM ops)
-- [`docs/COLAB_SETUP.md`](../COLAB_SETUP.md)
 
 ## Sweep / Orchestration
 

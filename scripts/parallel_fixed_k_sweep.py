@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     db_url = _resolve_database_url(args.database_url)
     if not (os.environ.get("SQLLM_WRITE_INTENT") or "").strip():
         os.environ["SQLLM_WRITE_INTENT"] = str(default_write_intent_for_connection(db_url))
-    db = DatabaseConnectionV2(db_url, quiet=True)
+    db = DatabaseConnectionV2(db_url, quiet=True, write_intent=default_write_intent_for_connection(db_url))
     targets, diag = build_targets(
         db=db,
         snapshot_ids=snapshots,

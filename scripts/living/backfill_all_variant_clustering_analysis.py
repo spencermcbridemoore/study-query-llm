@@ -30,6 +30,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2  # noqa: E402
+from study_query_llm.db.write_intent import WriteIntent  # noqa: E402
 from study_query_llm.experiments.clustering_analysis_backfill import (  # noqa: E402
     build_manifest,
     preflight_manifest_blocking_issues,
@@ -146,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.verify_manifest:
         path = Path(args.verify_manifest)
         manifest = json.loads(path.read_text(encoding="utf-8"))
-        db = DatabaseConnectionV2(_resolve_database_url(args.database_url), enable_pgvector=False)
+        db = DatabaseConnectionV2(_resolve_database_url(args.database_url), enable_pgvector=False, write_intent=WriteIntent.CANONICAL)
         with db.session_scope() as session:
             refreshed = refresh_manifest_completion(session, manifest)
         report = verify_manifest_coverage(refreshed)
@@ -157,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         str(args.embedding_engine)
     )
 
-    db = DatabaseConnectionV2(_resolve_database_url(args.database_url), enable_pgvector=False)
+    db = DatabaseConnectionV2(_resolve_database_url(args.database_url), enable_pgvector=False, write_intent=WriteIntent.CANONICAL)
 
     validate_registry_expansion_or_raise()
 

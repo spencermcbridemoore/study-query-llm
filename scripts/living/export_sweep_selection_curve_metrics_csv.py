@@ -24,6 +24,7 @@ import os
 import sys
 
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
+from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.experiments.selection_curve_export import (
     default_sweep_method_names,
@@ -82,7 +83,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    db = DatabaseConnectionV2(args.database_url, quiet=True)
+    db = DatabaseConnectionV2(
+        args.database_url,
+        quiet=True,
+        write_intent=default_write_intent_for_connection(args.database_url),
+    )
     filt = _parse_analysis_group_ids(args.analysis_group_ids)
 
     with db.session_scope() as session:

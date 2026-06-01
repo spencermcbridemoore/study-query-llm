@@ -16,6 +16,7 @@ ALLOWED_CREATE_ENGINE_PATHS = {
     "scripts/backup_mcq_db_to_json.py",
     "scripts/check_active_workers.py",
     "scripts/check_call_artifacts_uri_constraint.py",
+    "scripts/check_mosart_run_status.py",
     "scripts/check_raw_calls_uri_sentinel.py",
     "scripts/probe_postgres_inventory.py",
     "scripts/purge_dataset_acquisition.py",

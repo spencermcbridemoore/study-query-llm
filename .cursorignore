@@ -1,0 +1,44 @@
+# Context-hygiene cleanup ignore policy (Phase A.1)
+# See .cursor/plans/context_hygiene_cleanup.md
+# Companion to .claude/settings.json deny rules and .gitignore.
+
+# --- Untracked accumulators (worktree pollution, experimental output, dumps) ---
+.claude/worktrees/**
+experimental_results/**
+pg_migration_dumps/**
+backup_pg_dumps/**
+backup_*/**
+data/**
+scratch/**
+artifacts/**
+logs/**
+
+# --- Non-living docs (tombstoned after Phase C; ignored from now on) ---
+notebooks/archive/**
+docs/history/**
+docs/deprecated/**
+docs/plans/**
+docs/experiments/**
+docs/audit/**
+docs/design/**
+docs/IMPLEMENTATION_PLAN.md
+docs/ARCHITECTURE.md
+docs/API.md
+docs/MIGRATION_GUIDE.md
+docs/PHASE1_5_VERIFICATION.md
+docs/PLOT_ORGANIZATION.md
+
+# --- Lane-flagged scripts ---
+scripts/history/**
+scripts/deprecated/**
+
+# --- Bulk data file extensions (anywhere) ---
+**/*.pkl
+**/*.npz
+**/*.parquet
+**/*.log
+
+# --- Exceptions (re-allow specific paths) ---
+!scratch/claude/README.md
+!scratch/local/README.md
+!scratch/local/jetstream-remote-build-and-restart.ps1

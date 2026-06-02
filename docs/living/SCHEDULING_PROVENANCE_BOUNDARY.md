@@ -94,6 +94,37 @@ this visible in logs.
 
 `reduce_k` is intentionally **aggregating**: it selects best objective labels/metadata across sibling leaf shards while still emitting audit-grade summaries (`objectives`, `labels_all`). After this update it also preserves **every** leaf shard’s structured try row under `by_k[*].tries` (including profiling markers such as `try_idx`, `seed_value`, and the full `k_payload` blob). Leaf shards are therefore expected to carry exactly **one** `by_k` bucket each; multi-`k` leaf payloads violate reducer assumptions and raise `RuntimeError`.
 
+## Request-Group Identity Uniqueness
+
+A one-off analysis execution is grouped under an `analysis_request` Group keyed
+by the identity `(method_name, input_id, run_key)` carried in
+`groups.metadata_json`. This identity is a **DB-enforced uniqueness invariant**:
+concurrent `analyze()` callers that resolve the same identity converge on a
+single `analysis_request` group rather than each creating a duplicate.
+
+- The guard is a partial UNIQUE *functional* index
+  (`uq_groups_analysis_request_identity`) over the JSON-extracted identity
+  fields, scoped `WHERE group_type = 'analysis_request'`. JSON extraction is
+  dialect-specific, so the index DDL is emitted per dialect from `after_create`
+  events in `db/models_v2.py`; `init_db()`/`create_all()` therefore builds it on
+  both SQLite (tests) and Postgres (fresh installs). The already-provisioned
+  canonical Postgres database receives it via
+  `db/migrations/add_analysis_request_unique_index.py`.
+- `ProvenanceService.create_analysis_request_group` delegates to
+  `RawCallRepository.insert_or_get_analysis_request_group`, which performs a
+  conflict-safe insert/reselect (fast-path lookup, then a SAVEPOINT-guarded
+  insert that recovers from a unique-index collision by re-selecting the
+  winner). Get-or-create is thus race-free at the database layer, not merely
+  inside the per-run in-process lock — that lock is acquired *after*
+  request-group resolution in `pipeline/analyze.py` and so cannot serialize it.
+
+Identity uniqueness is a *provenance* invariant, independent of scheduling: it
+holds whether the analysis runs as a standalone orchestration job or an in-job
+provenance event, and does not depend on job-graph shape. Remediating
+pre-existing duplicates (keep the lowest group id; repoint every reference onto
+it) is a one-off canonical write performed by
+`scripts/remediate_analysis_request_duplicates.py` before the index is added.
+
 ## See Also
 
 - [STANDING_ORDERS.md](../STANDING_ORDERS.md) — Method Definitions and Provenance conventions

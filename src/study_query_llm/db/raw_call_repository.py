@@ -606,6 +606,84 @@ class RawCallRepository:
         
         return group.id
 
+    def insert_or_get_analysis_request_group(
+        self,
+        *,
+        method_name: str,
+        input_id: int,
+        run_key: str,
+        name: str,
+        description: Optional[str] = None,
+        metadata_json: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Conflict-safe get-or-create for an ``analysis_request`` group.
+
+        Concurrent ``analyze()`` callers can share an analysis-request identity
+        ``(method_name, input_id, run_key)``. A naive scan-then-insert races and
+        creates duplicate ``analysis_request`` Group rows. This method mirrors
+        the conflict-safe insert/reselect idiom used by ``create_group_link`` and
+        ``enqueue_orchestration_job``: a fast-path lookup, then a SAVEPOINT-guarded
+        insert that recovers from a concurrent unique-index collision by
+        re-selecting the winning row. Uniqueness is DB-enforced by the partial
+        unique index ``uq_groups_analysis_request_identity`` over the extracted
+        identity fields (see ``models_v2`` and the
+        ``add_analysis_request_unique_index`` migration). Works on Postgres and
+        SQLite.
+        """
+        # Literal mirrors services.provenance_service.GROUP_TYPE_ANALYSIS_REQUEST;
+        # kept local to avoid a repo->service import inversion.
+        group_type = "analysis_request"
+        identity = {
+            "method_name": str(method_name),
+            "input_id": int(input_id),
+            "run_key": str(run_key),
+        }
+
+        existing_id = self.find_group_id_by_metadata(
+            group_type=group_type, metadata_eq=identity
+        )
+        if existing_id is not None:
+            return int(existing_id)
+
+        group = Group(
+            group_type=group_type,
+            name=name,
+            description=description,
+            metadata_json=metadata_json or {},
+        )
+        try:
+            # Nested transaction lets us recover from a uniqueness conflict
+            # without rolling back the outer unit of work.
+            with self.session.begin_nested():
+                self.session.add(group)
+                self.session.flush()
+                self.session.refresh(group)
+        except IntegrityError:
+            existing_id = self.find_group_id_by_metadata(
+                group_type=group_type, metadata_eq=identity
+            )
+            if existing_id is not None:
+                logger.debug(
+                    "Recovered concurrent analysis_request collision for "
+                    "method=%s input_id=%s run_key=%s -> group %s",
+                    method_name,
+                    input_id,
+                    run_key,
+                    existing_id,
+                )
+                return int(existing_id)
+            raise
+
+        logger.debug(
+            "Created analysis_request group: id=%s method=%s input_id=%s run_key=%s",
+            group.id,
+            method_name,
+            input_id,
+            run_key,
+        )
+        return int(group.id)
+
     def add_call_to_group(
         self,
         group_id: int,

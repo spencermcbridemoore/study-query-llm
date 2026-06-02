@@ -201,47 +201,42 @@ class ProvenanceService:
     ) -> int:
         """
         Get-or-create an analysis_request group for one-off analysis execution.
-        """
-        from ..db.models_v2 import Group
 
+        Identity is ``(method_name, input_id, run_key)``. Uniqueness is enforced
+        at the database layer (partial unique index) and resolved race-free by
+        ``RawCallRepository.insert_or_get_analysis_request_group``; concurrent
+        callers that share an identity converge on a single group.
+        """
         normalized_method = str(method_name)
         normalized_input_id = int(input_id)
         normalized_run_key = str(run_key)
-        existing_groups = (
-            self.repository.session.query(Group)
-            .filter(Group.group_type == GROUP_TYPE_ANALYSIS_REQUEST)
-            .all()
-        )
-        for existing in existing_groups:
-            existing_meta = dict(existing.metadata_json or {})
-            if (
-                str(existing_meta.get("method_name") or "") == normalized_method
-                and int(existing_meta.get("input_id") or -1) == normalized_input_id
-                and str(existing_meta.get("run_key") or "") == normalized_run_key
-            ):
-                return int(existing.id)
 
         full_name = name or f"analyze_request:{normalized_method}:{normalized_input_id}:{normalized_run_key}"
         capped_name, preserved_full_name = _cap_group_name(full_name)
-        metadata_json = {
-            "method_name": normalized_method,
-            "input_id": normalized_input_id,
-            "run_key": normalized_run_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if preserved_full_name is not None:
-            metadata_json["full_name"] = preserved_full_name
+
+        metadata_json: Dict[str, Any] = {}
         if metadata:
             metadata_json.update(metadata)
+        # Identity fields are authoritative: they must equal what the unique
+        # index and lookup key off, so set them last (never let `metadata`
+        # override them).
+        metadata_json["method_name"] = normalized_method
+        metadata_json["input_id"] = normalized_input_id
+        metadata_json["run_key"] = normalized_run_key
+        metadata_json.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+        if preserved_full_name is not None:
+            metadata_json["full_name"] = preserved_full_name
 
-        group_id = self.repository.create_group(
-            group_type=GROUP_TYPE_ANALYSIS_REQUEST,
+        group_id = self.repository.insert_or_get_analysis_request_group(
+            method_name=normalized_method,
+            input_id=normalized_input_id,
+            run_key=normalized_run_key,
             name=capped_name,
             description=description or f"Analysis request: {normalized_method}",
             metadata_json=metadata_json,
         )
         logger.info(
-            "Created analysis_request group: id=%s method=%s input_id=%s run_key=%s",
+            "Resolved analysis_request group: id=%s method=%s input_id=%s run_key=%s",
             group_id,
             normalized_method,
             normalized_input_id,

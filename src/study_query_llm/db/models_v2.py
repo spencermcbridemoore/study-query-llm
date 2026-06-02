@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from sqlalchemy import (
     Column, Integer, String, DateTime, JSON, Float, Text, ForeignKey, Boolean,
-    Index, CheckConstraint
+    Index, CheckConstraint, DDL, event
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -150,6 +150,58 @@ class Group(BaseV2):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'metadata_json': self.metadata_json,
         }
+
+
+# ---------------------------------------------------------------------------
+# Concurrency-safe uniqueness for the analysis_request identity
+# ---------------------------------------------------------------------------
+# Concurrent ``analyze()`` callers that share an analysis-request identity
+# (group_type='analysis_request' with the same method_name/input_id/run_key in
+# ``metadata_json``) historically raced in a scan-then-insert get-or-create and
+# could each create a duplicate ``analysis_request`` Group row. The fix is a
+# DB-enforced partial UNIQUE index over the extracted identity fields, paired
+# with a conflict-safe insert/reselect in
+# ``RawCallRepository.insert_or_get_analysis_request_group``.
+#
+# The identity lives inside the JSON ``metadata_json`` column, so this is a
+# functional (expression) index. JSON extraction differs by dialect, so the DDL
+# is emitted per dialect from ``after_create`` events. That makes
+# ``create_all()`` (the SQLite test path and any fresh Postgres init) build the
+# index on both backends; the already-provisioned canonical Postgres DB gets it
+# via ``db/migrations/add_analysis_request_unique_index.py``.
+ANALYSIS_REQUEST_UNIQUE_INDEX_NAME = "uq_groups_analysis_request_identity"
+
+# Postgres + SQLite renderings of the same partial UNIQUE functional index over
+# the analysis_request identity. Exposed as module constants so the canonical
+# migration (db/migrations/add_analysis_request_unique_index.py) and this model
+# stay in lockstep (identical index name + definition); a divergent definition
+# under the same name would be a silent correctness bug.
+ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_POSTGRESQL = (
+    f"CREATE UNIQUE INDEX IF NOT EXISTS {ANALYSIS_REQUEST_UNIQUE_INDEX_NAME} "
+    "ON groups ("
+    "(metadata_json ->> 'method_name'), "
+    "(metadata_json ->> 'input_id'), "
+    "(metadata_json ->> 'run_key')) "
+    "WHERE group_type = 'analysis_request'"
+)
+ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_SQLITE = (
+    f"CREATE UNIQUE INDEX IF NOT EXISTS {ANALYSIS_REQUEST_UNIQUE_INDEX_NAME} "
+    "ON groups ("
+    "json_extract(metadata_json, '$.method_name'), "
+    "json_extract(metadata_json, '$.input_id'), "
+    "json_extract(metadata_json, '$.run_key')) "
+    "WHERE group_type = 'analysis_request'"
+)
+
+_PG_ANALYSIS_REQUEST_UNIQUE_DDL = DDL(
+    ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_POSTGRESQL
+).execute_if(dialect="postgresql")
+_SQLITE_ANALYSIS_REQUEST_UNIQUE_DDL = DDL(
+    ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_SQLITE
+).execute_if(dialect="sqlite")
+
+event.listen(Group.__table__, "after_create", _PG_ANALYSIS_REQUEST_UNIQUE_DDL)
+event.listen(Group.__table__, "after_create", _SQLITE_ANALYSIS_REQUEST_UNIQUE_DDL)
 
 
 class GroupMember(BaseV2):

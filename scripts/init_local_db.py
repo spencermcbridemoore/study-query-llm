@@ -79,7 +79,6 @@ def main():
     print(f"Tables present: {', '.join(tables)}")
     print("\nLocal DB is ready. You can now run:")
     print("  python scripts/sync_from_online.py      # pull all records from Neon")
-    print("  python scripts/archive_defective_data.py # move defective records here")
 
 
 if __name__ == "__main__":

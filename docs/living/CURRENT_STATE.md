@@ -126,7 +126,7 @@ This document is the canonical "what exists and works now" summary for the repos
 - Automated full-state backup entrypoint: `scripts/backup_jetstream_full_state.py` orchestrates Jetstream dump/upload/inventory verification plus artifact container mirroring into a dated backup prefix, then writes a local JSON receipt under `backup_pg_dumps/`.
 - High-risk DB scripts now enforce write-target guardrails (remote-target overrides, same-target refusal, and explicit destructive confirmations).
 - DB lane static policy checks are available at `scripts/check_db_lane_policy.py` and run in `.github/workflows/persistence-contract.yml`.
-- Scripts use lane governance (`scripts/living`, `scripts/history`, `scripts/deprecated`, `scripts/internal`). No-PCA/experiment drivers live under `scripts/history`; **move set v1.1** adds canonical implementations under `scripts/deprecated/` (thin root wrappers forward there, then into history where applicable). **Move set v1.2** adds `scripts/history/one_offs/` for ad-hoc probes/utilities moved out of root without wrappers where no active references required path stability. Incident sweep tooling: `scripts/history/sweep_recovery/` (`archive_pre_fix_runs`, `label_pre_fix_runs`) with root wrappers preserved.
+- Scripts use lane governance (`scripts/living`, `scripts/internal`). Historical experiment/probe drivers and retired compatibility wrappers are archive-backed (git tag `archive/pre-context-hygiene-cleanup`), not present on `main`.
 
 ## Known Legacy / Transitional Areas
 

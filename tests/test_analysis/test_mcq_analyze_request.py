@@ -10,6 +10,7 @@ from study_query_llm.db.models_v2 import Group
 from study_query_llm.db.raw_call_repository import RawCallRepository
 from study_query_llm.services.provenance_service import GROUP_TYPE_MCQ_RUN
 from study_query_llm.services.sweep_request_service import SweepRequestService
+from study_query_llm.services.method_service import MethodService
 
 
 def _mcq_axes():
@@ -30,6 +31,20 @@ def test_run_mcq_analyses_dry_run():
     with db.session_scope() as session:
         repo = RawCallRepository(session)
         svc = SweepRequestService(repo)
+        method_service = MethodService(repo)
+        for method_name in (
+            "mcq_compliance_metrics",
+            "mcq_answer_position_distribution",
+            "mcq_answer_position_chi_square",
+        ):
+            if method_service.get_method(method_name, version="1.0") is not None:
+                continue
+            method_service.register_method(
+                name=method_name,
+                version="1.0",
+                code_ref="tests.test_analysis.test_mcq_analyze_request",
+                description="pre-registered fixture method",
+            )
         req_id = svc.create_request(
             request_name="mcq_analyze_dry",
             algorithm="mcq_answer_position_probe",

@@ -18,6 +18,7 @@ from study_query_llm.datasets.source_specs.registry import ACQUIRE_REGISTRY
 from study_query_llm.db.connection_v2 import DatabaseConnectionV2
 from study_query_llm.db.models_v2 import AnalysisResult, Group, GroupLink
 from study_query_llm.db.raw_call_repository import RawCallRepository
+from study_query_llm.services.method_service import MethodService
 from study_query_llm.pipeline.acquire import acquire
 from study_query_llm.pipeline.analyze import analyze
 from study_query_llm.pipeline.embed import embed
@@ -31,6 +32,17 @@ def _db(tmp_path: Path) -> DatabaseConnectionV2:
     db_path = (tmp_path / "bank77_e2e.sqlite3").resolve()
     db = DatabaseConnectionV2(f"sqlite:///{db_path.as_posix()}", enable_pgvector=False)
     db.init_db()
+    with db.session_scope() as session:
+        method_service = MethodService(RawCallRepository(session))
+        for method_name in ("bank77_structural_acceptance", "bank77_hdbscan_phase1"):
+            if method_service.get_method(method_name, version="1.0") is not None:
+                continue
+            method_service.register_method(
+                name=method_name,
+                version="1.0",
+                code_ref="tests.pipeline.test_bank77_pipeline_e2e",
+                description="pre-registered fixture method",
+            )
     return db
 
 

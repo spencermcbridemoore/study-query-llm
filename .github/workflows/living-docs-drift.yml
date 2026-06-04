@@ -32,8 +32,11 @@ jobs:
             BASE="${{ github.event.pull_request.base.sha }}"
             HEAD="${{ github.event.pull_request.head.sha }}"
           else
-            BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
             HEAD="$(git rev-parse HEAD)"
+            BASE="${{ github.event.before }}"
+            if [ -z "$BASE" ] || ! git rev-parse -q --verify "$BASE^{commit}" >/dev/null 2>&1; then
+              BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+            fi
           fi
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
           echo "head=$HEAD" >> "$GITHUB_OUTPUT"

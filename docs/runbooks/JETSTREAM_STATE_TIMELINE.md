@@ -4,6 +4,15 @@ Status: living
 Owner: ops-maintainers  
 Last reviewed: 2026-04-23
 
+> **Current state (2026-06-03): Jetstream canonical is ACTIVE, not dormant.**
+> After the Apr 23 dormant snapshot below, the canonical Jetstream DB was restored/
+> repopulated and is in active use -- e.g. commit `dd38ddc` (2026-06-02) wrote to a
+> live ~3300-group canonical (remediated an `analysis_request` duplicate and created
+> the `uq_groups_analysis_request_identity` index). The Recovery Options below are
+> HISTORICAL chronology for the Apr 22-23 cutover wipe: do NOT `pg_restore` an old
+> dump over the live canonical DB. Current DB state is mirrored in
+> `docs/living/CURRENT_STATE.md`.
+
 This note captures the Jetstream Postgres lifecycle around the Apr 22 2026 v5 cutover so that future operators can reason about the chronology without re-deriving it from `db-backups` filenames and the `group_graph_audit_log` survivor table. It is informational; the canonical source of truth for any restore decision is the dump set in the `db-backups` Azure container plus the manifests under `backup_pg_dumps/*.manifest.json`.
 
 ## Summary

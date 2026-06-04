@@ -41,8 +41,7 @@ This repository applies the same governance framework used by docs:
 Lane directories:
 
 - [`scripts/living/`](living/README.md)
-- [`scripts/history/`](history/README.md)
-- [`scripts/deprecated/`](deprecated/README.md)
+- `scripts/history/`, `scripts/deprecated/` -- archive-backed lanes (no on-`main` contents; recover via `git show archive/pre-context-hygiene-cleanup:<path>`)
 - [`scripts/internal/`](internal/README.md)
 
 ## Canonical DB Ops Matrix

@@ -52,8 +52,9 @@ for two reasons:
 - reintroduction guard (creating/reintroducing these paths on `main` requires
   `[restricted-doc-edit-ok]` in a commit message plus rationale)
 
-The "History" and "Deprecated" sections of `docs/README.md` and the lane
-structure in `scripts/README.md` are authoritative for membership. Confirmed
+The authoritative membership source is `scripts/internal/living_docs_governance.py`
+(mirrored in the table above); the `docs/README.md` History/Deprecated sections and
+`scripts/README.md` lanes are descriptive. Confirmed
 restricted/tombstoned paths today:
 
 Docs:

@@ -21,10 +21,10 @@ Sequence by risk: secure the operating state, repair trusted-set doc drift, coll
 ## Steps
 
 Phase 0 - secure the operating state
-- [ ] 0.1 Fix the two pre-existing test failures; green fast suite locally. Before any blocking hook.
+- [x] 0.1 Fix the two pre-existing test failures; green fast suite locally. Before any blocking hook.
 - [x] 0.2a Enact D1: push main to origin (done 2026-06-03; activates the 3 CI workflows + backs up the commits).
-- [ ] 0.2b Fix the push-range bug in `.github/workflows/living-docs-drift.yml` (HEAD~1..HEAD -> github.event.before..github.event.after). HARD gate before the next multi-commit push.
-- [ ] 0.2c Hooks, split by timing:
+- [x] 0.2b Fix the push-range bug in `.github/workflows/living-docs-drift.yml` (HEAD~1..HEAD -> github.event.before..github.event.after). HARD gate before the next multi-commit push.
+- [x] 0.2c Hooks, split by timing:
     - pre-commit (fast, target <2s, static/staged only): a BLOCKING port of `warn_restricted_doc_edits.py` (staged restricted-path check) + `verify_script_path_references.py` + `check_persistence_contract.py`. No heavy tests.
     - pre-push: `check_living_docs_drift.py` over origin/main..HEAD (committed range + messages - the only place it works).
 - [ ] 0.2d Wire `verify_script_path_references.py` into `.github/workflows/persistence-contract.yml` so CI re-runs it on every push as an INFORMATIONAL backstop (catches a bypassed/uninstalled hook). Fork A decision: the local pre-push hook is the PRIMARY gate; CI is a safety net, NOT a required status check, and there is NO mandatory PR flow for this solo repo. Also delete the now-redundant `origin/fix/analysis-request-dup-race` branch (dd38ddc is on main); glance at the stray `origin/docs/meta-plan-workflow` branch.
@@ -33,8 +33,8 @@ Phase 0 - secure the operating state
 - [ ] 0.5 Minimal migration bookkeeping (gate before the next migration): `schema_migrations(name, applied_at)` + a tiny ordered runner that runs each module in a transaction and skips applied ones; record+order+applied-check only. (Cross-site SQL agreement test lives in 2.1, not here.)
 
 Phase 1 - repair the trusted living set (interleave; but 1.2 + 1.3 BEFORE 3.3)
-- [ ] 1.1 Full prose refresh of `JETSTREAM_STATE_TIMELINE.md`: add a "Current state (active)" section, keep the Apr-22 chronology as historical, supersede ledger claim C053. (The urgent safety neutralization is in 0.3.)
-- [ ] 1.2 Fix `scripts/README.md` Framework-Lanes dead links to `history/README.md` + `deprecated/README.md` AND the `.cursor/rules/living-docs-only.mdc` "lane structure ... authoritative for membership" pointer, in one commit; add an archive-tag recovery one-liner. Do before 3.3.
+- [x] 1.1 Full prose refresh of `JETSTREAM_STATE_TIMELINE.md`: add a "Current state (active)" section, keep the Apr-22 chronology as historical, supersede ledger claim C053. (The urgent safety neutralization is in 0.3.)
+- [x] 1.2 Fix `scripts/README.md` Framework-Lanes dead links to `history/README.md` + `deprecated/README.md` AND the `.cursor/rules/living-docs-only.mdc` "lane structure ... authoritative for membership" pointer, in one commit; add an archive-tag recovery one-liner. Do before 3.3.
 - [ ] 1.3 Add a test asserting the restricted-path TABLE in `living-docs-only.mdc` (the authoritative source) equals `scripts/internal/living_docs_governance.py`. Do before 3.3.
 - [ ] 1.4 Demote `DOC_PARITY_LEDGER.md` to an append-only decision log AND rebind the governance docs that tell agents to maintain it (`.cursorrules`, the `.mdc` parity-evidence line, `docs/STANDING_ORDERS.md` sync checklist) to `CURRENT_STATE.md` as the living mirror. Scope any evidence-path-exists check to living-set paths only (archived/tombstoned paths are intentionally gone - do not false-red). Fork C decision: append-only in place; revisit moving it to docs/review/history/ only if the 80-row history inside the living set becomes noise.
 

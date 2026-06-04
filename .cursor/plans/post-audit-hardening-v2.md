@@ -49,8 +49,8 @@ Phase 2 - de-risk the race-fix surface
 
 Phase 3 - resume cleanup behind tighter gates (after Phase 0; 1.2 + 1.3 first)
 - [ ] 3.1 Creation gate - Fork D decision: a cheap DETERMINISTIC lint in the static set. For each ADDED `scripts/run_*.py` in the diff, fail if no file under `tests/` references its stem (filename + sibling-test existence only; no AST / import-graph / delegates-to-Tier-A analysis). It is a human-nudging tripwire (shallow + gameable), not a correctness proof; pair it with the AGENTS.md Tier A/B boundary note. Chosen over convention-only because the parallel_fixed_k recurrence already happened once.
-- [ ] 3.2 Define the canonical MCQ accuracy contract BEFORE promotion: persist components (attempts, errors, abstentions, correct), derive rates. Start as a computed dataclass/function (no persisted metrics table yet). Then extract the token-matcher util and promote diagnostics into a tested `src` analysis module.
-- [ ] 3.3 Resume Set B/D under a tiered retirement gate (broken/unreferenced -> delete; operator-facing w/ nonzero refs -> time-boxed deprecation warning then delete). Enumerate the answer-position chain explicitly: `run_mcq_answer_position_probe.py`, `ingest_mcq_probe_json_to_sweep_db.py`, `audit_mcq_method_definitions.py` (+ cross-refs). Decide AFTER 3.2 defines the contract.
+- [ ] 3.2 Define the canonical MCQ accuracy contract BEFORE promotion: persist components (attempts, errors, abstentions, correct), derive rates. Start as a computed dataclass/function (no persisted metrics table yet). Then extract the token-matcher util and promote diagnostics into a tested `src` analysis module. **(2026-06-03 - DEFERRED/split):** the accuracy contract is captured as documented intent in `.cursor/plans/mcq-method-definition-direction.md`; the token-matcher extraction + `src`-module promotion are deferred together with the (deferred) MCQ method-definition redesign. Legacy MCQ scripts/data stay as-is.
+- [x] 3.3 Resume Set B/D under a tiered retirement gate (broken/unreferenced -> delete; operator-facing w/ nonzero refs -> time-boxed deprecation warning then delete). Enumerate the answer-position chain explicitly: `run_mcq_answer_position_probe.py`, `ingest_mcq_probe_json_to_sweep_db.py`, `audit_mcq_method_definitions.py` (+ cross-refs). Decide AFTER 3.2 defines the contract. **(2026-06-03 - RESOLVED: no retirement):** the answer-position chain is Family 1 (authoring/constructor-bias generation), a DISTINCT hypothesis NOT superseded by the Family-2 logprob answering work; keep both, retire nothing, legacy data stays legacy. See `.cursor/plans/mcq-method-definition-direction.md`.
 - [ ] 3.4 Consolidate clustering-backfill scripts onto the tested core: reconcile the divergent snapshot-lineage contract FIRST; extract a single-target executor; no new parallelism in core.
 
 ## Validation
@@ -69,9 +69,13 @@ Resolved forks (2026-06-03):
 - Fork B (half-row invariant): detect now (read-only assertion in 0.4 + CI); enforce the partial CHECK only if a half-row ever appears or `groups` is migrated anyway.
 - Fork C (ledger fate): append-only in place + governance-doc rebind; move to docs/review/history/ only if it becomes noise.
 - Fork D (creation gate): a cheap deterministic lint (filename + sibling-test), not convention-only, not semantic.
+- 3.3 (MCQ supersession): the answer-position chain is a DISTINCT hypothesis (authoring/constructor-bias = "Family 1"), NOT superseded by the logprob answering family ("Family 2"). Keep both; retire nothing. Detail: `.cursor/plans/mcq-method-definition-direction.md`.
 
 Still open:
-- 3.3: is the older MCQ answer-position chain superseded by the tested run_mcq_logprob_experiment, or a distinct hypothesis (position bias vs logprob)? Decide after 3.2 defines the contract.
+- (none currently.)
+
+Deferred (intent captured, not scheduled):
+- MCQ method-definition redesign: fold MCQ into the method lane as composed methods (permutation-as-method -> raw_call-emitting inference -> scoring; recipe_json composition). Intent in `.cursor/plans/mcq-method-definition-direction.md`. Legacy MCQ scripts/runners and data stay as-is.
 
 ## Out of scope
 - Full Alembic (a version table + ordered runner is enough).

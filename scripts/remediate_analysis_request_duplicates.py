@@ -59,9 +59,13 @@ from study_query_llm.db.models_v2 import (
     ProvenancedRun,
     SweepRunClaim,
 )
+from study_query_llm.db.analysis_request_identity import (
+    ANALYSIS_REQUEST_GROUP_TYPE,
+    extract_identity,
+)
 from study_query_llm.db.write_intent import WriteIntent
 
-ANALYSIS_REQUEST = "analysis_request"
+ANALYSIS_REQUEST = ANALYSIS_REQUEST_GROUP_TYPE
 
 # Every foreign-key column that references groups.id (see models_v2). Repointing
 # all of them off a loser empties its reference set so the row can be deleted
@@ -104,14 +108,10 @@ def find_duplicate_identities(session) -> dict[tuple[str, str, str], list[int]]:
     )
     buckets: dict[tuple[str, str, str], list[int]] = {}
     for group in groups:
-        meta = dict(group.metadata_json or {})
-        method_name = meta.get("method_name")
-        input_id = meta.get("input_id")
-        run_key = meta.get("run_key")
-        if method_name is None or input_id is None or run_key is None:
+        identity = extract_identity(group.metadata_json)
+        if identity is None:
             continue
-        key = (str(method_name), str(input_id), str(run_key))
-        buckets.setdefault(key, []).append(int(group.id))
+        buckets.setdefault(identity, []).append(int(group.id))
     return {key: sorted(ids) for key, ids in buckets.items() if len(ids) > 1}
 
 

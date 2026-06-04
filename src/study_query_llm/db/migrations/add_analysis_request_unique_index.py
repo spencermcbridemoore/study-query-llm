@@ -35,34 +35,17 @@ from study_query_llm.db.models_v2 import (
     ANALYSIS_REQUEST_UNIQUE_INDEX_NAME,
     ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_POSTGRESQL,
 )
+from study_query_llm.db.analysis_request_identity import build_duplicate_probe_sql
 from study_query_llm.db.write_intent import default_write_intent_for_connection
 from study_query_llm.utils.logging_config import get_logger, setup_logging
 
 setup_logging()
 logger = get_logger(__name__)
 
-# Mirrors scripts/remediate_analysis_request_duplicates.find_duplicate_identities.
-# The partial unique index is NULL-distinct, so analysis_request rows with any
-# NULL identity field (empty-metadata container groups) never collide and must
-# be excluded here -- otherwise SQL GROUP BY would fold all such rows into one
-# bucket and falsely report a duplicate that the index would happily allow.
-_DUPLICATE_PROBE_SQL = """
-    SELECT method_name, input_id, run_key, COUNT(*) AS n, MIN(id) AS keeper_id
-    FROM (
-        SELECT id,
-               metadata_json ->> 'method_name' AS method_name,
-               metadata_json ->> 'input_id'    AS input_id,
-               metadata_json ->> 'run_key'     AS run_key
-        FROM groups
-        WHERE group_type = 'analysis_request'
-    ) AS extracted
-    WHERE method_name IS NOT NULL
-      AND input_id IS NOT NULL
-      AND run_key IS NOT NULL
-    GROUP BY method_name, input_id, run_key
-    HAVING COUNT(*) > 1
-    ORDER BY n DESC, method_name, input_id, run_key
-"""
+# Duplicate-identity probe built from the shared identity contract so it cannot
+# drift from the index / remediation definitions (NULL-distinct: container/half
+# rows are excluded, matching the index).
+_DUPLICATE_PROBE_SQL = build_duplicate_probe_sql("postgresql")
 
 
 def _find_duplicate_identities(conn) -> list[dict]:

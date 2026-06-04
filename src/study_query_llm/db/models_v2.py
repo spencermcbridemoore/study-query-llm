@@ -16,6 +16,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import ARRAY
 
+from study_query_llm.db.analysis_request_identity import (
+    ANALYSIS_REQUEST_UNIQUE_INDEX_NAME,
+    build_unique_index_sql,
+)
+
 BaseV2 = declarative_base()
 
 
@@ -169,29 +174,14 @@ class Group(BaseV2):
 # ``create_all()`` (the SQLite test path and any fresh Postgres init) build the
 # index on both backends; the already-provisioned canonical Postgres DB gets it
 # via ``db/migrations/add_analysis_request_unique_index.py``.
-ANALYSIS_REQUEST_UNIQUE_INDEX_NAME = "uq_groups_analysis_request_identity"
-
-# Postgres + SQLite renderings of the same partial UNIQUE functional index over
-# the analysis_request identity. Exposed as module constants so the canonical
-# migration (db/migrations/add_analysis_request_unique_index.py) and this model
-# stay in lockstep (identical index name + definition); a divergent definition
-# under the same name would be a silent correctness bug.
-ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_POSTGRESQL = (
-    f"CREATE UNIQUE INDEX IF NOT EXISTS {ANALYSIS_REQUEST_UNIQUE_INDEX_NAME} "
-    "ON groups ("
-    "(metadata_json ->> 'method_name'), "
-    "(metadata_json ->> 'input_id'), "
-    "(metadata_json ->> 'run_key')) "
-    "WHERE group_type = 'analysis_request'"
-)
-ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_SQLITE = (
-    f"CREATE UNIQUE INDEX IF NOT EXISTS {ANALYSIS_REQUEST_UNIQUE_INDEX_NAME} "
-    "ON groups ("
-    "json_extract(metadata_json, '$.method_name'), "
-    "json_extract(metadata_json, '$.input_id'), "
-    "json_extract(metadata_json, '$.run_key')) "
-    "WHERE group_type = 'analysis_request'"
-)
+# The identity contract (field list, index name, dialect SQL builders) is the
+# single source of truth in ``db/analysis_request_identity.py`` -- imported above
+# and re-exported here so the migration and tests keep importing the index name
+# and DDL from ``models_v2``. The Postgres + SQLite index DDL must stay
+# byte-stable (the canonical Postgres index was built from this exact string); a
+# regression test pins both renderings.
+ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_POSTGRESQL = build_unique_index_sql("postgresql")
+ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_SQLITE = build_unique_index_sql("sqlite")
 
 _PG_ANALYSIS_REQUEST_UNIQUE_DDL = DDL(
     ANALYSIS_REQUEST_UNIQUE_INDEX_SQL_POSTGRESQL

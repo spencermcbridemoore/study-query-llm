@@ -29,7 +29,8 @@ heading. Each living doc binds to the code surface it governs:
 | `docs/DESIGN_FLAWS.md` | Cross-cutting flaw register (advisory) |
 | `docs/runbooks/README.md` | `scripts/`, `deploy/jetstream/`, env-var contracts (`DATABASE_URL`, `JETSTREAM_DATABASE_URL`, `LOCAL_DATABASE_URL`, `SOURCE_DATABASE_URL`) |
 
-Parity evidence layer (not a primary source itself):
+Parity evidence layer (append-only historical log; not a primary source and not
+the living mirror, which is `docs/living/CURRENT_STATE.md`):
 `docs/review/DOC_PARITY_LEDGER.md`.
 
 ## Default Allowed Reading (no permission needed)
@@ -108,8 +109,11 @@ table when membership changes.
    restricted material. Do not preemptively open it. Do not summarize from
    it without permission.
 3. **Cite the binding.** When a change touches a code surface in the table,
-   name the living doc you relied on and update it (plus
-   `docs/review/DOC_PARITY_LEDGER.md` when claims change). The update
+   name the living doc you relied on and update it (reflect any changed
+   capability claims in `docs/living/CURRENT_STATE.md`, the living mirror).
+   `docs/review/DOC_PARITY_LEDGER.md` is an append-only historical log: append a
+   dated row only to record a notable parity decision; never rewrite existing
+   rows. The update
    checklist lives in `docs/STANDING_ORDERS.md` § "Documentation Sync Process".
 4. **No silent promotion.** Do not treat any path outside the table as
    authoritative. To add a doc to the living set, edit `docs/README.md`

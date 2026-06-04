@@ -33,7 +33,7 @@ Keep documentation in sync with code changes:
 ### 5. Update Status
 When completing work, update:
 - `docs/living/CURRENT_STATE.md` for current behavior changes
-- `docs/review/DOC_PARITY_LEDGER.md` for major documentation-claim changes
+- Documentation-claim changes go in `docs/living/CURRENT_STATE.md` (living mirror); `docs/review/DOC_PARITY_LEDGER.md` is an append-only historical log (append dated rows only)
 - `docs/IMPLEMENTATION_PLAN.md` only for historical/roadmap chronology
 
 ## Status Markers in IMPLEMENTATION_PLAN.md
@@ -45,7 +45,7 @@ When completing work, update:
 Before submitting changes, verify:
 - [ ] Tests pass (`pytest`)
 - [ ] Documentation updated (`docs/living/*`, runbooks, relevant docs)
-- [ ] Parity-sensitive claims updated in `docs/review/DOC_PARITY_LEDGER.md`
+- [ ] Parity-sensitive claims reflected in `docs/living/CURRENT_STATE.md` (living mirror; `docs/review/DOC_PARITY_LEDGER.md` is append-only history)
 - [ ] No secrets committed (check for API keys, credentials)
 - [ ] Follows architecture patterns (see `docs/living/ARCHITECTURE_CURRENT.md`)
 - [ ] Uses v2 database schema for new features

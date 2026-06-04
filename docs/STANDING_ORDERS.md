@@ -28,7 +28,7 @@ The rule is enforced by:
 - **`docs/living/ARCHITECTURE_CURRENT.md`** is authoritative for current architecture.
 - **`docs/DATA_PIPELINE.md`** is authoritative for the five-stage data pipeline contract.
 - **`docs/living/API_CURRENT.md`** is authoritative for the current public API surface.
-- **`docs/review/DOC_PARITY_LEDGER.md`** is the evidence ledger for doc-to-code parity claims.
+- **`docs/review/DOC_PARITY_LEDGER.md`** is an append-only historical log of doc-to-code parity decisions (not the living mirror; `docs/living/CURRENT_STATE.md` is authoritative for current claims).
 - **`docs/IMPLEMENTATION_PLAN.md`** and **`docs/ARCHITECTURE.md`** are historical context only and must not be opened to drive current implementation work without explicit user instruction (see the restricted set in `.cursor/rules/living-docs-only.mdc`).
 
 ### Before Starting Work
@@ -39,7 +39,7 @@ The rule is enforced by:
 
 ### After Completing Work
 1. **Immediately update living docs** that changed (`CURRENT_STATE`, current architecture/API, runbooks as needed)
-2. Update `docs/review/DOC_PARITY_LEDGER.md` when significant claims change
+2. Reflect changed capability claims in `docs/living/CURRENT_STATE.md` (the living mirror); `docs/review/DOC_PARITY_LEDGER.md` is append-only history (append a dated row only to record a notable parity decision)
 3. Do **not** edit historical or deprecated docs unless the user explicitly requests it
 4. Ensure tests are written and passing
 
@@ -88,7 +88,7 @@ When creating session-local scratch plans, use session-aware naming to prevent c
 
 **When completing a phase/milestone:**
 1. Update `docs/living/CURRENT_STATE.md` if behavior/capabilities changed
-2. Update `docs/review/DOC_PARITY_LEDGER.md` if claim parity changed
+2. Reflect changed claims in `docs/living/CURRENT_STATE.md` (the living mirror); `docs/review/DOC_PARITY_LEDGER.md` is append-only history
 3. Add/update relevant docstrings in code
 4. Update `docs/living/ARCHITECTURE_CURRENT.md` if design changed
 
@@ -263,7 +263,7 @@ study-query-llm/
 
 ### Status Update Checklist
 - [ ] Update `docs/living/CURRENT_STATE.md` if current behavior changed
-- [ ] Update `docs/review/DOC_PARITY_LEDGER.md` for changed doc claims
+- [ ] Reflect changed doc claims in `docs/living/CURRENT_STATE.md` (living mirror; parity ledger is append-only history)
 - [ ] Update `README.md` if phase completed
 - [ ] Update relevant documentation (`docs/living/ARCHITECTURE_CURRENT.md`, `docs/living/API_CURRENT.md`, runbooks)
 - [ ] Add/update code docstrings

@@ -27,7 +27,7 @@ See [docs/living/ARCHITECTURE_CURRENT.md](docs/living/ARCHITECTURE_CURRENT.md) f
 **Current status references:**
 
 - Current capabilities and defaults: [docs/living/CURRENT_STATE.md](docs/living/CURRENT_STATE.md)
-- Documentation parity evidence: [docs/review/DOC_PARITY_LEDGER.md](docs/review/DOC_PARITY_LEDGER.md)
+- Documentation parity evidence (append-only historical log): [docs/review/DOC_PARITY_LEDGER.md](docs/review/DOC_PARITY_LEDGER.md)
 - Historical phased implementation narrative: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 
 ### Current Feature Snapshot

@@ -45,7 +45,7 @@ the same restricted-path machinery.
 - Always use v2 database schema for new features (`models_v2.py`, `connection_v2.py`, `raw_call_repository.py`)
 - Pipeline changes must preserve five-stage contracts in `docs/DATA_PIPELINE.md` (parser identity/version, deterministic snapshot sampling, analyze dual-input lineage).
 - Follow bottom-up, incremental development approach
-- Update `docs/living/CURRENT_STATE.md` and `docs/review/DOC_PARITY_LEDGER.md` when current behavior/claims change
+- Update `docs/living/CURRENT_STATE.md` (the living mirror) when current behavior/claims change; `docs/review/DOC_PARITY_LEDGER.md` is an append-only historical log (append dated rows only)
 - **MANDATORY: Stage and commit when completing features/tasks** - do not wait for user to ask
 - Never commit `.env` files or API keys (see `SECURITY.md`)
 - Use `encoding='utf-8'` for all Python file operations (Windows compatibility)

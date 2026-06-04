@@ -15,7 +15,7 @@ Last reviewed: 2026-04-18
 - Canonical DB ops entrypoint: [`docs/runbooks/README.md`](runbooks/README.md)
 - Current user workflow (v2-first): [`docs/USER_GUIDE.md`](USER_GUIDE.md)
 - Design flaws register: [`docs/DESIGN_FLAWS.md`](DESIGN_FLAWS.md)
-- Parity evidence ledger: [`docs/review/DOC_PARITY_LEDGER.md`](review/DOC_PARITY_LEDGER.md)
+- Parity evidence ledger (append-only historical log): [`docs/review/DOC_PARITY_LEDGER.md`](review/DOC_PARITY_LEDGER.md)
 
 ## Taxonomy
 
@@ -63,7 +63,7 @@ Last reviewed: 2026-04-18
 
 ### Review Artifacts
 
-- [`docs/review/DOC_PARITY_LEDGER.md`](review/DOC_PARITY_LEDGER.md)
+- [`docs/review/DOC_PARITY_LEDGER.md`](review/DOC_PARITY_LEDGER.md) (append-only historical log)
 
 ## Navigation Policy
 

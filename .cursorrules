@@ -17,7 +17,7 @@ Quick pointers:
 - Current architecture: `docs/living/ARCHITECTURE_CURRENT.md`
 - Current API surface: `docs/living/API_CURRENT.md`
 - Pipeline contract: `docs/DATA_PIPELINE.md`
-- Parity evidence: `docs/review/DOC_PARITY_LEDGER.md`
+- Parity evidence (append-only historical log; living mirror is `docs/living/CURRENT_STATE.md`): `docs/review/DOC_PARITY_LEDGER.md`
 
 ## Scripts vs src Boundary (summary)
 - Treat `src/study_query_llm/**` as canonical runtime for orchestration/pipeline behavior.
@@ -35,7 +35,7 @@ Quick pointers:
 
 ## Documentation Requirements
 - Update `docs/living/CURRENT_STATE.md` when current behavior changes
-- Update `docs/review/DOC_PARITY_LEDGER.md` for major claim parity changes
+- Record changed capability/doc claims in `docs/living/CURRENT_STATE.md` (the living mirror); `docs/review/DOC_PARITY_LEDGER.md` is an append-only historical log (append a dated row only; do not edit existing rows)
 - Add docstrings to all public classes and functions
 - Update relevant docs when changing architecture or adding features:
   - Architecture changes → update `docs/living/ARCHITECTURE_CURRENT.md`

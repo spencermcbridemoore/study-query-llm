@@ -139,7 +139,7 @@ This document is the canonical "what exists and works now" summary for the repos
 
 ## Near-Term Documentation Priorities
 
-- Keep parity with `docs/review/DOC_PARITY_LEDGER.md`.
+- `docs/review/DOC_PARITY_LEDGER.md` is an append-only historical log; this file (CURRENT_STATE) is the living mirror, so keep it current rather than syncing to the ledger.
 - Update living docs first; append historical notes instead of mixing modes.
 - Avoid fixed claims that go stale quickly (for example exact test counts).
 

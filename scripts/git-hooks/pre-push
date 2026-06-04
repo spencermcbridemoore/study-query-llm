@@ -1,0 +1,4 @@
+#!/bin/sh
+# Living-docs-only governance pre-push hook (blocking; token-aware).
+# Authoritative restricted-path drift check over the unpushed range.
+exec python scripts/check_living_docs_drift.py --base origin/main --head HEAD

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -184,3 +185,89 @@ class TestCheckScriptSmoke:
         assert result.returncode == 0, (
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
+
+
+def _parse_mdc_tombstoned_paths(mdc_text: str) -> tuple[set[str], set[str]]:
+    """Parse the tombstoned-path list out of living-docs-only.mdc.
+
+    Returns ``(prefix_dirs, files)``: ``prefix_dirs`` are ``docs/foo/``-style
+    directory prefixes (parsed from ``docs/foo/**`` entries, trailing slash
+    kept) and ``files`` are exact-path entries. Only the "Confirmed
+    restricted/tombstoned paths today" block (up to "### Archive Retrieval")
+    is scanned, so back-ticked prose elsewhere in the section is ignored.
+    """
+    lines = mdc_text.splitlines()
+    start = next(
+        (i for i, ln in enumerate(lines) if "restricted/tombstoned paths today" in ln),
+        None,
+    )
+    assert start is not None, "tombstoned-paths sentinel not found in .mdc"
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].startswith("### Archive Retrieval")
+        ),
+        len(lines),
+    )
+    prefix_dirs: set[str] = set()
+    files: set[str] = set()
+    for line in lines[start + 1 : end]:
+        stripped = line.strip()
+        if not stripped.startswith("- "):
+            continue
+        match = re.search(r"`([^`]+)`", stripped)
+        if match is None:
+            continue
+        token = match.group(1)
+        if token.endswith("/**"):
+            prefix_dirs.add(token[:-2])  # drop trailing "**", keep the "/"
+        else:
+            files.add(token)
+    return prefix_dirs, files
+
+
+class TestMdcTableMatchesGovernanceConstants:
+    """1.3: living-docs-only.mdc mirrors the governance constants.
+
+    The .mdc tombstone list and the living_docs_governance constants must
+    agree in BOTH directions, so editing one without the other fails here
+    (and, via the suite, in CI). Closes the gap TestRestrictedSetMembership
+    leaves open: that class only spot-checks a few entries one-directionally
+    and never reads the .mdc at all.
+    """
+
+    MDC_PATH = REPO / ".cursor" / "rules" / "living-docs-only.mdc"
+
+    def _parsed(self) -> tuple[set[str], set[str]]:
+        text = self.MDC_PATH.read_text(encoding="utf-8")
+        return _parse_mdc_tombstoned_paths(text)
+
+    def test_mdc_file_exists(self) -> None:
+        assert self.MDC_PATH.is_file(), f"missing {self.MDC_PATH}"
+
+    def test_prefix_dirs_match_constants(self) -> None:
+        mdc_prefixes, _ = self._parsed()
+        assert mdc_prefixes == set(RESTRICTED_PREFIX_DIRS), (
+            "living-docs-only.mdc prefix dirs disagree with "
+            "RESTRICTED_PREFIX_DIRS; update both together.\n"
+            f"  only in .mdc:      {sorted(mdc_prefixes - set(RESTRICTED_PREFIX_DIRS))}\n"
+            f"  only in constants: {sorted(set(RESTRICTED_PREFIX_DIRS) - mdc_prefixes)}"
+        )
+
+    def test_files_match_constants(self) -> None:
+        _, mdc_files = self._parsed()
+        assert mdc_files == set(RESTRICTED_FILES), (
+            "living-docs-only.mdc files disagree with RESTRICTED_FILES; "
+            "update both together.\n"
+            f"  only in .mdc:      {sorted(mdc_files - set(RESTRICTED_FILES))}\n"
+            f"  only in constants: {sorted(set(RESTRICTED_FILES) - mdc_files)}"
+        )
+
+    def test_parser_found_nonempty_sets(self) -> None:
+        # Fail loud if the parse comes back empty (heading text changed or the
+        # list was reformatted as a markdown table) instead of letting the
+        # equality checks vacuously compare the constants against empty sets.
+        mdc_prefixes, mdc_files = self._parsed()
+        assert mdc_prefixes, "no prefix dirs parsed from .mdc tombstone list"
+        assert mdc_files, "no files parsed from .mdc tombstone list"

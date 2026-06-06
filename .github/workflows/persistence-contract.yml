@@ -28,6 +28,13 @@ jobs:
       - name: Run persistence contract lint
         run: python scripts/check_persistence_contract.py
 
+      # Fork A: informational backstop for the local pre-commit hook.
+      # Re-runs verify_script_path_references on every push so a bypassed or
+      # uninstalled hook can't silently land a broken script-path reference.
+      # Not a required status check (visible-but-non-blocking on this solo repo).
+      - name: Run script path reference check (informational backstop)
+        run: python scripts/verify_script_path_references.py
+
       - name: Run DB lane policy lint
         run: python scripts/check_db_lane_policy.py
 

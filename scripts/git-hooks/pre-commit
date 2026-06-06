@@ -6,3 +6,4 @@ set -e
 python scripts/check_staged_restricted_paths.py
 python scripts/verify_script_path_references.py
 python scripts/check_persistence_contract.py
+python scripts/check_new_run_scripts_have_tests.py

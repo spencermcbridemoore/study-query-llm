@@ -59,6 +59,7 @@ the same restricted-path machinery.
 Boundary rule:
 - New orchestration/job logic belongs in Tier A (`src/study_query_llm/services/jobs/` or `src/study_query_llm/experiments/`), not in root `scripts/`.
 - Root `scripts/` are wrappers/utilities unless explicitly documented otherwise.
+- New root `scripts/run_*.py` should be exercised by at least one test under `tests/`; a pre-commit tripwire (`scripts/check_new_run_scripts_have_tests.py`) nudges this. It is shallow + gameable (filename/content reference only), not a proof.
 
 Worked counter-example:
 - Adding a new clustering method belongs under `src/study_query_llm/pipeline/clustering/` (registry + runner + tests). Do **not** add a new `scripts/run_*.py` orchestration surface for it.

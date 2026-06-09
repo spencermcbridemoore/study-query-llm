@@ -20,6 +20,7 @@ from study_query_llm.db import models_v2
 from study_query_llm.db.analysis_request_identity import (
     ANALYSIS_REQUEST_UNIQUE_INDEX_NAME,
     build_duplicate_probe_sql,
+    build_half_row_probe_sql,
     build_unique_index_sql,
     extract_identity,
 )
@@ -152,3 +153,50 @@ def test_postgres_arm_renders_and_optionally_agrees() -> None:
     db.init_db()
     probe_identities = _seed_then_probe_identities(db, "postgresql")
     assert probe_identities == _EXPECTED_DUP_IDENTITIES
+
+
+class TestHalfRowProbe:
+    """2.2: build_half_row_probe_sql flags PARTIAL identities (1-2 of the 3 fields)."""
+
+    def test_flags_only_partial_identity_rows_sqlite(self) -> None:
+        db = _sqlite_db()
+        rows_meta = [
+            ("identity", {"method_name": "m", "input_id": 1, "run_key": "k"}),  # nn=0
+            ("container", {}),                                                  # nn=3
+            ("half_1null", {"method_name": "m", "input_id": 1}),                # nn=1
+            ("half_2null", {"method_name": "m"}),                               # nn=2
+        ]
+        ids = {}
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            for name, meta in rows_meta:
+                ids[name] = int(
+                    repo.create_group(
+                        group_type="analysis_request", name=name, metadata_json=meta
+                    )
+                )
+        with db.session_scope() as session:
+            rows = session.execute(text(build_half_row_probe_sql("sqlite"))).mappings().all()
+        flagged = {int(r["id"]): int(r["null_field_count"]) for r in rows}
+        assert flagged == {ids["half_1null"]: 1, ids["half_2null"]: 2}
+
+    def test_clean_db_has_no_half_rows_sqlite(self) -> None:
+        db = _sqlite_db()
+        with db.session_scope() as session:
+            repo = RawCallRepository(session)
+            repo.create_group(
+                group_type="analysis_request",
+                name="i",
+                metadata_json={"method_name": "m", "input_id": 1, "run_key": "k"},
+            )
+            repo.create_group(group_type="analysis_request", name="c", metadata_json={})
+        with db.session_scope() as session:
+            rows = session.execute(text(build_half_row_probe_sql("sqlite"))).mappings().all()
+        assert rows == []
+
+    def test_postgres_render_is_wellformed(self) -> None:
+        sql = build_half_row_probe_sql("postgresql")
+        assert "metadata_json ->> 'method_name'" in sql
+        assert "NOT IN (0, 3)" in sql
+        # 3 CASE-WHEN in the SELECT null-count + 3 in the WHERE clause
+        assert sql.count("CASE WHEN") == 6

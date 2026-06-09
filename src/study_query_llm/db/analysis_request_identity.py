@@ -98,6 +98,34 @@ def build_duplicate_probe_sql(dialect: str) -> str:
     )
 
 
+def build_half_row_probe_sql(dialect: str) -> str:
+    """Build SQL selecting ``analysis_request`` groups with a PARTIAL identity.
+
+    A "half row" has some but not all of ``(method_name, input_id, run_key)``
+    present -- a NULL count of 1 or 2, strictly between identity-bearing (0) and
+    container (3). No writer produces one, and a half row would silently escape
+    the NULL-distinct unique index. Fork B / plan 2.2: detect now, enforce only
+    if one ever appears. Cross-dialect (SQLite has no ``num_nulls``): the null
+    count is a sum of CASE expressions, so it runs on both Postgres and SQLite.
+    """
+    null_count = " + ".join(
+        f"(CASE WHEN {json_extract_sql(field, dialect)} IS NULL THEN 1 ELSE 0 END)"
+        for field in IDENTITY_FIELDS
+    )
+    selected = ",\n           ".join(
+        f"{json_extract_sql(field, dialect)} AS {field}" for field in IDENTITY_FIELDS
+    )
+    return (
+        f"\n    SELECT id,"
+        f"\n           {selected},"
+        f"\n           ({null_count}) AS null_field_count"
+        f"\n    FROM groups"
+        f"\n    WHERE group_type = '{ANALYSIS_REQUEST_GROUP_TYPE}'"
+        f"\n      AND ({null_count}) NOT IN (0, 3)"
+        f"\n    ORDER BY id\n"
+    )
+
+
 def extract_identity(
     metadata: Optional[Mapping[str, Any]],
 ) -> Optional[tuple[str, ...]]:
@@ -125,5 +153,6 @@ __all__ = [
     "json_extract_sql",
     "build_unique_index_sql",
     "build_duplicate_probe_sql",
+    "build_half_row_probe_sql",
     "extract_identity",
 ]

@@ -76,6 +76,7 @@ Still open:
 
 Deferred (intent captured, not scheduled):
 - MCQ method-definition redesign: fold MCQ into the method lane as composed methods (permutation-as-method -> raw_call-emitting inference -> scoring; recipe_json composition). Intent in `.cursor/plans/mcq-method-definition-direction.md`. Legacy MCQ scripts/runners and data stay as-is.
+- Drop the legacy `embedding_vectors` table on canonical: code is fully retired (ORM model gone; `RawCallRepository.get_embedding_vectors_by_request_hashes` serves from `embedding_cache_entries`) and `db/migrations/drop_embedding_vectors.py` is ready and idempotent, but the drop was never run on canonical so the physical table lingers (verified 2026-06-04). It is a DESTRUCTIVE canonical write (`DROP TABLE ... CASCADE`, drops unconditionally), so defer to the 0.4 gated-write discipline: read-only `SELECT COUNT(*)`/size first, full-state backup, approval, then drop. See `docs/review/CANONICAL_INVENTORY_2026-06-04.md`.
 
 ## Out of scope
 - Full Alembic (a version table + ordered runner is enough).

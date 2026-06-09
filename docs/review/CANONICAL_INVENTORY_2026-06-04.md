@@ -73,3 +73,19 @@ Regenerate (tunnel up): `python scripts/probe_postgres_inventory.py --env-var JE
   collisions reflect re-runs or input/variant differences (the
   `snapshot_group_id` / `embedding_batch_group_id` differ). No index or
   insert-or-get change is warranted.
+
+## Pending cleanup: legacy `embedding_vectors` table (deferred)
+
+`embedding_vectors` appears in the table list above but is **code-retired**: the ORM
+model is gone (the CI `rg "EmbeddingVector"` gate passes) and
+`RawCallRepository.get_embedding_vectors_by_request_hashes` now serves from
+`embedding_cache_entries`. A ready, idempotent drop migration exists
+(`db/migrations/drop_embedding_vectors.py`), but it was never run on canonical, so the
+physical table lingers.
+
+Dropping it is a DESTRUCTIVE canonical write (`DROP TABLE ... CASCADE`; the migration
+drops unconditionally), so it is **deferred** to the 0.4 gated-write discipline:
+read-only `SELECT COUNT(*)` + table size on `embedding_vectors` first; if non-trivial,
+confirm the data is superseded (per ledger C032 embeddings moved to
+`embedding_cache_entries` / blob artifacts); then full-state backup
+(`scripts/backup_jetstream_full_state.py`) + explicit approval, then run the drop.

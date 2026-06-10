@@ -136,3 +136,72 @@ def test_build_all_targets_unique_analysis_keys() -> None:
     keys = [t.analysis_run_key for t in targets]
     assert len(keys) == len(set(keys))
 
+
+def test_build_manifest_matches_full_dataframe_embed_for_truncated_snapshot() -> None:
+    """Lineage contract: a snapshot shorter than its source dataframe still matches
+    the FULL-dataframe embedding batch (entry_max == source_dataframe_row_count), not
+    a per-snapshot prefix embed. ``analyze`` loads the full matrix and slices it by the
+    snapshot resolved-index, so the matching batch must cover every source row.
+    """
+    db = DatabaseConnectionV2("sqlite:///:memory:", enable_pgvector=False)
+    db.init_db()
+    with db.session_scope() as session:
+        sdf = Group(
+            group_type="dataset_dataframe",
+            name="df",
+            metadata_json={"row_count": 100},
+        )
+        session.add(sdf)
+        session.flush()
+
+        # Truncated snapshot: 30 rows out of a 100-row source dataframe.
+        snap = Group(
+            group_type="dataset_snapshot",
+            name="snap",
+            metadata_json={
+                "source_dataframe_group_id": int(sdf.id),
+                "row_count": 30,
+            },
+        )
+        session.add(snap)
+        session.flush()
+
+        full_batch = Group(
+            group_type="embedding_batch",
+            name="emb_full",
+            metadata_json={
+                "source_dataframe_group_id": int(sdf.id),
+                "entry_max": 100,  # full-dataframe embed (matches)
+                "embedding_engine": "text-embedding-3-small",
+                "provider": "openai",
+                "dimension": 8,
+            },
+        )
+        prefix_batch = Group(
+            group_type="embedding_batch",
+            name="emb_prefix",
+            metadata_json={
+                "source_dataframe_group_id": int(sdf.id),
+                "entry_max": 30,  # legacy per-snapshot prefix embed (must NOT match)
+                "embedding_engine": "text-embedding-3-small",
+                "provider": "openai",
+                "dimension": 8,
+            },
+        )
+        session.add(full_batch)
+        session.add(prefix_batch)
+        session.flush()
+        sdf_id = int(sdf.id)
+        full_batch_id = int(full_batch.id)
+
+        manifest = build_manifest(
+            session,
+            embedding_engine="text-embedding-3-small",
+            snapshot_ids=[int(snap.id)],
+        )
+
+    assert not manifest["collisions"]
+    ok_pairs = [pair for pair in manifest["pairs"] if pair.get("status") == "ok"]
+    assert len(ok_pairs) == 1
+    assert ok_pairs[0]["embedding_batch_group_id"] == full_batch_id
+    assert ok_pairs[0]["lineage_key"] == [sdf_id, 100]

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Plan and execute bundled clustering analysis across snapshots for one embedding engine.
 
-Matches ``dataset_snapshot`` groups to ``embedding_batch`` rows using lineage key
-``(source_dataframe_group_id, row_count)`` ↔ ``(source_dataframe_group_id, entry_max)``
-(as in :mod:`scripts.living.fill_snapshot_embeddings_from_baseline`).
+Matches ``dataset_snapshot`` groups to ``embedding_batch`` rows on lineage key
+``(source_dataframe_group_id, source_dataframe_row_count)`` against the batch
+``entry_max`` (the full-dataframe embed row count): ``analyze`` consumes the full
+embedding matrix sliced by the snapshot resolved-index, so the matching batch is
+the full-dataframe embed, not a per-snapshot prefix.
 
 Writes manifests under ``experimental_results/backfill_manifests/``. Uses deterministic
 ``analysis_run_key`` values prefixed with ``backfill_exec__`` (see
